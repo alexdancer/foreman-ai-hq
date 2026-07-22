@@ -8,6 +8,7 @@ Use it when you want a coding agent workflow that is easier to inspect:
 
 - estimate work before launch
 - break larger plans into smaller governed slices
+- investigate bounded repository uncertainty with visible, read-only Scout tasks
 - plan work in a project Pipeline and run coding agents from its Execution Floor
 - keep long-running agent work from turning into one polluted mega-thread: each slice gets its own scoped Worker run, while the Harness preserves the plan, budget, evidence, and review state
 - record Worker Run evidence, stdout/stderr, token usage, and review state
@@ -81,7 +82,7 @@ This updates the global `foremanctl` CLI and preserves repo-local `.foreman/` st
 4. Pick a control-plane provider/model, paste the provider API key, save, then test the connection.
 5. Connect a local repository from `/projects`.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify token tracking.
-7. Open the project's Pipeline at `/projects/{project_id}`, estimate a tiny task, and launch it.
+7. Open the project's Pipeline at `/projects/{project_id}`, estimate a tiny implementation task, and launch it.
 8. Follow the run on `/projects/{project_id}/floor`; open its Evidence Drawer before marking the task done.
 
 Default loopback `foremanctl serve` opens the local Portal without a login token. If you bind the Portal to `0.0.0.0`, run it behind a proxy, or use Docker/shared access, keep the portal token from ignored `.foreman/secrets.env` and sign in through `/login`.
@@ -107,7 +108,7 @@ Representative local Portal screens using synthetic/public-safe data:
 
 ## How the workflow works
 
-1. **Create a task** in the project Pipeline.
+1. **Create a task** in the project Pipeline. Short intake can create an implementation Task or a read-only Scout.
 2. **Estimate** with the control-plane model.
 3. **Launch** through a verified Worker Adapter.
 4. **Run async** on the Execution Floor while the Portal stays responsive.
@@ -120,7 +121,21 @@ Task lifecycle states are:
 Estimated -> Running -> Review -> Done
 ```
 
-Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while Needs You explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, and budget overrides at the top of the Pipeline.
+Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while Needs You explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, budget overrides, and advisory low-confidence estimates at the top of the Pipeline.
+
+Task kind is explicit: `implementation`, `scout`, or `acceptance_verification`. An implementation Task delivers a change, a Scout produces bounded findings without changing the repository, and Acceptance Verification proves an integrated result against its source contract.
+
+### When an estimate is uncertain
+
+An automatic estimate below `0.60` confidence creates an advisory Needs You item. It does not move the Task, block launch by itself, or silently spend more tokens. The operator can:
+
+- acknowledge the current estimate;
+- enter a manual estimate; or
+- create one linked Scout for the current estimate revision.
+
+A Scout is a normal visible Task with its own estimate, budget, Worker Run, actual usage, Review step, and Session Report. Launch forces read-only mode server-side and requires both authoritative usage tracking and a separately verified adapter-enforced read-only profile. The current built-in Scout launch proof is Codex with `--sandbox read-only`; an adapter that is launchable for implementation work is not automatically Scout-compatible.
+
+Running or completing a Scout never changes the target Task's estimate. After the Scout report is ready, the operator may request a Scout-informed re-estimate, review the pending result, and explicitly apply or dismiss it. Scout actuals remain Worker spend on the Scout and are excluded from implementation accuracy calibration.
 
 ### With a Markdown file
 
@@ -146,7 +161,7 @@ Foreman AI HQ has four main pieces:
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Portal / Control Plane**   | Browser UI and API for setup, estimates, project boards, launch, reports, budgets, and review.                                                                                           |
 | **Local Runner**             | Runs near your local repository so Worker CLIs can see local files, git state, and their own credentials. In local mode it runs inside the same app process.                             |
-| **Worker Adapter**           | Integration for a coding CLI such as OpenCode, Claude Code, or Codex. Adapter verification proves the CLI can run and produce trustworthy usage evidence for the selected model. |
+| **Worker Adapter**           | Integration for a coding CLI such as OpenCode, Claude Code, or Codex. Adapter verification proves the CLI can run and produce trustworthy usage evidence for the selected model; Scout launch additionally requires a verified read-only profile. |
 | **Token ledger and reports** | SQLite-backed records for estimates, Worker Runs, token evidence, alarms, checkpoints, and session artifacts.                                                                            |
 
 
@@ -195,11 +210,13 @@ The Portal writes submitted API keys only to ignored local secret storage and do
 
 - The main supported path is local all-in-one mode.
 - Worker launch readiness depends on local repo access, git state, installed Worker CLIs, and native CLI auth/config.
+- Scout launch currently requires the verified Codex read-only sandbox profile; tracking verification alone is insufficient.
 - Hosted workspaces, a fuller CLI, MCP access, and Homebrew install are future work.
 
 ## More docs
 
 - [Getting started](docs/GETTING_STARTED.md)
+- [Harness architecture and workflow](docs/HARNESS.md)
 - [Install options](docs/INSTALL.md)
 - [Worker Adapter setup](docs/WORKER_ADAPTER_SETUP.md)
 - [Setup support checklist](docs/SETUP_SUPPORT_CHECKLIST.md)

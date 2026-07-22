@@ -25,6 +25,7 @@ We will model investigation work as a **Scout Task** — an ordinary Orchestrati
 
 - Candidate kind becomes one of `implementation`, `scout`, or `acceptance_verification`; the Task Breakdown Agent may propose Scouts and the user may set the kind during Task Breakdown Review.
 - Low estimator confidence no longer triggers hidden re-estimation spend. It raises a **Needs You** entry (ADR-0003) offering to launch a Scout, accept the estimate, or estimate manually. A Scout's findings inform a re-estimate the user applies; the harness does not auto-rewrite a seen estimate.
+- Scout launch requires budget-authoritative tracking plus a separate adapter-enforced read-only profile; prompt-only restrictions and post-run diff checks are not sufficient. The first built-in Scout-compatible profile is Codex `--sandbox read-only`.
 - Scout spend is **Worker spend recorded against the Scout task's actuals**, not Orchestration Tokens — a Scout is a real Task launched through an adapter. `CONTEXT.md`'s Orchestration Tokens list drops `spike`.
 - Recovering from a bad estimate costs more clicks than Spike's one button (create Scout → run → read → re-estimate). That friction is the accepted price of making the spend visible and human-approved.
 - Scout actuals must not calibrate implementation estimation coefficients (ADR-0004); task kind discriminates them.

@@ -11,7 +11,7 @@ Separately, Proposed Task Breakdowns are specified as durable, resumable audit r
 
 ## Decision
 
-We will replace the persisted Blocked column with a **Blocked Condition** flag that never relocates a task (the task keeps its lifecycle state and position and wears a reason badge), and aggregate every item awaiting a human decision into a project-scoped **Needs You** queue pinned atop the Pipeline Surface with a live count badge in project navigation.
+We will replace the persisted Blocked column with a **Blocked Condition** flag that never relocates a task (the task keeps its lifecycle state and position and wears a reason badge), and aggregate human decisions into a project-scoped **Needs You** queue pinned atop the Pipeline Surface with a live count badge in project navigation. Needs You may also contain an explicitly advisory estimate decision that does not block forward progress.
 
 ## Alternatives considered
 
@@ -25,7 +25,7 @@ We will replace the persisted Blocked column with a **Blocked Condition** flag t
 ## Consequences
 
 - Inability to proceed never changes lifecycle state. A failed estimate keeps the task on the Pipeline Surface flagged `manual estimate required`; a review Block disposition or failed Acceptance Verification records a Blocked Condition on a task in Review. Retryable operational failures continue to return the task to `Estimated`, unchanged.
-- Needs You aggregates: pending Proposed Task Breakdowns awaiting review (fixing the orphaning bug), tasks needing a manual estimate, launches refused by Launch Guardrails, completed Worker Runs awaiting Review Disposition, and budget overrides awaiting approval. It requires a new `list_task_breakdowns_for_project` query.
+- Needs You aggregates: pending Proposed Task Breakdowns awaiting review (fixing the orphaning bug), tasks needing a manual estimate, launches refused by Launch Guardrails, completed Worker Runs awaiting Review Disposition, budget overrides awaiting approval, and unresolved automatic estimates below `0.60` confidence. Low-confidence entries are advisory and do not change Task lifecycle or launch eligibility by themselves. It requires a new `list_task_breakdowns_for_project` query.
 - Needs You is **project-scoped**, not global: a decision is always read in the context of one project's repo, adapter, and budget. The cost is that "what's waiting across all projects" needs visiting each project; a per-project count roll-up on the `/app` Dashboard is a possible later mitigation and is a display, not a second queue.
-- Needs You is deliberately **distinct from Alarms**: Needs You is decisions blocking forward progress; Alarms are runtime behavioral warnings about an already-running worker (budget burn, loop detection, tool-category bias). They must not be merged.
+- Needs You is deliberately **distinct from Alarms**: Needs You is operator decisions, most of which block forward progress while low confidence is explicitly advisory; Alarms are runtime behavioral warnings about an already-running worker (budget burn, loop detection, tool-category bias). They must not be merged.
 - Demo data and tests that encode the `Blocked` column must be updated to the flag model.

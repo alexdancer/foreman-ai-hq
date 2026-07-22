@@ -61,6 +61,14 @@ Foreman AI HQ governs launches that go through its project Pipeline / Execution 
 
 Foreman AI HQ cannot govern arbitrary external-agent token spend. The supported local path is governed only after Worker Adapter setup proves the native Worker CLI emits trustworthy, run-bound usage evidence that Foreman AI HQ can import for the selected model.
 
+## Investigating with a Scout
+
+Choose Task kind **Scout** in short project intake when you need a bounded repository answer before implementation. A Scout is not a hidden planning call: it is estimated and launched as a visible Task, records its own Worker usage, enters Review, and produces a normal Session Report with findings, risks, and a recommendation.
+
+Scout launch is stricter than ordinary launch. The adapter must prove authoritative token tracking and expose a separately verified, adapter-enforced read-only profile. The current built-in profile is Codex using `--sandbox read-only`; OpenCode and Claude Code may remain launchable for compatible implementation Tasks without being Scout-launchable.
+
+An automatic estimate below `0.60` confidence also appears in Needs You as an advisory decision. You may acknowledge it, replace it manually, or create one linked Scout for that estimate revision. The original Task stays in its current lifecycle state and remains launchable when ordinary guardrails pass. Scout completion does not rewrite the estimate: request a re-estimate from the report, inspect the pending result, then explicitly apply or dismiss it.
+
 ## Local secret storage
 
 - `.foreman/config.toml` stores non-secret config only.

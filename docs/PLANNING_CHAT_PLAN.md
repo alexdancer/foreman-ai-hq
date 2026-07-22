@@ -1,8 +1,8 @@
 # Planning Chat + pi Orchestrator — Plan
 
 Realizes the "Agent planning mode" TODO and the Supervisor/Planning Chat phase of
-the cockpit roadmap (`docs/LIVE_RUN_COCKPIT_PLAN.md`), as a **governed
-conversational front door** to the existing pipeline. See ADR-0006 (spec-kit
+the coding-work cockpit as a **governed conversational front door** to the
+existing pipeline. See ADR-0006 (spec-kit
 front stages), ADR-0007 (pi as proxy_governed orchestrator), ADR-0008 (Spec
 content/ledger split), and the `Planning Chat` / `Spec` / `Orchestrator Agent`
 terms in `CONTEXT.md`.
