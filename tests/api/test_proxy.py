@@ -294,3 +294,101 @@ def test_chat_completions_rejects_aborted_session(tmp_path):
         )
 
     assert response.status_code == 403
+
+
+def test_chat_completions_worker_session_records_worker_turn(tmp_path):
+    client, _fake = _client(tmp_path)
+    with client:
+        started = client.post(
+            "/session/start",
+            headers={"Authorization": "Bearer test-portal-token"},
+            json={"task_description": "Worker request", "model": "claude-haiku"},
+        ).json()
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {started['session_api_key']}"},
+            json={"model": "claude-haiku", "messages": [{"role": "user", "content": "finish"}]},
+        )
+
+    assert response.status_code == 200
+    artifact = db.build_session_artifact(tmp_path / "harness.db", started["session_id"])
+    assert artifact["token_log"][0]["usage_kind"] == "worker"
+    assert artifact["token_log"][0]["raw_usage"]["spend_category"] == "worker_execution"
+    assert artifact["token_log"][0]["raw_usage"]["usage_source"] == "harness_proxy"
+
+
+def test_chat_completions_on_planning_session_records_planning_turn_and_budget_governance(tmp_path):
+    client, fake = _client(tmp_path)
+    with client:
+        planning_session, bearer_key = db.create_planning_session(
+            tmp_path / "harness.db",
+            task_description="Planning anchor",
+            model="claude-haiku",
+        )
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {bearer_key}"},
+            json={
+                "model": "claude-haiku",
+                "messages": [{"role": "user", "content": "plan something"}],
+                "max_tokens": 4096,
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake.requests[0]["max_tokens"] == 4096
+    artifact = db.build_session_artifact(tmp_path / "harness.db", planning_session["id"])
+    turn = artifact["token_log"][0]
+    assert turn["usage_kind"] == "planning"
+    assert turn["raw_usage"]["spend_category"] == "planning"
+    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+    assert artifact["guardrail_snapshots"][0]["zone"] == "green"
+
+
+def test_chat_completions_on_planning_session_does_not_count_against_worker_session_cap(tmp_path):
+    client, _fake = _client(tmp_path)
+    with client:
+        planning_session, bearer_key = db.create_planning_session(
+            tmp_path / "harness.db",
+            task_description="Planning anchor",
+            model="claude-haiku",
+        )
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {bearer_key}"},
+            json={
+                "model": "claude-haiku",
+                "messages": [{"role": "user", "content": "plan something"}],
+                "budget": {"session_cap_tokens": 500},
+            },
+        )
+
+    assert response.status_code == 200
+    artifact = db.build_session_artifact(tmp_path / "harness.db", planning_session["id"])
+    assert {alarm["type"] for alarm in artifact["alarms"]} == set()
+    assert db.session_token_breakdown(tmp_path / "harness.db", planning_session["id"])["by_category"]["worker_execution"] == 0
+
+
+def test_chat_completions_planning_is_client_agnostic(tmp_path):
+    client, _fake = _client(tmp_path)
+    sessions = []
+    with client:
+        for i in range(2):
+            session, bearer_key = db.create_planning_session(
+                tmp_path / "harness.db",
+                task_description=f"Planning anchor {i}",
+                model="claude-haiku",
+            )
+            sessions.append((session, bearer_key))
+        for _session, bearer_key in sessions:
+            response = client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {bearer_key}"},
+                json={"model": "claude-haiku", "messages": [{"role": "user", "content": "hi"}]},
+            )
+            assert response.status_code == 200
+
+    for session, _ in sessions:
+        artifact = db.build_session_artifact(tmp_path / "harness.db", session["id"])
+        assert len(artifact["token_log"]) == 1
+        assert artifact["token_log"][0]["usage_kind"] == "planning"

@@ -58,3 +58,46 @@ its spend is `proxy_governed` and metered as `planning` Orchestration Tokens.
   lifecycle) is an implementation choice recorded here; the glossary keeps only
   the domain-level Orchestrator Agent so a future runtime swap does not churn
   `CONTEXT.md`.
+- pi lives in the repo as **configuration, not engine**. The pi runtime is
+  installed on the machine and version-pinned — the same external-CLI shape as
+  Worker Adapters — and is never vendored as source. What the repo owns and
+  git-tracks is a harness-owned orchestrator **profile**: system prompt, tool
+  policy (allow repo-read/memory; deny or escalate code-write/shell; delegate
+  deep analysis to a Scout), and the list of loaded plugins. First-party plugins
+  we author are tracked source in the repo; third-party plugins are pinned
+  installed dependencies. Unlike the operator-local, git-ignored adapter config
+  dirs, this profile is tracked because it defines product behavior. Secrets and
+  the per-session proxy key are injected at launch (from `.htb/secrets.env`),
+  never committed to the profile.
+
+## Rollout
+
+Three milestones, mapped to OpenSpec changes:
+
+- **M1 — Metering proof** (own change): a turn through the Harness Proxy recorded
+  as a `planning` token turn, categorized and budget-gated. No ACP, no orchestrator
+  logic, no UI. Proves `proxy_governed` end-to-end. Client-agnostic — a real pi turn
+  is the demonstration, not the contract.
+- **M2 — Conversational runtime** (own change, gated on M1 archived): pi as a managed
+  subprocess over ACP — Node↔Python bridge, streamed tool-calls mapped to Needs You /
+  HITL, cancellation as a clean stop, and the tracked pi orchestrator profile.
+- **M3 — Scoped orchestrator** (phases inside M2, not its own change): code-write and
+  shell tools denied or escalated to Needs You; deep repository analysis delegated to
+  a governed Scout Task, never hidden orchestrator spend.
+
+### M2 carry-forward (from the M1 pi-startup spike)
+
+Findings from the M1 `proxy-governed-orchestration` spike that M2 must act on:
+
+- pi 0.80.10's **built-in `openai` provider ignores `OPENAI_BASE_URL`** (returns 401
+  without hitting the proxy). Pointing pi at the Harness Proxy therefore requires a
+  **custom provider** entry — `baseUrl` = proxy, `apiKey` = planning session bearer —
+  not the stock provider. This is the concrete blocker M2 wires.
+- The request/auth surface is standard OpenAI `POST /v1/chat/completions` with
+  `Authorization: Bearer <token>`, so the M1 proxy contract is compatible once the
+  custom provider is configured.
+- The test client issued **no `/v1/models` probe**; whether real pi does on startup is
+  still open. The proxy only exposes `/v1/chat/completions` today, so M2 may need a
+  `/v1/models` stub.
+- pi has no config dir until first configured (`~/.config/pi` absent on a fresh
+  install); M2 provisions the custom-provider config as part of the tracked profile.

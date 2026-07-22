@@ -724,3 +724,127 @@ def test_estimation_accuracy_excludes_tasks_with_missing_actuals(tmp_path):
     result = estimation_accuracy(db_path)
     assert result["completed_count"] == 1
     assert result["median_error_ratio"] == 1.2
+
+
+def test_read_session_kind_defaults_to_worker_for_legacy_sessions(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="Legacy session",
+        model="claude-haiku",
+        session_key_hash="legacy-hash",
+        guardrail_overrides={},
+    )
+
+    assert db.read_session_kind(session) == "worker"
+    assert session["guardrail_overrides"] == {}
+
+
+def test_create_planning_session_returns_bearer_key_and_kind(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+
+    session, bearer_key = db.create_planning_session(
+        db_path,
+        task_description="Planning anchor",
+        model="claude-haiku",
+    )
+
+    assert db.read_session_kind(session) == "planning"
+    assert session["guardrail_overrides"]["session_kind"] == "planning"
+    assert bearer_key.startswith("sk_plan_")
+    loaded = db.get_session_by_key_hash(db_path, session["session_key_hash"])
+    assert db.read_session_kind(loaded) == "planning"
+
+
+def test_list_sessions_excludes_planning_by_default(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    worker_session = create_session(
+        db_path,
+        task_description="Worker session",
+        model="claude-haiku",
+        session_key_hash="worker-hash",
+        guardrail_overrides={},
+    )
+    planning_session, _ = db.create_planning_session(
+        db_path,
+        task_description="Planning session",
+        model="claude-haiku",
+    )
+
+    assert db.read_session_kind(worker_session) == "worker"
+    assert db.read_session_kind(planning_session) == "planning"
+    assert db.list_sessions(db_path) == [worker_session]
+    assert len(db.list_sessions(db_path, kind=None)) == 2
+
+
+def test_planning_token_turn_spend_category_and_usage_source(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="Planning spend",
+        model="claude-haiku",
+        session_key_hash="planning-hash",
+        guardrail_overrides={"session_kind": "planning"},
+    )
+
+    record_token_turn(
+        db_path,
+        session_id=session["id"],
+        usage_kind="planning",
+        model="claude-haiku",
+        prompt_tokens=100,
+        completion_tokens=50,
+        cost=0.001,
+        raw_usage={"total_tokens": 150},
+    )
+
+    artifact = build_session_artifact(db_path, session["id"])
+    turn = artifact["token_log"][0]
+    assert turn["usage_kind"] == "planning"
+    assert turn["raw_usage"]["spend_category"] == "planning"
+    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+
+    breakdown = token_usage_breakdown(db_path)
+    assert breakdown["by_category"]["other"] == 150
+    assert breakdown["by_category"]["worker_execution"] == 0
+    assert breakdown["by_source"]["harness_proxy"] == 150
+    assert db.budgeted_token_usage(db_path) == 150
+
+
+def test_token_usage_breakdown_keeps_six_fixed_keys_and_rolls_up_planning(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="Fixed key rollup",
+        model="claude-haiku",
+        session_key_hash="rollup-hash",
+        guardrail_overrides={"session_kind": "planning"},
+    )
+    record_token_turn(
+        db_path,
+        session_id=session["id"],
+        usage_kind="planning",
+        model="claude-haiku",
+        prompt_tokens=1,
+        completion_tokens=0,
+        cost=None,
+        raw_usage={"total_tokens": 1},
+    )
+
+    breakdown = token_usage_breakdown(db_path)
+
+    assert set(breakdown["by_category"].keys()) == {
+        "control_plane",
+        "task_breakdown",
+        "worker_execution",
+        "adapter_verification",
+        "reporting_summary",
+        "other",
+    }
+    assert breakdown["by_category"]["other"] == 1
+    assert db.budgeted_token_usage(db_path) == 1

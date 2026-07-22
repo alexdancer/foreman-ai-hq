@@ -98,3 +98,28 @@ def test_streaming_chat_completions_records_cost_from_zero_token_usage_tail(tmp_
     assert response.status_code == 200
     assert artifact["token_log"][0]["total_tokens"] == 6
     assert artifact["token_log"][0]["cost"] == 0.0042
+
+
+def test_streaming_chat_completions_on_planning_session_records_planning_turn(tmp_path):
+    settings = Settings(database_path=tmp_path / "harness.db", guardrails_path=ROOT / "guardrails.yaml")
+    app = create_app(settings)
+    app.state.llm_client = FakeStreamingLLMClient()
+
+    with TestClient(app) as client:
+        planning_session, bearer_key = db.create_planning_session(
+            tmp_path / "harness.db",
+            task_description="Planning stream",
+            model="claude-haiku",
+        )
+        with client.stream(
+            "POST",
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {bearer_key}"},
+            json={"model": "claude-haiku", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        ) as response:
+            response.read()
+
+    assert response.status_code == 200
+    artifact = db.build_session_artifact(tmp_path / "harness.db", planning_session["id"])
+    assert artifact["token_log"][0]["usage_kind"] == "planning"
+    assert artifact["token_log"][0]["raw_usage"]["spend_category"] == "planning"

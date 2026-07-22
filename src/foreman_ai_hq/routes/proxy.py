@@ -104,6 +104,7 @@ def _persist_turn(
     db.record_token_turn(
         database_path,
         session_id=session["id"],
+        usage_kind=db.read_session_kind(session),
         model=model,
         prompt_tokens=usage["prompt_tokens"],
         completion_tokens=usage["completion_tokens"],

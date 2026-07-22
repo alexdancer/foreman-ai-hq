@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -476,9 +477,13 @@ def create_session(
     session_key_hash: str,
     guardrail_overrides: dict[str, Any],
     status: str = "running",
+    session_kind: str | None = None,
 ) -> dict[str, Any]:
     session_id = f"sess_{uuid.uuid4().hex}"
     started_at = _now_iso()
+    guardrail_overrides = dict(guardrail_overrides)
+    if session_kind is not None:
+        guardrail_overrides["session_kind"] = session_kind
     with connect(path) as conn:
         conn.execute(
             """
@@ -497,6 +502,26 @@ def create_session(
             ),
         )
     return get_session(path, session_id)
+
+
+def create_planning_session(
+    path: Path | str,
+    *,
+    task_description: str,
+    model: str,
+) -> tuple[dict[str, Any], str]:
+    """Create a planning-kind metering-anchor session and return (session, bearer_key)."""
+    bearer_key = f"sk_plan_{uuid.uuid4().hex}"
+    session = create_session(
+        path,
+        task_description=task_description,
+        model=model,
+        session_key_hash=hashlib.sha256(bearer_key.encode("utf-8")).hexdigest(),
+        guardrail_overrides={},
+        status="running",
+        session_kind="planning",
+    )
+    return session, bearer_key
 
 
 def get_session(path: Path | str, session_id: str) -> dict[str, Any]:
@@ -1399,10 +1424,18 @@ def list_task_ids_for_breakdown(path: Path | str, breakdown_id: str) -> list[str
     ]
 
 
-def list_sessions(path: Path | str) -> list[dict[str, Any]]:
+def read_session_kind(session: dict[str, Any]) -> str:
+    """Canonical session-kind reader. Legacy and Worker sessions default to 'worker'."""
+    return str((session.get("guardrail_overrides") or {}).get("session_kind") or "worker")
+
+
+def list_sessions(path: Path | str, *, kind: str | None = "worker") -> list[dict[str, Any]]:
     with connect(path) as conn:
         rows = conn.execute("select * from sessions order by started_at, id").fetchall()
-    return [_session_from_row(row) for row in rows]
+    sessions = [_session_from_row(row) for row in rows]
+    if kind is not None:
+        sessions = [session for session in sessions if read_session_kind(session) == kind]
+    return sessions
 
 
 def list_worker_adapters(path: Path | str) -> list[dict[str, Any]]:
@@ -2082,6 +2115,8 @@ def _spend_category_for_usage_kind(usage_kind: str) -> str:
         return "adapter_verification"
     if usage_kind in {"reporting", "summary"}:
         return "reporting_summary"
+    if usage_kind == "planning":
+        return "planning"
     return "other"
 
 
@@ -2091,6 +2126,8 @@ def _usage_source_for_usage_kind(usage_kind: str, spend_category: str) -> str:
     if spend_category == "adapter_verification":
         return "harness_proxy"
     if usage_kind in {"worker", "task_execution"}:
+        return "harness_proxy"
+    if usage_kind == "planning" or spend_category == "planning":
         return "harness_proxy"
     return "unspecified"
 
