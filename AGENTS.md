@@ -16,6 +16,13 @@ This is a single-context repo. Read `CONTEXT.md` and applicable `docs/adr/` deci
 
 Matt Pocock's engineering workflow may be available in an operator's environment; this repository does not vendor or install those skills. Use the compact accepted Portal workbench specification at `docs/design/portal-operator-workbench-spec.md` when planning implementation.
 
+## Code style
+
+- Leave short comments explaining *why* non-obvious code exists — the intent, a
+  constraint, or a gotcha — not *what* the line does. One line is enough.
+- Comment branches, workarounds, and any value that isn't self-evident.
+- Match the surrounding file's comment density; don't narrate obvious code.
+
 ## Project verification
 
 Use `uv run pytest` for the Python test suite when using the repo-managed uv environment; `pytest` is acceptable when dependencies are already active.

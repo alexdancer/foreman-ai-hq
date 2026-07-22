@@ -78,10 +78,18 @@ Three milestones, mapped to OpenSpec changes:
   as a `planning` token turn, categorized and budget-gated. No ACP, no orchestrator
   logic, no UI. Proves `proxy_governed` end-to-end. Client-agnostic — a real pi turn
   is the demonstration, not the contract.
-- **M2 — Conversational runtime** (own change, gated on M1 archived): pi as a managed
+- **M2a — Governed pi launch** (own change, gated on M1 archived): pi launched
+  non-interactively (`pi -p`) with a **custom provider** in the tracked profile pointed
+  at the Harness Proxy (`baseUrl` = proxy, `apiKey` = planning session bearer injected at
+  launch), one real pi turn recorded as a `planning` token turn. Establishes the
+  `orchestrator-runtime` capability minimally and closes M1's deferred 5.2. No ACP, no
+  subprocess supervision, no HITL. (Resolves the custom-provider config unknown the M1
+  spike surfaced.)
+- **M2b — Conversational runtime** (own change, gated on M2a archived): pi as a managed
   subprocess over ACP — Node↔Python bridge, streamed tool-calls mapped to Needs You /
-  HITL, cancellation as a clean stop, and the tracked pi orchestrator profile.
-- **M3 — Scoped orchestrator** (phases inside M2, not its own change): code-write and
+  HITL, cancellation as a clean stop, extending the tracked profile with the orchestrator
+  prompt and memory. Modifies `orchestrator-runtime`.
+- **M3 — Scoped orchestrator** (phases inside M2b, not its own change): code-write and
   shell tools denied or escalated to Needs You; deep repository analysis delegated to
   a governed Scout Task, never hidden orchestrator spend.
 

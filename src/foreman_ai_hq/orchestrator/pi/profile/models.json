@@ -1,0 +1,16 @@
+{
+  "providers": {
+    "harness": {
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "api": "openai-completions",
+      "apiKey": "$PI_HARNESS_API_KEY",
+      "models": [
+        {
+          "id": "proxy",
+          "name": "Harness Proxy",
+          "input": ["text"]
+        }
+      ]
+    }
+  }
+}

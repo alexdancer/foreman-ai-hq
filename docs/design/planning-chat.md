@@ -143,7 +143,7 @@ the Node agent + node_modules        system prompt, tool policy, plugin list,
 
 Three things live in the repo, none of them pi's source:
 
-1. **Orchestrator profile** — `orchestrator/pi/profile/` (prompt, tool policy, plugin
+1. **Orchestrator profile** — `src/foreman_ai_hq/orchestrator/pi/profile/` (prompt, tool policy, plugin
    list). Tracked.
 2. **First-party plugins** — ones we author (e.g. force-Scout-delegation). Tracked.
    Third-party plugins are pinned installed dependencies, not vendored.
