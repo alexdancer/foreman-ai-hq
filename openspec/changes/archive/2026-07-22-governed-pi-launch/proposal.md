@@ -5,7 +5,7 @@ M1 (`proxy-governed-orchestration`) proved `proxy_governed` metering end-to-end 
 ## What Changes
 
 - Introduce the tracked **pi orchestrator profile** (first, minimal version) under a git-tracked repo path — a custom-provider entry whose `baseUrl` is the Harness Proxy. Only the provider config; no orchestrator prompt, tools, plugins, or memory yet.
-- Add a launch path that runs pi **non-interactively** (`pi -p`) with that profile, injecting the planning session bearer as the provider `apiKey` **at launch** (from `.htb/secrets.env`, never committed) — mirroring the Worker Adapter session-key injection intent, but via pi's config-file custom provider because `OPENAI_BASE_URL` is ignored.
+- Add a launch path that runs pi **non-interactively** (`pi -p`) with that profile, injecting the planning session bearer as the provider `apiKey` **at launch** (minted per launch by `db.create_planning_session` and passed as a per-process env var, never committed) — mirroring the Worker Adapter session-key injection intent, but via pi's config-file custom provider because `OPENAI_BASE_URL` is ignored.
 - Reuse M1's `db.create_planning_session` to mint the metering anchor + bearer, and M1's proxy classification so the resulting turn records as `planning`.
 - Prove it: launching pi through this path records exactly one real pi turn as a `planning` token turn.
 - First task resolves the concrete unknown the spike left open: **how pi declares a custom provider** (config-file location and shape), since pi had no config dir on a fresh install.

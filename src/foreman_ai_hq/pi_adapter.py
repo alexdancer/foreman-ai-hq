@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -32,8 +31,9 @@ def launch_pi_once(
 ) -> tuple[dict[str, Any], subprocess.CompletedProcess[str]]:
     """Mint a planning session and run pi once through the Harness Proxy.
 
-    The tracked pi profile is copied to a temporary agent directory so pi's
-    runtime files (sessions, trust, settings) are never written into the repo.
+    The tracked pi profile is read, its provider baseUrl is rewritten to the
+    running proxy URL, and the result is written into a temporary agent directory
+    so pi's runtime files (sessions, trust, settings) never land in the repo.
     The planning bearer is injected as the provider API key via a per-process
     environment variable; it is never written to the tracked profile.
     """

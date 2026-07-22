@@ -38,9 +38,10 @@ rejected — it silently 401s for pi.
 **2. The custom-provider config lives in a git-tracked profile; the key is injected at launch.**
 Per ADR-0007, pi = configuration-not-engine: the profile (provider entry) is product
 behavior and is tracked, unlike the git-ignored `.opencode/`/`.codex/` operator dirs.
-The provider `apiKey` = planning bearer is supplied to the launched process only (from
-`.htb/secrets.env`), never written into the tracked file. Alternative (commit a key,
-or store under a git-ignored dir) rejected — secret leak / not product-tracked.
+The provider `apiKey` = planning bearer is minted per launch by `create_planning_session`
+and supplied to the launched process only via a per-process env var, never written into the
+tracked file. Alternative (commit a key, or store under a git-ignored dir) rejected — secret
+leak / not product-tracked.
 
 **3. Non-interactive `pi -p`, not a supervised subprocess.**
 M2a only needs one turn to prove metering. Running `pi -p` and letting it exit is the
@@ -77,7 +78,7 @@ existing-flow change. Rollback = remove the profile + helper; M1 metering is unt
 ## Resolved from experiment (pi 0.81.1 on this machine)
 
 - pi custom-provider config is loaded from the directory pointed to by `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) as `models.json`. Schema: `{"providers": {"<provider-id>": {"baseUrl": "...", "api": "openai-completions", "apiKey": "$ENV_VAR", "models": [{"id": "..."}]}}}`.
-- Non-interactive one-turn argv: `pi -p --provider harness --model harness/proxy "<prompt>"`. The request body sets `stream: true`; the proxy must return a proper SSE stream with a final `finish_reason: "stop"` chunk. The model id from the profile is passed through to the proxy unchanged.
+- Non-interactive one-turn argv: `pi -p --offline --provider harness --model harness/proxy "<prompt>"` (`--offline` suppresses pi's update/telemetry network probes so the only outbound request is the proxied model turn). The request body sets `stream: true`; the proxy must return a proper SSE stream with a final `finish_reason: "stop"` chunk. The model id from the profile is passed through to the proxy unchanged.
 - No `/v1/models` probe was observed in `-p` mode, so no stub is needed.
 
 ## Open Questions

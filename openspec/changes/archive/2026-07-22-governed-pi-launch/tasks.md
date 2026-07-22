@@ -10,7 +10,7 @@
 
 ## 3. Governed pi launch path
 
-- [x] 3.1 Add a minimal launch helper that mints a planning anchor via `db.create_planning_session`, then runs pi non-interactively with the profile, injecting the planning bearer as the custom provider's `apiKey` for the launched process only (from `.htb/secrets.env`), never writing it into the tracked profile.
+- [x] 3.1 Add a minimal launch helper that mints a planning anchor via `db.create_planning_session`, then runs pi non-interactively with the profile, injecting the planning bearer as the custom provider's `apiKey` for the launched process only (as a per-process env var), never writing it into the tracked profile.
 - [x] 3.2 Keep the launch one-shot (process runs and exits); no supervision, cancellation, or persistent subprocess (deferred to M2b).
 
 ## 4. Real pi turn proof
