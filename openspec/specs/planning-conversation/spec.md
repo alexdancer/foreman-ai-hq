@@ -1,5 +1,8 @@
-## ADDED Requirements
+# planning-conversation Specification
 
+## Purpose
+TBD - created by archiving change pi-planning-conversation-lifecycle. Update Purpose after archive.
+## Requirements
 ### Requirement: A governed planning conversation has a server-side HTTP lifecycle
 The system SHALL expose portal-authenticated, project-scoped HTTP endpoints to drive a governed pi planning conversation across multiple requests: start a conversation for a project, send one operator message that drives exactly one governed pi turn, poll the conversation's turns since a cursor, cancel an in-flight turn, and end the conversation. A driven turn SHALL flow through the governed launch path and SHALL be recorded as a `planning` token turn with spend category `planning` and usage source `harness_proxy`. The endpoints SHALL NOT introduce any un-metered model call, and SHALL keep pi persona-driven and tool-scoped (read-only) exactly as the governed launch does.
 
@@ -32,7 +35,7 @@ The system SHALL persist each driven planning turn to a durable feed keyed by th
 - **AND** it SHALL NOT contain the planning bearer, an API key, or other secret
 
 ### Requirement: Held planning conversations are bounded and torn down without orphans
-The system SHALL bound the number of concurrently held planning conversations and SHALL tear a conversation's pi subprocess down when the conversation is ended or has been idle beyond a time-to-live, reaping the least-recently-used idle conversation first when the bound is reached. Ending or reaping a conversation SHALL terminate the pi subprocess and release its stdio without leaving an orphaned pi process.
+The system SHALL bound the number of concurrently held planning conversations and SHALL tear a conversation's pi subprocess down when the conversation is ended, on the next registry operation after it has been idle beyond a time-to-live, or on server shutdown, reaping the least-recently-used idle conversation first when the bound is reached. Teardown is swept lazily on registry operations rather than by an always-on background timer, so a conversation idle beyond its time-to-live is reaped no later than the next registry operation (or shutdown). Ending or reaping a conversation SHALL terminate the pi subprocess and release its stdio without leaving an orphaned pi process.
 
 #### Scenario: An ended conversation leaves no orphan
 - **WHEN** a planning conversation is ended
@@ -49,3 +52,4 @@ The system SHALL bound the number of concurrently held planning conversations an
 - **THEN** the system SHALL signal `session/cancel` for the active session
 - **AND** the in-flight turn SHALL resolve with stop reason `cancelled`
 - **AND** the same conversation SHALL remain usable for a subsequent message
+
