@@ -57,6 +57,7 @@ foreman_ai_hq = [
     "defaults/*.yaml",
     "data/*.json",
     "orchestrator/pi/profile/*.json",
+    "orchestrator/pi/profile/*.md",
     "orchestrator/pi/bridge/package.json",
     "orchestrator/pi/bridge/package-lock.json",
     "static/react/*",

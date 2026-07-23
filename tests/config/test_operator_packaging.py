@@ -60,6 +60,7 @@ def test_pyproject_packages_server_rendered_templates_and_defaults():
         "defaults/*.yaml",
         "data/*.json",
         "orchestrator/pi/profile/*.json",
+        "orchestrator/pi/profile/*.md",
         "orchestrator/pi/bridge/package.json",
         "orchestrator/pi/bridge/package-lock.json",
         "static/react/*",

@@ -21,6 +21,7 @@ from foreman_ai_hq.pi_adapter import DEFAULT_PROFILE_DIR, launch_pi_once
 from foreman_ai_hq.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
+ORCHESTRATOR_PERSONA_MARKER = "FOREMAN_AI_HQ_ORCHESTRATOR_V1"
 
 
 class FakePiLLMClient:
@@ -120,6 +121,153 @@ def test_pi_governed_launch_records_planning_turn_and_keeps_secret_out_of_profil
     profile_text = DEFAULT_PROFILE_DIR.joinpath("models.json").read_text()
     assert "sk_plan_" not in profile_text
     assert "sk_" not in profile_text
+
+    artifact = db.build_session_artifact(database_path, session["id"])
+    assert len(artifact["token_log"]) == 1
+    turn = artifact["token_log"][0]
+    assert turn["usage_kind"] == "planning"
+    assert turn["raw_usage"]["spend_category"] == "planning"
+    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+
+
+def test_pi_governed_launch_forwards_orchestrator_persona_in_system_message(
+    tmp_path,
+) -> None:
+    if not shutil.which("pi"):
+        pytest.skip("pi CLI not installed")
+
+    database_path = tmp_path / "harness.db"
+    default_guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
+    guardrails_path = tmp_path / "guardrails.yaml"
+    # Disable zone-level prompt rewriting so the test can observe pi's system
+    # prompt as forwarded, not the budget-zone replacement.
+    guardrails_path.write_text(
+        default_guardrails_path.read_text(encoding="utf-8").replace(
+            "zones:\n    enabled: true", "zones:\n    enabled: false"
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
+    app = create_app(settings)
+    fake = FakePiLLMClient()
+    app.state.llm_client = fake
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=0,
+            loop="asyncio",
+            log_level="warning",
+            access_log=False,
+        )
+    )
+    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
+            break
+        time.sleep(0.05)
+    else:
+        raise RuntimeError("uvicorn server failed to start")
+
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        session, result = launch_pi_once(
+            database_path,
+            "hi",
+            proxy_url=f"http://127.0.0.1:{port}/v1",
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        if thread.is_alive():
+            server.force_exit = True
+            thread.join(timeout=2)
+
+    assert result.returncode == 0, f"pi failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+
+    forwarded = fake.requests[0]
+    system_messages = [m for m in forwarded["messages"] if m.get("role") == "system"]
+    assert any(ORCHESTRATOR_PERSONA_MARKER in str(m.get("content", "")) for m in system_messages)
+
+    artifact = db.build_session_artifact(database_path, session["id"])
+    turn = artifact["token_log"][0]
+    assert turn["usage_kind"] == "planning"
+    assert turn["raw_usage"]["spend_category"] == "planning"
+    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+
+
+def test_pi_governed_launch_applies_read_only_tool_policy(
+    tmp_path,
+) -> None:
+    if not shutil.which("pi"):
+        pytest.skip("pi CLI not installed")
+
+    database_path = tmp_path / "harness.db"
+    guardrails_path = ROOT / "guardrails.yaml"
+    if not guardrails_path.is_file():
+        guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
+
+    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
+    app = create_app(settings)
+    fake = FakePiLLMClient()
+    app.state.llm_client = fake
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=0,
+            loop="asyncio",
+            log_level="warning",
+            access_log=False,
+        )
+    )
+    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
+            break
+        time.sleep(0.05)
+    else:
+        raise RuntimeError("uvicorn server failed to start")
+
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        session, result = launch_pi_once(
+            database_path,
+            "Create a file named foo.txt containing 'hello'",
+            proxy_url=f"http://127.0.0.1:{port}/v1",
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        if thread.is_alive():
+            server.force_exit = True
+            thread.join(timeout=2)
+
+    assert result.returncode == 0, f"pi failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+
+    # The launched argv must carry the read-only allowlist and omit mutating tools.
+    joined_args = " ".join(map(str, result.args))
+    assert "--tools" in result.args
+    tools_idx = result.args.index("--tools")
+    assert result.args[tools_idx + 1] == "read,grep,find,ls"
+    assert "bash" not in joined_args
+    assert "edit" not in joined_args
+    assert "write" not in joined_args
+
+    # Best-effort: the turn should not have executed a mutating tool.
+    output = result.stdout + result.stderr
+    assert "bash" not in output
+    assert "edit" not in output
+    assert "write" not in output
 
     artifact = db.build_session_artifact(database_path, session["id"])
     assert len(artifact["token_log"]) == 1
