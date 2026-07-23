@@ -17,9 +17,34 @@ from foreman_ai_hq import db
 DEFAULT_PI_PROVIDER = "harness"
 DEFAULT_PI_MODEL = "harness/proxy"
 PI_HARNESS_API_KEY_ENV = "PI_HARNESS_API_KEY"
+PI_ACP_PI_COMMAND_ENV = "PI_ACP_PI_COMMAND"
+PI_ACP_PERSONA_PATH_ENV = "PI_ACP_PERSONA_PATH"
+PI_ACP_ALLOWED_TOOLS_ENV = "PI_ACP_ALLOWED_TOOLS"
+
+PI_ORCHESTRATOR_ALLOWED_TOOLS = ("read", "grep", "find", "ls")
 DEFAULT_PROFILE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "profile"
 DEFAULT_BRIDGE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "bridge"
 PI_ACP_PACKAGE = "pi-acp"
+
+
+def _persona_path(profile_dir: Path) -> Path:
+    """Return the path to the git-tracked orchestrator persona."""
+    return profile_dir / "orchestrator.md"
+
+
+def _write_pi_acp_wrapper(tmpdir: Path, persona_path: Path) -> Path:
+    """Write a generated POSIX wrapper that execs pi with the persona and tool allowlist appended.
+
+    The wrapper is content-free of policy text; it reads the persona path and
+    comma-joined allowlist from environment variables set by the adapter.
+    """
+    wrapper = tmpdir / "pi-wrapper.sh"
+    wrapper.write_text(
+        '#!/bin/sh\nexec pi --append-system-prompt "${PI_ACP_PERSONA_PATH}" --tools "${PI_ACP_ALLOWED_TOOLS}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    return wrapper
 
 
 def _default_proxy_url() -> str:
@@ -109,10 +134,15 @@ def launch_pi_once(
             agent_dir,
             sessions_dir,
         )
+        persona_path = _persona_path(selected_profile_dir)
         command = [
             "pi",
             "-p",
             "--offline",
+            "--append-system-prompt",
+            str(persona_path),
+            "--tools",
+            ",".join(PI_ORCHESTRATOR_ALLOWED_TOOLS),
             "--provider",
             provider,
             "--model",
@@ -148,6 +178,7 @@ class _AcpJsonRpcTransport:
         self._queue: queue.Queue[dict[str, Any]] = queue.Queue()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+        self._write_lock = threading.Lock()
 
     def _read_loop(self) -> None:
         stdout = self.proc.stdout
@@ -163,15 +194,24 @@ class _AcpJsonRpcTransport:
                 continue
             self._queue.put(msg)
 
-    def _write(self, method: str, params: dict[str, Any]) -> int:
+    def _send_frame(self, payload: dict[str, Any]) -> None:
         if self.proc.stdin is None:
             raise AcpRuntimeError("ACP bridge stdin is closed")
+        with self._write_lock:
+            self.proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            self.proc.stdin.flush()
+
+    def _write(self, method: str, params: dict[str, Any]) -> int:
         req_id = self._next_id
         self._next_id += 1
         payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
-        self.proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
-        self.proc.stdin.flush()
+        self._send_frame(payload)
         return req_id
+
+    def notify(self, method: str, params: dict[str, Any]) -> None:
+        """Send a JSON-RPC notification (no id, no response)."""
+        payload = {"jsonrpc": "2.0", "method": method, "params": params}
+        self._send_frame(payload)
 
     def call(
         self, method: str, params: dict[str, Any], *, timeout: float = 30
@@ -216,6 +256,45 @@ def _extract_text_chunks(notifications: list[dict[str, Any]]) -> str:
     return "".join(chunks)
 
 
+class PiConversation:
+    """Handle for an active ACP pi conversation."""
+
+    def __init__(
+        self,
+        session: dict[str, Any],
+        proc: subprocess.Popen,
+        transport: _AcpJsonRpcTransport,
+        session_id: str,
+        default_timeout: float,
+    ) -> None:
+        self.session = session
+        self.proc = proc
+        self.responses: list[str] = []
+        self._transport = transport
+        self._session_id = session_id
+        self._default_timeout = default_timeout
+
+    def prompt(self, text: str, *, timeout: float | None = None) -> tuple[str, str]:
+        """Drive one turn and return (text, stop_reason)."""
+        deadline = timeout if timeout is not None else self._default_timeout
+        result, notifications = self._transport.call(
+            "session/prompt",
+            {"sessionId": self._session_id, "prompt": [{"type": "text", "text": text}]},
+            timeout=deadline,
+        )
+        # Trailing ``agent_message_chunk`` notifications may arrive after the
+        # prompt response; give them a moment to land.
+        notifications.extend(self._transport.drain(timeout=0.5))
+        stop_reason = result.get("stopReason", "end_turn") if isinstance(result, dict) else "end_turn"
+        text = _extract_text_chunks(notifications)
+        self.responses.append(text)
+        return text, stop_reason
+
+    def cancel(self) -> None:
+        """Send a ``session/cancel`` notification for the active session."""
+        self._transport.notify("session/cancel", {"sessionId": self._session_id})
+
+
 def _terminate_process_group(proc: subprocess.Popen) -> None:
     """Terminate the bridge and any child processes it spawned (e.g. pi)."""
     if proc.poll() is not None:
@@ -251,7 +330,7 @@ def _terminate_process_group(proc: subprocess.Popen) -> None:
 @contextlib.contextmanager
 def launch_pi_conversation(
     database_path: Path | str,
-    prompts: list[str],
+    prompts: list[str] | None = None,
     *,
     proxy_url: str | None = None,
     profile_dir: Path | str | None = None,
@@ -259,14 +338,15 @@ def launch_pi_conversation(
     model: str = DEFAULT_PI_MODEL,
     cwd: Path | str | None = None,
     timeout: float = 60,
-) -> Iterator[dict[str, Any]]:
-    """Mint one planning session and drive multiple pi turns over ACP through the Harness Proxy.
+) -> Iterator[PiConversation]:
+    """Mint one planning session and yield a handle for an ACP pi conversation.
 
     The planning bearer is injected as the provider API key for the subprocess only;
-    it is never written to the tracked profile.  The returned mapping contains the
-    planning ``session``, the ``responses`` (one string per prompt), and the bridge
-    ``proc`` so callers can verify teardown.  The context manager guarantees the
-    subprocess is terminated and stdio is closed on exit or error.
+    it is never written to the tracked profile.  The yielded ``PiConversation`` handle
+    exposes ``prompt(text)``, ``cancel()``, ``session``, ``proc``, and ``responses``.
+    If ``prompts`` is provided, the helper drives them eagerly and the collected
+    responses are already on the handle when it is yielded.  The context manager
+    guarantees the subprocess is terminated and stdio is closed on exit or error.
     """
     session, bearer_key = db.create_planning_session(
         database_path,
@@ -289,6 +369,11 @@ def launch_pi_conversation(
             agent_dir,
             sessions_dir,
         )
+        persona_path = _persona_path(selected_profile_dir)
+        wrapper = _write_pi_acp_wrapper(Path(tmpdir), persona_path)
+        env[PI_ACP_PI_COMMAND_ENV] = str(wrapper)
+        env[PI_ACP_PERSONA_PATH_ENV] = str(persona_path)
+        env[PI_ACP_ALLOWED_TOOLS_ENV] = ",".join(PI_ORCHESTRATOR_ALLOWED_TOOLS)
 
         command = _pi_acp_command(bridge_dir)
         proc = subprocess.Popen(
@@ -301,7 +386,6 @@ def launch_pi_conversation(
             cwd=str(bridge_dir),
             start_new_session=True,
         )
-        responses: list[str] = []
         try:
             transport = _AcpJsonRpcTransport(proc)
             transport.call(
@@ -322,17 +406,11 @@ def launch_pi_conversation(
             # do not mix into the first prompt response.
             transport.drain(timeout=1.0)
 
-            for prompt in prompts:
-                _, notifications = transport.call(
-                    "session/prompt",
-                    {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]},
-                    timeout=timeout,
-                )
-                # Trailing ``agent_message_chunk`` notifications may arrive after the
-                # prompt response; give them a moment to land.
-                notifications.extend(transport.drain(timeout=0.5))
-                responses.append(_extract_text_chunks(notifications))
+            conv = PiConversation(session, proc, transport, session_id, timeout)
+            if prompts:
+                for prompt in prompts:
+                    conv.prompt(prompt)
 
-            yield {"session": session, "responses": responses, "proc": proc}
+            yield conv
         finally:
             _terminate_process_group(proc)
