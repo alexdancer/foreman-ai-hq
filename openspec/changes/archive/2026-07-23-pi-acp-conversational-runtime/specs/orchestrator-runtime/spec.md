@@ -1,22 +1,4 @@
-# orchestrator-runtime Specification
-
-## Purpose
-Route the `pi` coding agent through the Harness Proxy so its model traffic is governed as `planning` orchestration tokens.
-
-## Requirements
-
-### Requirement: pi is pointed at the Harness Proxy through a tracked custom provider
-The system SHALL provide a git-tracked pi orchestrator profile that declares a custom provider whose base URL is the Harness Proxy. Because pi's built-in provider ignores `OPENAI_BASE_URL`, the profile SHALL route pi's model traffic through a custom provider entry rather than an environment variable. The profile SHALL NOT contain secrets; the provider API key SHALL be supplied at launch.
-
-#### Scenario: Profile declares the proxy as a custom provider
-- **WHEN** the pi orchestrator profile is loaded
-- **THEN** it SHALL declare a custom provider whose base URL is the Harness Proxy `/v1` endpoint
-- **AND** it SHALL NOT contain a committed API key or other secret
-
-#### Scenario: Profile is tracked, not operator-local
-- **WHEN** the repository is inspected
-- **THEN** the pi orchestrator profile SHALL be a git-tracked path
-- **AND** it SHALL NOT be placed under a git-ignored operator adapter directory
+## MODIFIED Requirements
 
 ### Requirement: Governed pi launch injects the planning bearer at launch
 The system SHALL launch pi with the orchestrator profile, injecting a planning session bearer as the custom provider's API key at launch time. The bearer SHALL be minted via the planning-session metering anchor so that pi's proxied turns authenticate as a `planning` session. The bearer SHALL NOT be written into the tracked profile. The launch MAY run pi either non-interactively as a one-shot process or as a managed, long-lived subprocess; the earlier restriction to non-interactive one-shot launches no longer applies.
@@ -32,14 +14,7 @@ The system SHALL launch pi with the orchestrator profile, injecting a planning s
 - **THEN** it MAY run pi as a managed, long-lived subprocess rather than a non-interactive one-shot process
 - **AND** the injected bearer SHALL authenticate every proxied turn of that subprocess as the same planning session
 
-### Requirement: A real pi turn is metered as planning
-A pi turn produced through the governed launch path SHALL be forwarded through the Harness Proxy and recorded as a `planning` token turn against the planning session, using the M1 proxy classification unchanged.
-
-#### Scenario: Launched pi turn records a planning token turn
-- **WHEN** pi produces a model turn through the governed launch path
-- **THEN** the Harness Proxy SHALL record exactly one `planning` token turn for the planning session
-- **AND** the turn SHALL have spend category `planning` and usage source `harness_proxy`
-- **AND** the turn SHALL count toward the daily governed budget total and remain out of Worker execution actuals
+## ADDED Requirements
 
 ### Requirement: pi runs as a managed ACP conversational subprocess
 The system SHALL be able to run pi as a managed, long-lived subprocess driven over the Agent Client Protocol (ACP) through a Node↔Python bridge. The Harness SHALL own the subprocess lifecycle — spawning it with the planning bearer injected and shutting it down cleanly at the end of the conversation. The Node bridge SHALL be installed and version-pinned like the pi engine, never vendored as source, and SHALL carry no application logic beyond the ACP transport.

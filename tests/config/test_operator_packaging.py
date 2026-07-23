@@ -52,13 +52,16 @@ def test_pyproject_has_public_cli_package_metadata():
 def test_pyproject_packages_server_rendered_templates_and_defaults():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
 
-    # Server-rendered templates/defaults and the tracked pi orchestrator profile ship
-    # alongside the built React Portal shell assets so a packaged install can serve them.
+    # Server-rendered templates/defaults, the tracked pi orchestrator profile, and the
+    # pinned Node bridge config ship alongside the built React Portal shell assets so a
+    # packaged install can serve them.
     assert pyproject["tool"]["setuptools"]["package-data"]["foreman_ai_hq"] == [
         "templates/*.html",
         "defaults/*.yaml",
         "data/*.json",
         "orchestrator/pi/profile/*.json",
+        "orchestrator/pi/bridge/package.json",
+        "orchestrator/pi/bridge/package-lock.json",
         "static/react/*",
         "static/react/assets/*",
     ]
