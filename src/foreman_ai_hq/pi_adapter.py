@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -266,6 +267,7 @@ class PiConversation:
         transport: _AcpJsonRpcTransport,
         session_id: str,
         default_timeout: float,
+        workdir: Path | None = None,
     ) -> None:
         self.session = session
         self.proc = proc
@@ -273,6 +275,7 @@ class PiConversation:
         self._transport = transport
         self._session_id = session_id
         self._default_timeout = default_timeout
+        self._workdir = workdir
 
     def prompt(self, text: str, *, timeout: float | None = None) -> tuple[str, str]:
         """Drive one turn and return (text, stop_reason)."""
@@ -293,6 +296,12 @@ class PiConversation:
     def cancel(self) -> None:
         """Send a ``session/cancel`` notification for the active session."""
         self._transport.notify("session/cancel", {"sessionId": self._session_id})
+
+    def close(self) -> None:
+        """Terminate the subprocess and clean up the temporary workdir."""
+        _terminate_process_group(self.proc)
+        if self._workdir is not None:
+            shutil.rmtree(self._workdir, ignore_errors=True)
 
 
 def _terminate_process_group(proc: subprocess.Popen) -> None:
@@ -327,10 +336,8 @@ def _terminate_process_group(proc: subprocess.Popen) -> None:
                     pass
 
 
-@contextlib.contextmanager
-def launch_pi_conversation(
+def open_pi_conversation(
     database_path: Path | str,
-    prompts: list[str] | None = None,
     *,
     proxy_url: str | None = None,
     profile_dir: Path | str | None = None,
@@ -338,15 +345,14 @@ def launch_pi_conversation(
     model: str = DEFAULT_PI_MODEL,
     cwd: Path | str | None = None,
     timeout: float = 60,
-) -> Iterator[PiConversation]:
-    """Mint one planning session and yield a handle for an ACP pi conversation.
+) -> PiConversation:
+    """Open a governed pi conversation and return a long-lived handle.
 
     The planning bearer is injected as the provider API key for the subprocess only;
-    it is never written to the tracked profile.  The yielded ``PiConversation`` handle
-    exposes ``prompt(text)``, ``cancel()``, ``session``, ``proc``, and ``responses``.
-    If ``prompts`` is provided, the helper drives them eagerly and the collected
-    responses are already on the handle when it is yielded.  The context manager
-    guarantees the subprocess is terminated and stdio is closed on exit or error.
+    it is never written to the tracked profile.  The returned ``PiConversation`` handle
+    exposes ``prompt(text)``, ``cancel()``, ``session``, ``proc``, ``responses`` and
+    ``close()``.  The caller is responsible for calling ``close()`` to terminate the
+    subprocess and remove the temporary workdir.
     """
     session, bearer_key = db.create_planning_session(
         database_path,
@@ -358,7 +364,8 @@ def launch_pi_conversation(
     selected_cwd = Path(cwd) if cwd else Path.cwd()
     bridge_dir = DEFAULT_BRIDGE_DIR
 
-    with tempfile.TemporaryDirectory(prefix="pi-orchestrator-acp-") as tmpdir:
+    tmpdir = tempfile.mkdtemp(prefix="pi-orchestrator-acp-")
+    try:
         agent_dir = Path(tmpdir) / "agent"
         sessions_dir = Path(tmpdir) / "sessions"
         env = _prepare_pi_env(
@@ -386,31 +393,69 @@ def launch_pi_conversation(
             cwd=str(bridge_dir),
             start_new_session=True,
         )
-        try:
-            transport = _AcpJsonRpcTransport(proc)
-            transport.call(
-                "initialize",
-                {
-                    "protocolVersion": 1,
-                    "clientInfo": {"name": "foreman-ai-hq", "version": "0.1.0"},
-                },
-                timeout=timeout,
-            )
-            new_result, _ = transport.call(
-                "session/new",
-                {"cwd": str(selected_cwd), "mcpServers": []},
-                timeout=timeout,
-            )
-            session_id = new_result["sessionId"]
-            # Discard pi startup info / available-commands notifications so they
-            # do not mix into the first prompt response.
-            transport.drain(timeout=1.0)
+        transport = _AcpJsonRpcTransport(proc)
+        transport.call(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientInfo": {"name": "foreman-ai-hq", "version": "0.1.0"},
+            },
+            timeout=timeout,
+        )
+        new_result, _ = transport.call(
+            "session/new",
+            {"cwd": str(selected_cwd), "mcpServers": []},
+            timeout=timeout,
+        )
+        session_id = new_result["sessionId"]
+        # Discard pi startup info / available-commands notifications so they
+        # do not mix into the first prompt response.
+        transport.drain(timeout=1.0)
 
-            conv = PiConversation(session, proc, transport, session_id, timeout)
-            if prompts:
-                for prompt in prompts:
-                    conv.prompt(prompt)
+        return PiConversation(
+            session,
+            proc,
+            transport,
+            session_id,
+            timeout,
+            workdir=Path(tmpdir),
+        )
+    except Exception:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
 
-            yield conv
-        finally:
-            _terminate_process_group(proc)
+
+@contextlib.contextmanager
+def launch_pi_conversation(
+    database_path: Path | str,
+    prompts: list[str] | None = None,
+    *,
+    proxy_url: str | None = None,
+    profile_dir: Path | str | None = None,
+    provider: str = DEFAULT_PI_PROVIDER,
+    model: str = DEFAULT_PI_MODEL,
+    cwd: Path | str | None = None,
+    timeout: float = 60,
+) -> Iterator[PiConversation]:
+    """Mint one planning session and yield a handle inside a ``with`` block.
+
+    This is the existing context-managed API; it is implemented on top of
+    ``open_pi_conversation`` and ``PiConversation.close`` so the spawn/teardown
+    logic is not duplicated.
+    """
+    conv = open_pi_conversation(
+        database_path,
+        proxy_url=proxy_url,
+        profile_dir=profile_dir,
+        provider=provider,
+        model=model,
+        cwd=cwd,
+        timeout=timeout,
+    )
+    try:
+        if prompts:
+            for prompt in prompts:
+                conv.prompt(prompt)
+        yield conv
+    finally:
+        conv.close()
