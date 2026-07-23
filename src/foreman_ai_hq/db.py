@@ -78,6 +78,18 @@ create table if not exists worker_run_events (
 create index if not exists idx_worker_run_events_run on worker_run_events(worker_run_id, created_at, id);
 create index if not exists idx_worker_run_events_session on worker_run_events(session_id, created_at, id);
 
+create table if not exists planning_turn_events (
+    id integer primary key autoincrement,
+    session_id text not null references sessions(id) on delete cascade,
+    layer text not null default 'planning',
+    kind text not null,
+    level text not null,
+    title text not null,
+    detail_json text not null default '{}',
+    created_at text not null
+);
+create index if not exists idx_planning_turn_events_session on planning_turn_events(session_id, created_at, id);
+
 create table if not exists token_turns (
     id integer primary key autoincrement,
     session_id text not null references sessions(id) on delete cascade,
@@ -1290,6 +1302,69 @@ def list_worker_run_events(
     return [_worker_run_event_from_row(row) for row in rows]
 
 
+def record_planning_turn_event(
+    path: Path | str,
+    *,
+    session_id: str,
+    operator_message: str,
+    agent_response: str,
+    stop_reason: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist one sanitized planning turn to the pollable feed."""
+    now = _now_iso()
+    merged_detail = _sanitize_evidence(
+        {
+            "text": agent_response,
+            "operator_message": operator_message,
+            **({"stop_reason": stop_reason} if stop_reason is not None else {}),
+            **(detail or {}),
+        }
+    )
+    with connect(path) as conn:
+        cursor = conn.execute(
+            """
+            insert into planning_turn_events (
+                session_id, layer, kind, level, title, detail_json, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                "planning",
+                "turn",
+                "info",
+                "Planning turn",
+                _to_json(merged_detail),
+                now,
+            ),
+        )
+        row = conn.execute("select * from planning_turn_events where id = ?", (cursor.lastrowid,)).fetchone()
+    return _planning_turn_event_from_row(row)
+
+
+def list_planning_turn_events(
+    path: Path | str,
+    *,
+    session_id: str,
+    since_id: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return planning turn events for a session after an optional cursor."""
+    clauses: list[str] = ["session_id = ?"]
+    params: list[Any] = [session_id]
+    if since_id is not None:
+        clauses.append("id > ?")
+        params.append(since_id)
+    where = f" where {' and '.join(clauses)}"
+    query = "select * from planning_turn_events" + where + " order by id"
+    if limit is not None:
+        query += " limit ?"
+        params.append(limit)
+    with connect(path) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_planning_turn_event_from_row(row) for row in rows]
+
+
 def mark_worker_run_running(path: Path | str, run_id: str) -> dict[str, Any]:
     now = _now_iso()
     with connect(path) as conn:
@@ -2390,6 +2465,21 @@ def _worker_run_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "worker_run_id": row["worker_run_id"],
         "session_id": row["session_id"],
         "task_id": row["task_id"],
+        "layer": row["layer"],
+        "kind": row["kind"],
+        "level": row["level"],
+        "title": row["title"],
+        "detail": detail,
+        "detail_summary": _worker_run_event_detail_summary(detail),
+        "created_at": row["created_at"],
+    }
+
+
+def _planning_turn_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    detail = _from_json(row["detail_json"])
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
         "layer": row["layer"],
         "kind": row["kind"],
         "level": row["level"],
