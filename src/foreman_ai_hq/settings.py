@@ -14,7 +14,7 @@ class Settings:
     guardrails_path: Path = Path("guardrails.yaml")
     timezone: str = "local"
     control_plane_provider: str = "openai"
-    control_plane_model: str = "gpt-5.4"
+    orchestrator_model: str = "gpt-5.4"
     control_plane_api_key_env: str = "FOREMAN_AI_HQ_CONTROL_API_KEY"
     control_plane_base_url: str = ""
     provider_api_key_env: str = "PROVIDER_API_KEY"
@@ -26,12 +26,19 @@ class Settings:
     portal_cookie_secure: bool = False
     local_runner_enabled: bool = False
 
+    @property
+    def control_plane_model(self) -> str:
+        # Back-compat alias: the orchestrator model used to be exposed as the
+        # control-plane model. Every canonical caller should read orchestrator_model.
+        return self.orchestrator_model
+
     def __init__(
         self,
         database_path: Path | str | None = None,
         guardrails_path: Path | str | None = None,
         timezone: str | None = None,
         control_plane_provider: str | None = None,
+        orchestrator_model: str | None = None,
         control_plane_model: str | None = None,
         control_plane_api_key_env: str | None = None,
         control_plane_base_url: str | None = None,
@@ -93,12 +100,22 @@ class Settings:
             or provider_defaults.get("control_plane_api_key_env")
             or "FOREMAN_AI_HQ_CONTROL_API_KEY"
         )
-        resolved_control_model = (
-            control_plane_model
+        # The orchestrator model is the canonical model for planning, estimation,
+        # and task breakdown. It falls back to the legacy control_plane_model config/env
+        # and then to the estimator model for a smooth upgrade path.
+        resolved_orchestrator_model = (
+            # Explicit constructor arguments win over ambient environment so a leaked
+            # FOREMAN_AI_HQ_ORCHESTRATOR_MODEL cannot override an explicit model.
+            orchestrator_model
+            or control_plane_model
+            or os.getenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL")
+            or os.getenv("TOKEN_TRACKER_ORCHESTRATOR_MODEL")
             or os.getenv("FOREMAN_AI_HQ_CONTROL_MODEL")
             or os.getenv("TOKEN_TRACKER_CONTROL_PLANE_MODEL")
             or estimator_model
+            or os.getenv("FOREMAN_AI_HQ_ESTIMATOR_MODEL")
             or os.getenv("TOKEN_TRACKER_ESTIMATOR_MODEL")
+            or config.get("orchestrator_model")
             or config.get("control_plane_model")
             or "gpt-5.4"
         )
@@ -107,7 +124,7 @@ class Settings:
             "control_plane_provider",
             resolved_control_provider,
         )
-        object.__setattr__(self, "control_plane_model", resolved_control_model)
+        object.__setattr__(self, "orchestrator_model", resolved_orchestrator_model)
         object.__setattr__(self, "control_plane_api_key_env", resolved_control_api_env)
         default_control_base_url = (
             provider_defaults.get("control_plane_base_url")
@@ -137,7 +154,7 @@ class Settings:
             or os.getenv("FOREMAN_AI_HQ_ESTIMATOR_MODEL")
             or os.getenv("TOKEN_TRACKER_ESTIMATOR_MODEL")
             or config.get("estimator_model")
-            or resolved_control_model,
+            or resolved_orchestrator_model,
         )
         object.__setattr__(
             self,
@@ -146,7 +163,7 @@ class Settings:
             or os.getenv("FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL")
             or os.getenv("TOKEN_TRACKER_TASK_BREAKDOWN_MODEL")
             or config.get("task_breakdown_model")
-            or resolved_control_model,
+            or resolved_orchestrator_model,
         )
         object.__setattr__(
             self,

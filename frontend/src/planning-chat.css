@@ -1,0 +1,52 @@
+.planning-chat-feed {
+  min-height: 160px;
+}
+
+.planning-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.planning-turn {
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+}
+
+.planning-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.planning-line .pill {
+  flex-shrink: 0;
+}
+
+.planning-line .mono {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.planning-chat-composer {
+  margin-top: 14px;
+}
+
+.planning-chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.planning-chat-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.planning-chat-form .board-input {
+  width: 100%;
+}

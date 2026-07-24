@@ -26,7 +26,7 @@ installed foremanctl CLI
   -> session report and token evidence
 ```
 
-The Worker CLI keeps its own auth/config. Foreman AI HQ configures the control-plane model separately for estimates, planning, recommendations, summaries, and reports.
+The Worker CLI keeps its own auth/config. Foreman AI HQ configures the orchestrator model separately for estimates, planning, recommendations, summaries, and reports.
 
 Foreman AI HQ only governs work launched through its own board and a verified Worker Adapter. It does not govern arbitrary external agent spend.
 
@@ -170,7 +170,7 @@ There are two model layers:
 
 | Layer                   | Used for                                                      | Auth/config                                                     |
 | ----------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Control Plane model** | estimates, planning, task breakdown, recommendations, reports | configured in `/settings/control-plane` or local config/secrets |
+| **Orchestrator model** | estimates, planning, task breakdown, recommendations, reports | configured in `/settings/control-plane` or local config/secrets |
 | **Worker model**        | the actual coding task                                        | configured by the native Worker CLI                             |
 
 
@@ -190,7 +190,7 @@ Run it from the repository you want Foreman AI HQ to govern. If you run it from 
 | `.foreman/harness.db`      | default SQLite database, created or migrated by `foremanctl init`     |
 
 
-For normal local use, prefer the Portal settings screens. Environment variables are mainly for CI, headless runs, or compatibility.
+For normal local use, prefer the Portal settings screens. Environment variables are mainly for CI, headless runs, or compatibility. Config files may use either `orchestrator_model` or the legacy `control_plane_model`; both resolve to the same setting.
 
 Common environment variables:
 
@@ -198,10 +198,13 @@ Common environment variables:
 | Variable                        | Purpose                                                                       |
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `TOKEN_TRACKER_PORTAL_TOKEN`    | Portal login token for shared/non-loopback access                             |
-| `FOREMAN_AI_HQ_CONTROL_PROVIDER` | Control-plane provider, such as `openai`, `anthropic`, or `openai-compatible` |
-| `FOREMAN_AI_HQ_CONTROL_MODEL`    | Control-plane model                                                           |
-| `FOREMAN_AI_HQ_CONTROL_BASE_URL` | Base URL for OpenAI-compatible providers                                      |
-| `FOREMAN_AI_HQ_CONTROL_API_KEY`  | Control-plane provider API key                                                |
+| `FOREMAN_AI_HQ_CONTROL_PROVIDER`    | Control-plane provider, such as `openai`, `anthropic`, or `openai-compatible` |
+| `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model for estimates, planning, breakdown, and reports            |
+| `TOKEN_TRACKER_ORCHESTRATOR_MODEL` | *(alias)* Alternative env name for `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`         |
+| `FOREMAN_AI_HQ_CONTROL_MODEL`      | *(legacy)* Alias for `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`                       |
+| `TOKEN_TRACKER_CONTROL_PLANE_MODEL`| *(legacy alias)* Legacy alias for the orchestrator model                     |
+| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Base URL for OpenAI-compatible providers                                      |
+| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Control-plane provider API key                                                |
 
 
 The Portal writes submitted API keys only to ignored local secret storage and does not display raw key values again.

@@ -6,6 +6,8 @@ def test_settings_defaults_point_to_local_development_files(monkeypatch):
     monkeypatch.delenv("TOKEN_TRACKER_GUARDRAILS_PATH", raising=False)
     monkeypatch.delenv("TOKEN_TRACKER_TIMEZONE", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_PROVIDER", raising=False)
+    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
+    monkeypatch.delenv("TOKEN_TRACKER_ORCHESTRATOR_MODEL", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_MODEL", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_API_KEY_ENV", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_BASE_URL", raising=False)
@@ -86,6 +88,8 @@ def test_settings_keeps_legacy_estimator_model_as_control_plane_alias(monkeypatc
 
 def test_settings_reads_operator_config_when_env_missing(monkeypatch):
     monkeypatch.delenv("TOKEN_TRACKER_DATABASE_PATH", raising=False)
+    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
+    monkeypatch.delenv("TOKEN_TRACKER_ORCHESTRATOR_MODEL", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_MODEL", raising=False)
     monkeypatch.delenv("TOKEN_TRACKER_LOCAL_RUNNER", raising=False)
 

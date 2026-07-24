@@ -89,7 +89,7 @@ The harness tracks project capability explicitly:
 | Launch-ready via Hosted Workspace/Sandbox | A hosted execution environment is sandboxed, configured, and verified. |
 | Blocked | The project exists, but no backend satisfies launch requirements. |
 
-The current operator path is local-first: `foremanctl init`, `foremanctl serve`, connect a local project, configure the control-plane model, verify a Worker Adapter, then launch from the project board.
+The current operator path is local-first: `foremanctl init`, `foremanctl serve`, connect a local project, configure the orchestrator model, verify a Worker Adapter, then launch from the project board.
 
 Hosted workspaces are useful for analysis and estimation before they are launch-ready. Hosted Worker execution requires a verified sandbox, credentials policy, and Worker Adapter installation before it should be presented as launchable.
 
@@ -196,7 +196,7 @@ It does not auto-approve budget overrides, auto-mark tasks Done, run cross-proje
 - **Portal** — primary user experience for setup, project connection, Orchestration Board, dashboard, alarms, review, and reports.
 - **Needs You** — project-scoped decisions and advisory low-confidence estimate work, with backend-authoritative recovery actions.
 - **`foremanctl` command** — administrative entrypoint for initialization, serving, checks, and demo setup.
-- **Settings** — source of truth for control-plane model connection, Worker Adapter setup, token budget, and project readiness.
+- **Settings** — source of truth for orchestrator model connection, Worker Adapter setup, token budget, and project readiness.
 - **REST API** — backing API for sessions, tasks, guardrails, alarms, dashboard data, and reports.
 
 Secrets are local and ignored. Operator config stores non-secret settings; provider keys, portal tokens, and CLI auth must not appear in support output, logs, or committed files.

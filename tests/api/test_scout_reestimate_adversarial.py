@@ -340,7 +340,7 @@ async def test_request_reestimate_records_estimation_token_turn(tmp_path):
     artifact = db.build_session_artifact(db_path, session_id)
     assert len(artifact["token_log"]) == 1
     assert artifact["token_log"][0]["usage_kind"] == "estimation"
-    assert artifact["token_log"][0]["raw_usage"]["spend_category"] == "estimation"
+    assert artifact["token_log"][0]["raw_usage"]["spend_category"] == "orchestration"
     assert artifact["token_log"][0]["total_tokens"] == 70
 
 

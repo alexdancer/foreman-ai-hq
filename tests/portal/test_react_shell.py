@@ -2709,7 +2709,7 @@ def test_react_control_plane_save_json_outcome_key_free_and_persistence(
     assert set(payload) == {"ok", "error", "settings", "status", "shadowed_settings"}
     assert payload["ok"] is True
     assert payload["error"] is None
-    assert payload["settings"]["control_plane_model"] == "gpt-5.5"
+    assert payload["settings"]["orchestrator_model"] == "gpt-5.5"
     assert payload["status"]["state"] == "needs_test"
     assert payload["shadowed_settings"] == {}
     assert "sk_new_key_999" not in str(payload)

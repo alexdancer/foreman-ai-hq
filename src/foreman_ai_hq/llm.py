@@ -158,7 +158,7 @@ def response_to_dict(response: Any) -> dict[str, Any]:
 
 def _provider_config(settings: Settings, request: dict[str, Any]) -> ProviderConfig:
     provider = settings.control_plane_provider.lower().strip()
-    model = str(request.get("model") or settings.control_plane_model)
+    model = str(request.get("model") or settings.orchestrator_model)
     # Fall back to the legacy provider env name while preferring the explicit control-plane key.
     api_key = os.getenv(settings.control_plane_api_key_env) or os.getenv(settings.provider_api_key_env) or ""
     if not api_key:

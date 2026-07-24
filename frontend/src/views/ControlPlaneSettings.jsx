@@ -146,13 +146,13 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
         apply_to_estimator_breakdown: form.applyToEstimator,
       });
       if (!outcome?.ok) {
-        setInlineError(boundedError(outcome?.error, "Could not save control-plane settings."));
+        setInlineError(boundedError(outcome?.error, "Could not save orchestrator settings."));
       } else {
         setStatus("Saved. Run a connection test to confirm the new settings.");
         onRefresh();
       }
     } catch (err) {
-      setInlineError(boundedError(err.message, "Could not save control-plane settings."));
+      setInlineError(boundedError(err.message, "Could not save orchestrator settings."));
     } finally {
       setBusy(false);
     }
@@ -178,7 +178,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
   };
 
   if (loading && !data) {
-    return <p className="spinner">Loading control-plane settings…</p>;
+    return <p className="spinner">Loading orchestrator settings…</p>;
   }
   if (error) {
     return (
@@ -189,7 +189,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
     );
   }
   if (!data || !form) {
-    return <p className="spinner">Loading control-plane settings…</p>;
+    return <p className="spinner">Loading orchestrator settings…</p>;
   }
 
   const curatedForProvider = data.curated_models.filter((m) => m.provider === form.provider);
@@ -199,7 +199,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
 
   return (
     <>
-      <h1 className="page-title">Control plane model</h1>
+      <h1 className="page-title">Orchestrator model</h1>
       <p className="page-sub">
         Foreman AI HQ orchestration model · separate from Worker Harness models and credentials
       </p>
@@ -210,7 +210,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
 
       <section className="control-plane-layout">
         <article className="panel">
-          <div className="panel-header"><h3>Choose model</h3></div>
+          <div className="panel-header"><h3>Choose orchestrator model</h3></div>
           <div className="panel-body">
             <form className="control-plane-form" onSubmit={submitSave}>
               <div className="control-plane-fields">

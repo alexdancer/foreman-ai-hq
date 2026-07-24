@@ -99,7 +99,7 @@ The system SHALL expose an authenticated read-only dashboard JSON handoff for th
 - **AND** tests SHALL assert the nested response-key allowlists
 
 ### Requirement: React owns only the migrated project surfaces
-The React Portal shell SHALL own its dashboard home, the Projects list, selected project Pipeline, Execution Floor, Sessions list, Session Report, Task Breakdown Review, Project Task History, and the Alarms inbox. No server-rendered equivalent of those surfaces SHALL remain. The selected project Pipeline SHALL preserve the existing project overview's identity, profile, readiness, actionable summary, archive safety, and workflow navigation. The canonical `/dashboard`, `/projects`, `/projects/{project_id}`, `/projects/{project_id}/floor`, `/sessions`, `/sessions/{session_id}`, `/task-breakdowns/{breakdown_id}/review`, `/projects/{project_id}/task-history`, and `/alarms` routes SHALL serve React when the complete frontend build is available and SHALL return the missing-build recovery response otherwise. Legacy `/projects/{project_id}/board`, `/app/projects/{project_id}`, and `/app/projects/{project_id}/board` SHALL permanently redirect to `/projects/{project_id}`; `/app/projects/{project_id}/floor` SHALL permanently redirect to `/projects/{project_id}/floor`.
+The React Portal shell SHALL own its dashboard home, the Projects list, selected project Pipeline, Execution Floor, Planning Chat, Sessions list, Session Report, Task Breakdown Review, Project Task History, and the Alarms inbox. No server-rendered equivalent of those surfaces SHALL remain. The selected project Pipeline SHALL preserve the existing project overview's identity, profile, readiness, actionable summary, archive safety, and workflow navigation. The canonical `/dashboard`, `/projects`, `/projects/{project_id}`, `/projects/{project_id}/floor`, `/projects/{project_id}/plan`, `/sessions`, `/sessions/{session_id}`, `/task-breakdowns/{breakdown_id}/review`, `/projects/{project_id}/task-history`, and `/alarms` routes SHALL serve React when the complete frontend build is available and SHALL return the missing-build recovery response otherwise. Legacy `/projects/{project_id}/board`, `/app/projects/{project_id}`, and `/app/projects/{project_id}/board` SHALL permanently redirect to `/projects/{project_id}`; `/app/projects/{project_id}/floor` SHALL permanently redirect to `/projects/{project_id}/floor`.
 
 #### Scenario: Unknown React paths are not claimed
 - **WHEN** an operator opens a path under `/app` other than `/app`, `/app/projects/{project_id}`, `/app/projects/{project_id}/board`, or `/app/projects/{project_id}/floor`
@@ -140,7 +140,7 @@ The React Portal shell SHALL own its dashboard home, the Projects list, selected
 - **AND** it SHALL NOT serve a duplicate board surface
 
 #### Scenario: Unknown project is rejected before the shell is served
-- **WHEN** an authenticated operator opens `/projects/{project_id}`, `/projects/{project_id}/floor`, or `/projects/{project_id}/board` for a project that does not exist
+- **WHEN** an authenticated operator opens `/projects/{project_id}`, `/projects/{project_id}/floor`, `/projects/{project_id}/plan`, or `/projects/{project_id}/board` for a project that does not exist
 - **THEN** FastAPI SHALL return its existing not-found response regardless of build availability
 - **AND** it SHALL NOT serve the React shell or the recovery response for an unknown project
 
@@ -404,7 +404,8 @@ The React Portal shell SHALL render the full Portal application frame: a top bra
 #### Scenario: React shell renders the sidebar project list from the shared context helper
 
 - **WHEN** an authenticated operator opens a React-owned route with one or more connected projects
-- **THEN** the shell SHALL render a sidebar listing those projects, each with its name, a `Task board` subtitle when the project has tasks or a `No tasks` subtitle when it does not, and a `└ Task board` link under projects that have tasks
+- **THEN** the shell SHALL render a sidebar listing those projects, each with its name and a `Task board` subtitle when the project has tasks or a `No tasks` subtitle when it does not
+- **AND** the selected project SHALL expand to its canonical sub-links — `└ Pipeline` (`/projects/{project_id}#needs-you`, carrying a Needs You badge when that count is above zero), `└ Execution Floor` (`/projects/{project_id}/floor`), and `└ Plan` (`/projects/{project_id}/plan`) — while unselected projects SHALL show no sub-links
 - **AND** the project data SHALL come from an authenticated FastAPI JSON endpoint that reuses the existing `portal_template_context` helper
 - **AND** the shell SHALL render an empty `No projects` state and a reachable `+ Open local repo` action when no projects are connected
 
@@ -430,9 +431,9 @@ The React Portal shell SHALL render the full Portal application frame: a top bra
 
 #### Scenario: Active project and board routes are highlighted in the sidebar
 
-- **WHEN** an authenticated operator opens a project workspace or project board at the canonical `/projects/{id}` or `/projects/{id}/board`
+- **WHEN** an authenticated operator opens a project surface at the canonical `/projects/{project_id}`, `/projects/{project_id}/floor`, or `/projects/{project_id}/plan`
 - **THEN** the sidebar SHALL highlight the active project's sidebar entry so the operator can tell which project the shell is showing
-- **AND** the `└ Task board` sub-link SHALL be highlighted only on the board route, not on the project workspace
+- **AND** exactly one sub-link SHALL be highlighted — `└ Pipeline` on the project home, `└ Execution Floor` on the floor route, and `└ Plan` on the plan route
 - **AND** the Dashboard sidebar item SHALL NOT be highlighted
 - **AND** the shell SHALL NOT mark Setup, Sessions, Alarms, or Settings group items as active
 
@@ -462,7 +463,7 @@ The React Portal shell SHALL render the full Portal application frame: a top bra
 
 #### Scenario: React-owned sidebar links navigate in-shell while server-rendered targets stay full-page
 
-- **WHEN** an authenticated operator follows a sidebar link whose canonical target is a React-owned route — a `Settings` group item, `Alarms`, `Sessions`, `First-run setup`, `+ Open local repo` (`/projects`), a project, or its `└ Task board`
+- **WHEN** an authenticated operator follows a sidebar link whose canonical target is a React-owned route — a `Settings` group item, `Alarms`, `Sessions`, `First-run setup`, `+ Open local repo` (`/projects`), a project, or one of its `└ Pipeline`, `└ Execution Floor`, and `└ Plan` sub-links
 - **THEN** the shell SHALL navigate client-side via the shared route-aware link seam without a full-page transition
 - **AND** browser Back and Forward SHALL preserve those route transitions
 - **WHEN** an authenticated operator follows a sidebar link whose canonical target the React shell does not own — the bare `/board` Planning shim, or the `/login` / `/logout` controls
