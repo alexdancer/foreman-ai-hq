@@ -215,6 +215,5 @@ def _sanitize_env_name_fields(config: dict[str, Any]) -> None:
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
             config[key] = DEFAULT_LOCAL_CONFIG[key]
 
-
 def _quote_toml(value: str) -> str:
     return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'

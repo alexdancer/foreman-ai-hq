@@ -91,7 +91,7 @@ Use synthetic/public-safe data only. Do not capture real secrets, real customer 
 
 ![Foreman AI HQ project board UI](assets/screenshots/project-board-review-workflow.png)
 
-![Foreman AI HQ control-plane model UI](assets/screenshots/control-plane-model-settings.png)
+![Foreman AI HQ orchestrator model UI](assets/screenshots/control-plane-model-settings.png)
 
 ![Foreman AI HQ worker adapter setup UI](assets/screenshots/worker-adapter-setup.png)
 

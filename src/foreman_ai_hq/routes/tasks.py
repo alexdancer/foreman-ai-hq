@@ -1714,13 +1714,13 @@ async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str 
     review_session = db.create_session(
         database_path,
         task_description=f"Agent review for task {task['id']}: {task['description']}",
-        model=settings.control_plane_model,
+        model=settings.orchestrator_model,
         session_key_hash=_agent_review_session_key_hash(task["id"], _now_iso()),
         guardrail_overrides={"spend_category": "agent_review", "task_id": task["id"]},
         status="completed",
     )
     llm_request = {
-        "model": settings.control_plane_model,
+        "model": settings.orchestrator_model,
         "messages": [
             {
                 "role": "system",
@@ -1745,10 +1745,10 @@ async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str 
             database_path,
             session_id=review_session["id"],
             usage_kind="reporting",
-            model=settings.control_plane_model,
+            model=settings.orchestrator_model,
             prompt_tokens=usage["prompt_tokens"],
             completion_tokens=usage["completion_tokens"],
-            cost=resolve_cost(settings.control_plane_model, response_body),
+            cost=resolve_cost(settings.orchestrator_model, response_body),
             raw_usage={
                 **usage,
                 "spend_category": "reporting_summary",
@@ -1763,7 +1763,7 @@ async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str 
                 "status": "completed",
                 "reviewed_at": _now_iso(),
                 "review_session_id": review_session["id"],
-                "model": settings.control_plane_model,
+                "model": settings.orchestrator_model,
                 "token_totals": _agent_review_token_totals(database_path, review_session["id"]),
             }
         )
@@ -1776,7 +1776,7 @@ async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str 
             "recommendation": "needs_changes",
             "reviewed_at": _now_iso(),
             "review_session_id": review_session["id"],
-            "model": settings.control_plane_model,
+            "model": settings.orchestrator_model,
             "token_totals": _agent_review_token_totals(database_path, review_session["id"]),
             "error_type": type(exc).__name__,
             "error": _safe_review_value(str(exc)),

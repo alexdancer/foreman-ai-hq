@@ -14,7 +14,7 @@ import { useResource } from "../useResource.js";
 // browser loads the server-rendered page.
 //
 // Props:
-//   activeView: "dashboard" | "pipeline" | "floor"
+//   activeView: "dashboard" | "pipeline" | "floor" | "planningChat"
 //   activeProjectId: string | null
 export default function Shell({ children, activeView, activeProjectId, refreshKey = 0 }) {
   const { data, error, loading } = useResource("/api/portal/nav", refreshKey);
@@ -90,6 +90,14 @@ export function Sidebar({ activeView, activeProjectId, data, error, loading }) {
                     className={`project-board${activeView === "floor" ? " active" : ""}`}
                   >
                     └ Execution Floor
+                  </AppLink>
+                )}
+                {isActive && (
+                  <AppLink
+                    to={`/projects/${project.id}/plan`}
+                    className={`project-board${activeView === "planningChat" ? " active" : ""}`}
+                  >
+                    └ Plan
                   </AppLink>
                 )}
               </React.Fragment>

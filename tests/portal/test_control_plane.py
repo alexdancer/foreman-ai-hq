@@ -62,7 +62,7 @@ def test_control_plane_save_persists_and_hot_swaps_settings(tmp_path, monkeypatc
     assert response.status_code == 200
     body = response.json()
     assert body["settings"]["control_plane_provider"] == "anthropic"
-    assert body["settings"]["control_plane_model"] == "claude-haiku-4-5"
+    assert body["settings"]["orchestrator_model"] == "claude-haiku-4-5"
     assert body["settings"]["estimator_model"] == "claude-haiku-4-5"
     assert body["settings"]["task_breakdown_model"] == "claude-haiku-4-5"
     assert body["status"]["online"] is False
@@ -103,7 +103,7 @@ def test_control_plane_save_updates_bootstrap_env_override(tmp_path, monkeypatch
         )
 
     assert response.status_code == 200
-    assert response.json()["settings"]["control_plane_model"] == "gpt-5.5"
+    assert response.json()["settings"]["orchestrator_model"] == "gpt-5.5"
     assert app.state.settings.control_plane_model == "gpt-5.5"
     assert app.state.settings.estimator_model == "gpt-5.5"
     assert os.environ["FOREMAN_AI_HQ_CONTROL_MODEL"] == "gpt-5.5"

@@ -24,6 +24,9 @@ export function parseRoute(pathname) {
   const floor = normalized.match(/^\/projects\/([^/]+)\/floor$/);
   if (floor) return { view: "floor", projectId: decodeURIComponent(floor[1]) };
 
+  const plan = normalized.match(/^\/projects\/([^/]+)\/plan$/);
+  if (plan) return { view: "planningChat", projectId: decodeURIComponent(plan[1]) };
+
   const pipeline = normalized.match(/^\/projects\/([^/]+)$/);
   if (pipeline) return { view: "pipeline", projectId: decodeURIComponent(pipeline[1]) };
 

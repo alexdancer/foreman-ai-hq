@@ -11,7 +11,7 @@ from urllib.parse import quote, urlparse
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from foreman_ai_hq import db
 from foreman_ai_hq.auth import (
@@ -212,14 +212,15 @@ class TokenBudgetSettingsRequest(BaseModel):
 
 
 class ControlPlaneSettingsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     control_plane_provider: str = Field(min_length=1, pattern="^(openai|anthropic|openai-compatible|openrouter)$")
-    control_plane_model: str = Field(min_length=1)
+    orchestrator_model: str = Field(min_length=1, alias="control_plane_model")
     control_plane_base_url: str = ""
     control_plane_api_key_env: str = ""
     control_plane_api_key: str = ""
     apply_to_estimator_breakdown: bool = True
 
-    @field_validator("control_plane_model")
+    @field_validator("orchestrator_model")
     @classmethod
     def _model_must_not_be_blank(cls, value: str) -> str:
         model = value.strip()
@@ -489,6 +490,16 @@ def project_execution_floor(project_id: str, request: Request):
     return react_shell_or_missing_build()
 
 
+@router.get("/projects/{project_id}/plan", response_class=HTMLResponse, dependencies=[Depends(require_portal_auth)])
+def project_planning_chat(project_id: str, request: Request):
+    database_path = request.app.state.settings.database_path
+    try:
+        db.get_connected_project(database_path, project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="connected project not found") from exc
+    return react_shell_or_missing_build()
+
+
 def _setup_overview_state(request: Request) -> dict[str, Any]:
     """Readiness steps and next action for the Setup Overview surface.
 
@@ -525,7 +536,7 @@ def _setup_overview_state(request: Request) -> dict[str, Any]:
             "name": "Control plane model",
             "state": _control_plane_setup_state(settings, control_status),
             "href": "/settings/control-plane",
-            "detail": settings.control_plane_model,
+            "detail": settings.orchestrator_model,
         },
         {
             "name": "Token budget",
@@ -1255,13 +1266,13 @@ async def save_control_plane_settings(request: Request):
     current: Settings = request.app.state.settings
     updates: dict[str, Any] = {
         "control_plane_provider": payload.control_plane_provider,
-        "control_plane_model": payload.control_plane_model,
+        "control_plane_model": payload.orchestrator_model,
         "control_plane_base_url": payload.control_plane_base_url.strip(),
         "control_plane_api_key_env": payload.control_plane_api_key_env,
     }
     if payload.apply_to_estimator_breakdown:
-        updates["estimator_model"] = payload.control_plane_model
-        updates["task_breakdown_model"] = payload.control_plane_model
+        updates["estimator_model"] = payload.orchestrator_model
+        updates["task_breakdown_model"] = payload.orchestrator_model
     try:
         config = update_operator_config(**updates)
         if payload.control_plane_api_key:
@@ -1295,21 +1306,21 @@ async def save_control_plane_settings(request: Request):
     status_record = db.upsert_execution_backend_status(
         new_settings.database_path,
         "control_plane_model",
-        name="Control Plane Model",
+        name="Orchestrator Model",
         online=False,
         details={
             # A saved config is not trusted until the explicit connection test passes.
             "status": "needs_test",
             "reason": "configuration changed; test required",
             "provider": new_settings.control_plane_provider,
-            "model": new_settings.control_plane_model,
+            "model": new_settings.orchestrator_model,
             "api_key_env": new_settings.control_plane_api_key_env,
         },
     )
     status_with_state = {**status_record, "state": _control_plane_connection_state(status_record)}
     settings_json = {
         "control_plane_provider": new_settings.control_plane_provider,
-        "control_plane_model": new_settings.control_plane_model,
+        "orchestrator_model": new_settings.orchestrator_model,
         "control_plane_base_url": new_settings.control_plane_base_url,
         "control_plane_api_key_env": new_settings.control_plane_api_key_env,
         "estimator_model": new_settings.estimator_model,
@@ -1337,7 +1348,7 @@ async def test_control_plane_connection(request: Request):
     accept = request.headers.get("accept", "")
     wants_html = "text/html" in accept and "application/json" not in accept
     payload = {
-        "model": settings.control_plane_model,
+        "model": settings.orchestrator_model,
         "messages": [{"role": "user", "content": "Return exactly FOREMAN_AI_HQ_CONTROL_PLANE_OK."}],
     }
     try:
@@ -1345,14 +1356,14 @@ async def test_control_plane_connection(request: Request):
         status_record = db.upsert_execution_backend_status(
             settings.database_path,
             "control_plane_model",
-            name="Control Plane Model",
+            name="Orchestrator Model",
             online=True,
             details={
                 "provider": settings.control_plane_provider,
-                "model": settings.control_plane_model,
+                "model": settings.orchestrator_model,
                 "api_key_env": settings.control_plane_api_key_env,
                 "usage": extract_usage(response),
-                "cost": resolve_cost(settings.control_plane_model, response),
+                "cost": resolve_cost(settings.orchestrator_model, response),
                 "response": _safe_worker_evidence(response_to_dict(response)),
             },
         )
@@ -1364,11 +1375,11 @@ async def test_control_plane_connection(request: Request):
         status_record = db.upsert_execution_backend_status(
             settings.database_path,
             "control_plane_model",
-            name="Control Plane Model",
+            name="Orchestrator Model",
             online=False,
             details={
                 "provider": settings.control_plane_provider,
-                "model": settings.control_plane_model,
+                "model": settings.orchestrator_model,
                 "api_key_env": settings.control_plane_api_key_env,
                 "error_type": type(exc).__name__,
                 "error": _safe_worker_evidence(str(exc)),
@@ -1647,7 +1658,12 @@ def _control_plane_shadowed_settings(settings: Settings) -> dict[str, str]:
     shadowed: dict[str, str] = {}
     checks = {
         "control_plane_provider": ["FOREMAN_AI_HQ_CONTROL_PROVIDER", "TOKEN_TRACKER_CONTROL_PLANE_PROVIDER"],
-        "control_plane_model": ["FOREMAN_AI_HQ_CONTROL_MODEL", "TOKEN_TRACKER_CONTROL_PLANE_MODEL"],
+        "orchestrator_model": [
+            "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL",
+            "TOKEN_TRACKER_ORCHESTRATOR_MODEL",
+            "FOREMAN_AI_HQ_CONTROL_MODEL",
+            "TOKEN_TRACKER_CONTROL_PLANE_MODEL",
+        ],
         "control_plane_base_url": ["FOREMAN_AI_HQ_CONTROL_BASE_URL", "TOKEN_TRACKER_CONTROL_PLANE_BASE_URL"],
         "control_plane_api_key_env": ["FOREMAN_AI_HQ_CONTROL_API_KEY_ENV", "TOKEN_TRACKER_CONTROL_PLANE_API_KEY_ENV"],
         "estimator_model": ["FOREMAN_AI_HQ_ESTIMATOR_MODEL", "TOKEN_TRACKER_ESTIMATOR_MODEL"],
@@ -1666,18 +1682,20 @@ def _sync_control_plane_env(payload: ControlPlaneSettingsRequest) -> None:
     values = {
         "FOREMAN_AI_HQ_CONTROL_PROVIDER": payload.control_plane_provider,
         "TOKEN_TRACKER_CONTROL_PLANE_PROVIDER": payload.control_plane_provider,
-        "FOREMAN_AI_HQ_CONTROL_MODEL": payload.control_plane_model,
-        "TOKEN_TRACKER_CONTROL_PLANE_MODEL": payload.control_plane_model,
+        "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL": payload.orchestrator_model,
+        "TOKEN_TRACKER_ORCHESTRATOR_MODEL": payload.orchestrator_model,
+        "FOREMAN_AI_HQ_CONTROL_MODEL": payload.orchestrator_model,
+        "TOKEN_TRACKER_CONTROL_PLANE_MODEL": payload.orchestrator_model,
         "FOREMAN_AI_HQ_CONTROL_BASE_URL": payload.control_plane_base_url,
         "TOKEN_TRACKER_CONTROL_PLANE_BASE_URL": payload.control_plane_base_url,
         "FOREMAN_AI_HQ_CONTROL_API_KEY_ENV": payload.control_plane_api_key_env,
         "TOKEN_TRACKER_CONTROL_PLANE_API_KEY_ENV": payload.control_plane_api_key_env,
     }
     if payload.apply_to_estimator_breakdown:
-        values["FOREMAN_AI_HQ_ESTIMATOR_MODEL"] = payload.control_plane_model
-        values["TOKEN_TRACKER_ESTIMATOR_MODEL"] = payload.control_plane_model
-        values["FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL"] = payload.control_plane_model
-        values["TOKEN_TRACKER_TASK_BREAKDOWN_MODEL"] = payload.control_plane_model
+        values["FOREMAN_AI_HQ_ESTIMATOR_MODEL"] = payload.orchestrator_model
+        values["TOKEN_TRACKER_ESTIMATOR_MODEL"] = payload.orchestrator_model
+        values["FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL"] = payload.orchestrator_model
+        values["TOKEN_TRACKER_TASK_BREAKDOWN_MODEL"] = payload.orchestrator_model
     for name, value in values.items():
         if name in os.environ:
             os.environ[name] = value

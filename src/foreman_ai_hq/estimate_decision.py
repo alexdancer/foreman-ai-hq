@@ -404,7 +404,7 @@ def _record_reestimate_token_turn(
         prompt_tokens=usage["prompt_tokens"],
         completion_tokens=usage["completion_tokens"],
         cost=resolve_cost(estimator_model, llm_response),
-        raw_usage={**usage, "response": response_to_dict(llm_response), "spend_category": "estimation"},
+        raw_usage={**usage, "response": response_to_dict(llm_response), "spend_category": "orchestration"},
     )
 
 

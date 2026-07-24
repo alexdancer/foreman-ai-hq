@@ -530,6 +530,10 @@ test("only exact React routes are parsed as owned views", () => {
     view: "floor",
     projectId: "demo-999",
   });
+  assert.deepEqual(parseRoute("/projects/demo-999/plan"), {
+    view: "planningChat",
+    projectId: "demo-999",
+  });
   assert.equal(parseRoute("/projects/demo-999/task-history").view, "taskHistory");
   assert.equal(parseRoute("/app/projects/demo-999/task-history").view, "notFound");
   for (const path of [
@@ -1594,6 +1598,14 @@ test("project Pipeline and Floor active states follow the selected route", () =>
   });
   assert.match(floor, /class="project-item active"/);
   assert.match(floor, /class="project-board active" href="\/projects\/demo-999\/floor"/);
+
+  const plan = renderSidebar({
+    activeProjectId: "demo-999",
+    activeView: "planningChat",
+    data,
+  });
+  assert.match(plan, /class="project-item active"/);
+  assert.match(plan, /class="project-board active" href="\/projects\/demo-999\/plan"/);
 });
 
 test("canonical project routes highlight the project while aliases remain server-owned", () => {
@@ -1605,6 +1617,7 @@ test("canonical project routes highlight the project while aliases remain server
     "/app/projects/demo-999",
     "/app/projects/demo-999/board",
     "/app/projects/demo-999/floor",
+    "/app/projects/demo-999/plan",
   ]) {
     assert.equal(parseRoute(path).view, "notFound");
   }

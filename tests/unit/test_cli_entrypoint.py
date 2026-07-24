@@ -455,6 +455,8 @@ def test_check_reports_control_plane_and_observed_only_worker(monkeypatch, tmp_p
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("TOKEN_TRACKER_DATABASE_PATH", raising=False)
+    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
+    monkeypatch.delenv("TOKEN_TRACKER_ORCHESTRATOR_MODEL", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_MODEL", raising=False)
     monkeypatch.delenv("TOKEN_TRACKER_PORTAL_TOKEN_ENV", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_API_KEY_ENV", raising=False)
@@ -485,7 +487,7 @@ def test_check_reports_control_plane_and_observed_only_worker(monkeypatch, tmp_p
 
     assert exit_code == 0
     output = capsys.readouterr().out
-    assert "PASS control-plane model gpt-5.4 reachable" in output
+    assert "PASS orchestrator model gpt-5.4 reachable" in output
     assert "WARN Worker adapter opencode (opencode) observed_only is diagnostic-only and not normal board-launchable" in output
 
 

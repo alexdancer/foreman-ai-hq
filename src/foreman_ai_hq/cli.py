@@ -88,8 +88,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             aliases=("TOKEN_TRACKER_CONTROL_PLANE_PROVIDER",),
         )
         _set_env_if_missing(
+            "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL",
+            config.get("orchestrator_model") or config.get("control_plane_model"),
+            aliases=("TOKEN_TRACKER_ORCHESTRATOR_MODEL",),
+        )
+        _set_env_if_missing(
             "FOREMAN_AI_HQ_CONTROL_MODEL",
-            config.get("control_plane_model"),
+            config.get("control_plane_model") or config.get("orchestrator_model"),
             aliases=("TOKEN_TRACKER_CONTROL_PLANE_MODEL", "TOKEN_TRACKER_ESTIMATOR_MODEL"),
         )
         _set_env_if_missing(
@@ -282,18 +287,18 @@ def _check_operator_setup() -> int:
             asyncio.run(
                 LLMClient(settings).acompletion(
                     {
-                        "model": settings.control_plane_model,
+                        "model": settings.orchestrator_model,
                         "messages": [{"role": "user", "content": "Return exactly FOREMAN_AI_HQ_CONTROL_PLANE_OK."}],
                     }
                 )
             )
-            print(f"PASS control-plane model {settings.control_plane_model} reachable")
+            print(f"PASS orchestrator model {settings.orchestrator_model} reachable")
         except Exception as exc:
-            print(f"FAIL control-plane model {settings.control_plane_model} unreachable: {type(exc).__name__}")
+            print(f"FAIL orchestrator model {settings.orchestrator_model} unreachable: {type(exc).__name__}")
             hard_fail = True
     else:
         print(
-            f"FAIL control-plane model {settings.control_plane_model} unchecked: missing "
+            f"FAIL orchestrator model {settings.orchestrator_model} unchecked: missing "
             f"{settings.control_plane_api_key_env}; configure it in /settings/control-plane, "
             ".foreman/secrets.env, or the shell environment. Native Worker CLI auth is separate."
         )

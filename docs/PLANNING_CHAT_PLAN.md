@@ -101,4 +101,4 @@ logic or UI.
   chat renders, finalize commits `spec.md`, user lands in Task Breakdown Review.
 - Full: `uv run pytest`, `npm run check`, the repository test contract, recorded
   demo E2E. Consult the `claude-api` skill for the tool-use loop; default to the
-  latest capable Claude control-plane model behind the proxy.
+  latest capable Claude orchestrator model behind the proxy.

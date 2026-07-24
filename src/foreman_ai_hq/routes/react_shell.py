@@ -288,7 +288,7 @@ def react_dashboard_state(request: Request):
         "spend": {
             "worker_execution": context["worker_token_total"],
             "agent_review_reporting": categories["reporting_summary"],
-            "planning_estimation": categories["task_breakdown"] + categories["control_plane"],
+            "planning_estimation": categories["task_breakdown"] + categories.get("orchestration", categories.get("control_plane", 0)),
             "setup_verification": categories["adapter_verification"],
             "other": categories["other"],
             "cost_by_category": {
@@ -459,7 +459,7 @@ def react_control_plane_settings(request: Request):
         connection_status = None
     return {
         "provider": settings.control_plane_provider,
-        "model": settings.control_plane_model,
+        "model": settings.orchestrator_model,
         "base_url": settings.control_plane_base_url or None,
         "api_key_env": settings.control_plane_api_key_env,
         "api_key_present": bool(os.getenv(settings.control_plane_api_key_env)),
