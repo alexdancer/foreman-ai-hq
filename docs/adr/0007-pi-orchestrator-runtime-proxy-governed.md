@@ -1,7 +1,7 @@
 # ADR-0007: pi is the control-plane Orchestrator runtime, under proxy_governed
 
 **Date**: 2026-07-21
-**Status**: proposed
+**Status**: proposed — transport superseded by [ADR-0009](0009-orchestrator-native-runtime-owns-estimation-breakdown.md) (Orchestrator moves off the proxy to native-usage accounting and additionally owns estimation/breakdown). pi-as-runtime, ACP, profile-as-config, and the Scout boundary here still stand.
 
 ## Context
 
