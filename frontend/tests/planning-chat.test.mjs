@@ -127,6 +127,17 @@ test("PlanningChatState renders a sign-in state on 401", () => {
   assert.match(markup, /requires sign-in/);
 });
 
+test("PlanningChatState renders the provider sign-in state on a provider-auth 401", () => {
+  const error = Object.assign(
+    new Error("Provider authentication required; run `pi /login` or add an API key in pi."),
+    { status: 401 },
+  );
+  const markup = renderState({ started: false, error });
+  assert.match(markup, /Provider authentication required/);
+  assert.match(markup, /pi \/login/);
+  assert.doesNotMatch(markup, /requires sign-in/);
+});
+
 test("PlanningChatState disables the composer while a turn is in flight and shows Cancel", () => {
   const markup = renderState({ started: true, sending: true, message: "do this" });
   assert.match(markup, /disabled/);

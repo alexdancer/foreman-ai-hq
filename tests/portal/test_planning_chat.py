@@ -1,7 +1,11 @@
+import time
+from types import SimpleNamespace
+
 import pytest
 
 from foreman_ai_hq import db
-from foreman_ai_hq.routes import react_shell
+from foreman_ai_hq.pi_adapter import PiAuthRequired
+from foreman_ai_hq.routes import planning_conversation, react_shell
 from tests.portal.helpers import PORTAL_TOKEN, _client, _connect_project, _portal_headers
 
 
@@ -40,3 +44,60 @@ def test_planning_chat_serves_shell_or_the_missing_build_recovery_response(
         assert response.status_code == 503
         assert "not built" in response.text
     assert missing.status_code == 404
+
+
+def test_planning_start_surfaces_provider_auth_required_instead_of_a_dead_turn(tmp_path, monkeypatch):
+    """Absent/expired provider auth must reach the operator as an actionable sign-in state."""
+
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    db.init_db(tmp_path / "harness.db")
+    project = _connect_project(tmp_path / "harness.db", tmp_path / "repo")
+
+    def _no_provider_auth(*args, **kwargs):
+        raise PiAuthRequired("Provider authentication required; run `pi /login` or add an API key in pi.")
+
+    monkeypatch.setattr(planning_conversation, "open_pi_conversation", _no_provider_auth)
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            f"/api/projects/{project['id']}/planning/start", headers=_portal_headers()
+        )
+
+    assert response.status_code == 401
+    detail = response.json()["detail"]
+    assert "provider" in detail.lower()
+    assert "pi /login" in detail
+    assert "planning_session_id" not in response.text
+
+
+def test_planning_message_surfaces_provider_auth_expiring_mid_conversation(tmp_path, monkeypatch):
+    """Provider auth can expire between turns; that turn must still reach the sign-in state."""
+
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    db.init_db(tmp_path / "harness.db")
+    project = _connect_project(tmp_path / "harness.db", tmp_path / "repo")
+
+    class _ExpiredAuthConversation:
+        proc = SimpleNamespace(poll=lambda: None)
+
+        def prompt(self, text, **kwargs):
+            raise PiAuthRequired("Provider authentication required; run `pi /login` or add an API key in pi.")
+
+        def close(self):
+            """No subprocess to tear down; app shutdown closes every held conversation."""
+
+    with _client(tmp_path) as client:
+        registry = client.app.state.planning_registry
+        registry._live[project["id"]] = planning_conversation.LiveConversation(
+            conv=_ExpiredAuthConversation(),
+            planning_session_id="sess_planning_test",
+            last_used_at=time.monotonic(),
+        )
+        response = client.post(
+            f"/api/projects/{project['id']}/planning/message",
+            headers=_portal_headers(),
+            json={"message": "plan this"},
+        )
+
+    assert response.status_code == 401
+    assert "pi /login" in response.json()["detail"]

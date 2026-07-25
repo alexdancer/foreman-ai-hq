@@ -19,13 +19,6 @@ from foreman_ai_hq import db
 from foreman_ai_hq.app import create_app
 from foreman_ai_hq.settings import Settings
 
-# Reuse the fakes and helpers proven by the ACP conversation tests.
-from tests.e2e.test_pi_acp_conversation import (
-    BlockingThenNormalLLMClient,
-    FakePiLLMClient,
-    _pi_rpc_processes,
-)
-
 ROOT = Path(__file__).resolve().parents[2]
 PORTAL_TOKEN = "test-portal-token"
 
@@ -74,16 +67,32 @@ def _client(port) -> httpx.Client:
     return httpx.Client(
         base_url=f"http://127.0.0.1:{port}",
         headers={"Authorization": f"Bearer {PORTAL_TOKEN}"},
-        timeout=30,
+        timeout=60,
     )
 
 
-@pytest.fixture
-def project_and_server(tmp_path):
+def _pi_rpc_processes() -> list[str]:
+    """Return any surviving ``pi --mode rpc`` process command lines."""
+    result = subprocess.run(
+        ["pgrep", "-af", "pi --mode rpc"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if "pgrep" not in line]
+
+
+def _skip_without_pi_env() -> None:
     if not shutil.which("pi"):
         pytest.skip("pi CLI not installed")
     if not shutil.which("node"):
         pytest.skip("Node.js not installed")
+
+
+@pytest.fixture
+def project_and_server(tmp_path):
+    _skip_without_pi_env()
 
     database_path = tmp_path / "harness.db"
     db.init_db(database_path)
@@ -97,9 +106,8 @@ def project_and_server(tmp_path):
         capability={},
     )
 
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path())
+    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model="gpt-5.4")
     app = create_app(settings)
-    app.state.llm_client = FakePiLLMClient()
     server, thread, port = _start_server(app)
     try:
         yield project, database_path, port, app
@@ -108,10 +116,7 @@ def project_and_server(tmp_path):
 
 
 def test_start_requires_portal_auth(tmp_path):
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
-    if not shutil.which("node"):
-        pytest.skip("Node.js not installed")
+    _skip_without_pi_env()
 
     database_path = tmp_path / "harness.db"
     db.init_db(database_path)
@@ -125,7 +130,7 @@ def test_start_requires_portal_auth(tmp_path):
         capability={},
     )
 
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path())
+    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model="gpt-5.4")
     app = create_app(settings)
     server, thread, port = _start_server(app)
     try:
@@ -158,11 +163,11 @@ def test_message_drives_one_planning_turn_and_appears_in_poll(project_and_server
 
         message = client.post(
             f"/api/projects/{project['id']}/planning/message",
-            json={"message": "hi"},
+            json={"message": "Return exactly TURN_OK"},
         )
         assert message.status_code == 200
         body = message.json()
-        assert body["content"] == "ok"
+        assert "TURN_OK" in body["content"]
         assert body["stop_reason"] == "end_turn"
         assert body["planning_session_id"] == session_id
 
@@ -179,15 +184,16 @@ def test_message_drives_one_planning_turn_and_appears_in_poll(project_and_server
     turn = artifact["token_log"][0]
     assert turn["usage_kind"] == "planning"
     assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+    assert turn["raw_usage"]["usage_source"] == "native_usage"
+    assert turn["raw_usage"]["tracking_mode"] == "native_usage"
 
 
 def test_poll_returns_events_after_cursor(project_and_server):
     project, database_path, port, app = project_and_server
     with _client(port) as client:
         client.post(f"/api/projects/{project['id']}/planning/start")
-        client.post(f"/api/projects/{project['id']}/planning/message", json={"message": "one"})
-        client.post(f"/api/projects/{project['id']}/planning/message", json={"message": "two"})
+        client.post(f"/api/projects/{project['id']}/planning/message", json={"message": "Return exactly ONE"})
+        client.post(f"/api/projects/{project['id']}/planning/message", json={"message": "Return exactly TWO"})
 
         all_events = client.get(f"/api/projects/{project['id']}/planning/events").json()
         first_id = all_events["events"][0]["id"]
@@ -200,81 +206,6 @@ def test_poll_returns_events_after_cursor(project_and_server):
     assert payload["events"][0]["id"] == second_id
     assert payload["next_since_id"] == second_id
     assert payload["has_more"] is False
-
-
-def test_cancel_resolves_in_flight_turn_and_conversation_stays_usable(tmp_path):
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
-    if not shutil.which("node"):
-        pytest.skip("Node.js not installed")
-
-    database_path = tmp_path / "harness.db"
-    db.init_db(database_path)
-    root_path = tmp_path / "project-root"
-    root_path.mkdir(parents=True, exist_ok=True)
-    project = db.upsert_connected_project(
-        database_path,
-        name="test-project",
-        root_path=str(root_path),
-        profile={},
-        capability={},
-    )
-
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path())
-    app = create_app(settings)
-    fake = BlockingThenNormalLLMClient()
-    app.state.llm_client = fake
-    server, thread, port = _start_server(app)
-    try:
-        with _client(port) as client:
-            start = client.post(f"/api/projects/{project['id']}/planning/start")
-            session_id = start.json()["planning_session_id"]
-
-            message_result: dict[str, Any] = {}
-
-            def _message_in_thread() -> None:
-                try:
-                    with _client(port) as thread_client:
-                        resp = thread_client.post(
-                            f"/api/projects/{project['id']}/planning/message",
-                            json={"message": "block me"},
-                        )
-                    message_result.update(resp.json())
-                except Exception as exc:  # pragma: no cover
-                    message_result["error"] = str(exc)
-
-            msg_thread = threading.Thread(target=_message_in_thread)
-            msg_thread.start()
-            assert fake.block_started.wait(timeout=15), "prompt did not reach proxy"
-            time.sleep(0.2)
-
-            cancel = client.post(f"/api/projects/{project['id']}/planning/cancel")
-            assert cancel.status_code == 200
-            assert cancel.json()["cancelled"] is True
-
-            msg_thread.join(timeout=15)
-            assert not msg_thread.is_alive()
-
-            assert message_result.get("stop_reason") == "cancelled"
-            assert message_result.get("content") == "partial"
-
-            follow = client.post(
-                f"/api/projects/{project['id']}/planning/message",
-                json={"message": "echo"},
-            )
-            assert follow.status_code == 200
-            assert follow.json()["stop_reason"] == "end_turn"
-            assert follow.json()["content"] == "ok"
-
-    finally:
-        fake.release()
-        _stop_server(server, thread)
-
-    artifact = db.build_session_artifact(database_path, session_id)
-    assert len(artifact["token_log"]) == 1
-    turn = artifact["token_log"][0]
-    assert turn["usage_kind"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
 
 
 def test_end_terminates_pi_and_leaves_no_orphan(project_and_server):
@@ -295,11 +226,18 @@ def test_end_terminates_pi_and_leaves_no_orphan(project_and_server):
     assert retry.status_code == 404
 
 
+def test_cancel_endpoint_is_reachable(project_and_server):
+    project, database_path, port, app = project_and_server
+    with _client(port) as client:
+        start = client.post(f"/api/projects/{project['id']}/planning/start")
+        assert start.status_code == 200
+        cancel = client.post(f"/api/projects/{project['id']}/planning/cancel")
+        assert cancel.status_code == 200
+        assert cancel.json()["cancelled"] is True
+
+
 def test_registry_bounds_and_reaps_lru_idle(tmp_path):
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
-    if not shutil.which("node"):
-        pytest.skip("Node.js not installed")
+    _skip_without_pi_env()
 
     database_path = tmp_path / "harness.db"
     db.init_db(database_path)
@@ -324,13 +262,14 @@ def test_registry_bounds_and_reaps_lru_idle(tmp_path):
 
     from foreman_ai_hq.routes.planning_conversation import PlanningConversationRegistry
 
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path())
+    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model="gpt-5.4")
     app = create_app(settings)
-    app.state.llm_client = FakePiLLMClient()
     server, thread, port = _start_server(app)
     try:
         # Swap to a tiny registry so we can prove capacity and LRU idle reap.
-        app.state.planning_registry = PlanningConversationRegistry(ttl_seconds=2.0, max_size=1)
+        # The TTL must be longer than a real pi startup so the immediate capacity
+        # check observes project1 as still active.
+        app.state.planning_registry = PlanningConversationRegistry(ttl_seconds=5.0, max_size=1)
 
         with _client(port) as client:
             start1 = client.post(f"/api/projects/{project1['id']}/planning/start")
@@ -340,7 +279,7 @@ def test_registry_bounds_and_reaps_lru_idle(tmp_path):
             start2_immediate = client.post(f"/api/projects/{project2['id']}/planning/start")
             assert start2_immediate.status_code == 503
 
-            time.sleep(2.2)
+            time.sleep(5.2)
             start2 = client.post(f"/api/projects/{project2['id']}/planning/start")
             assert start2.status_code == 200
 

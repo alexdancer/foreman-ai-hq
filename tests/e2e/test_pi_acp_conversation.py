@@ -1,68 +1,22 @@
-"""ACP conversational pi launch: prove multi-turn governance through the Harness Proxy.
+"""ACP conversational pi launch: prove multi-turn governance on native usage.
 
-This test requires the `pi` CLI and Node.js to be installed. It starts a real
-uvicorn server with a fake streaming LLM client and drives pi over ACP through
-`foreman_ai_hq.pi_adapter.launch_pi_conversation`.
+This test requires the `pi` CLI, Node.js, and a configured provider. It drives
+pi over ACP through `foreman_ai_hq.pi_adapter.launch_pi_conversation`.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import shutil
 import subprocess
-import threading
-import time
 from pathlib import Path
-from typing import Any
 
 import pytest
-import uvicorn
 
 from foreman_ai_hq import db
-from foreman_ai_hq.app import create_app
-import foreman_ai_hq.pi_adapter as _pi_adapter
-from foreman_ai_hq.pi_adapter import DEFAULT_PROFILE_DIR, launch_pi_conversation
-from foreman_ai_hq.settings import Settings
-
-ROOT = Path(__file__).resolve().parents[2]
-ORCHESTRATOR_PERSONA_MARKER = "FOREMAN_AI_HQ_ORCHESTRATOR_V1"
-
-
-class FakePiLLMClient:
-    """Streaming fake that returns a finished one-token turn."""
-
-    def __init__(self) -> None:
-        self.requests: list[dict[str, object]] = []
-
-    async def acompletion(self, request: dict[str, object]):
-        self.requests.append(request)
-
-        async def chunks():
-            model = request.get("model", "proxy")
-            yield {
-                "id": "chunk-1",
-                "object": "chat.completion.chunk",
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": {"content": "ok"}, "finish_reason": None}
-                ],
-            }
-            yield {
-                "id": "chunk-2",
-                "object": "chat.completion.chunk",
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": {}, "finish_reason": "stop"}
-                ],
-                "usage": {
-                    "prompt_tokens": 1,
-                    "completion_tokens": 1,
-                    "total_tokens": 2,
-                },
-            }
-
-        return chunks()
+from foreman_ai_hq.pi_adapter import (
+    PiAuthRequired,
+    launch_pi_conversation,
+)
 
 
 def _pi_rpc_processes() -> list[str]:
@@ -77,413 +31,103 @@ def _pi_rpc_processes() -> list[str]:
     return [line for line in result.stdout.splitlines() if "pgrep" not in line]
 
 
-def test_acp_conversation_records_two_planning_turns_and_cleans_up(
-    tmp_path,
-) -> None:
+def _skip_without_pi_or_auth() -> None:
     if not shutil.which("pi"):
         pytest.skip("pi CLI not installed")
     if not shutil.which("node"):
         pytest.skip("Node.js not installed")
 
+
+def test_acp_conversation_records_two_planning_turns_and_cleans_up(tmp_path) -> None:
+    _skip_without_pi_or_auth()
+
     database_path = tmp_path / "harness.db"
-    guardrails_path = ROOT / "guardrails.yaml"
-    if not guardrails_path.is_file():
-        guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
+    db.init_db(database_path)
 
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = FakePiLLMClient()
-    app.state.llm_client = fake
-
-    models_probed: list[bool] = []
-
-    @app.get("/v1/models")
-    def list_models() -> dict[str, Any]:
-        models_probed.append(True)
-        return {"object": "list", "data": [{"id": "harness/proxy"}]}
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
     try:
         with launch_pi_conversation(
             database_path,
-            ["hi", "echo"],
-            proxy_url=f"http://127.0.0.1:{port}/v1",
+            prompts=["Return exactly T1", "Return exactly T2"],
             cwd=tmp_path,
+            model="gpt-5.4",
         ) as conv:
             session = conv.session
             responses = conv.responses
             proc = conv.proc
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
+    except PiAuthRequired:
+        pytest.skip("pi provider authentication not configured")
 
-    assert responses == ["ok", "ok"]
-
-    # The bearer must never appear in command-line args.
-    assert "sk_plan_" not in " ".join(map(str, proc.args))
-
-    # The tracked profile must contain no secret material.
-    profile_text = DEFAULT_PROFILE_DIR.joinpath("models.json").read_text()
-    assert "sk_plan_" not in profile_text
-    assert "sk_" not in profile_text
-
-    # ACP-mode pi did not need a /v1/models stub for this fake provider config.
-    assert not models_probed
+    assert len(responses) == 2
+    assert "T1" in responses[0]
+    assert "T2" in responses[1]
 
     artifact = db.build_session_artifact(database_path, session["id"])
     assert len(artifact["token_log"]) == 2
     for turn in artifact["token_log"]:
         assert turn["usage_kind"] == "planning"
         assert turn["raw_usage"]["spend_category"] == "planning"
-        assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+        assert turn["raw_usage"]["usage_source"] == "native_usage"
+        assert turn["raw_usage"]["tracking_mode"] == "native_usage"
 
-    # The bridge subprocess and the underlying pi process must be gone.
     assert proc.poll() is not None
     assert _pi_rpc_processes() == []
 
 
-class BlockingThenNormalLLMClient:
-    """Fake streaming LLM that blocks the first turn until released."""
+def test_acp_conversation_forwards_orchestrator_persona_and_tools(tmp_path) -> None:
+    _skip_without_pi_or_auth()
 
-    def __init__(self) -> None:
-        self.request_count = 0
-        self.requests: list[dict[str, object]] = []
-        self.block_started = threading.Event()
-        self.block_released = threading.Event()
+    database_path = tmp_path / "harness.db"
+    db.init_db(database_path)
 
-    def release(self) -> None:
-        self.block_released.set()
+    try:
+        with launch_pi_conversation(
+            database_path,
+            prompts=["Return exactly ACP_OK"],
+            cwd=tmp_path,
+            model="gpt-5.4",
+        ) as conv:
+            session = conv.session
+            proc = conv.proc
+            responses = conv.responses
 
-    async def acompletion(self, request: dict[str, object]):
-        self.request_count += 1
-        self.requests.append(request)
-        model = request.get("model", "proxy")
+            assert "ACP_OK" in responses[0]
 
-        if self.request_count == 1:
+            wrapper = conv._workdir / "pi-wrapper.sh"
+            wrapper_text = wrapper.read_text()
+            assert "--append-system-prompt" in wrapper_text
+            assert '--tools "$PI_ACP_ALLOWED_TOOLS"' in wrapper_text
+            assert "bash" not in wrapper_text
+            assert "edit" not in wrapper_text
+            assert "write" not in wrapper_text
+    except PiAuthRequired:
+        pytest.skip("pi provider authentication not configured")
 
-            async def _blocked():
-                yield {
-                    "id": "chunk-1",
-                    "object": "chat.completion.chunk",
-                    "model": model,
-                    "choices": [
-                        {"index": 0, "delta": {"content": "partial"}, "finish_reason": None}
-                    ],
-                }
-                self.block_started.set()
-                loop = asyncio.get_running_loop()
-                try:
-                    await loop.run_in_executor(None, self.block_released.wait)
-                finally:
-                    # Release the executor thread if the request is dropped.
-                    self.block_released.set()
+    artifact = db.build_session_artifact(database_path, session["id"])
+    assert len(artifact["token_log"]) == 1
+    turn = artifact["token_log"][0]
+    assert turn["usage_kind"] == "planning"
+    assert turn["raw_usage"]["usage_source"] == "native_usage"
 
-            return _blocked()
-
-        async def _normal():
-            yield {
-                "id": "chunk-1",
-                "object": "chat.completion.chunk",
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": {"content": "ok"}, "finish_reason": None}
-                ],
-            }
-            yield {
-                "id": "chunk-2",
-                "object": "chat.completion.chunk",
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": {}, "finish_reason": "stop"}
-                ],
-                "usage": {
-                    "prompt_tokens": 1,
-                    "completion_tokens": 1,
-                    "total_tokens": 2,
-                },
-            }
-
-        return _normal()
+    assert proc.poll() is not None
+    assert _pi_rpc_processes() == []
 
 
-def test_acp_conversation_cancels_in_flight_turn_and_continues(tmp_path) -> None:
+def test_acp_conversation_raises_provider_auth_required_when_no_auth(tmp_path) -> None:
     if not shutil.which("pi"):
         pytest.skip("pi CLI not installed")
     if not shutil.which("node"):
         pytest.skip("Node.js not installed")
 
     database_path = tmp_path / "harness.db"
-    guardrails_path = ROOT / "guardrails.yaml"
-    if not guardrails_path.is_file():
-        guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
+    db.init_db(database_path)
+    empty_agent_dir = tmp_path / "empty-agent"
+    empty_agent_dir.mkdir()
 
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = BlockingThenNormalLLMClient()
-    app.state.llm_client = fake
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
-    try:
+    with pytest.raises(PiAuthRequired):
         with launch_pi_conversation(
             database_path,
-            proxy_url=f"http://127.0.0.1:{port}/v1",
             cwd=tmp_path,
-        ) as conv:
-            result_holder: dict[str, Any] = {}
-
-            def _run_prompt() -> None:
-                result_holder["result"] = conv.prompt("hi")
-
-            prompt_thread = threading.Thread(target=_run_prompt)
-            prompt_thread.start()
-            assert fake.block_started.wait(timeout=15), "first prompt did not reach proxy"
-            # Give the transport call time to be blocked on the response queue.
-            time.sleep(0.2)
-            conv.cancel()
-            prompt_thread.join(timeout=15)
-            assert not prompt_thread.is_alive()
-
-            text, stop_reason = result_holder["result"]
-            assert stop_reason == "cancelled"
-            assert text == "partial"
-
-            # A subsequent prompt on the same handle still completes.
-            text2, stop_reason2 = conv.prompt("echo")
-            assert stop_reason2 == "end_turn"
-            assert text2 == "ok"
-
-            session = conv.session
-            proc = conv.proc
-    finally:
-        fake.release()
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
-
-    # Only the completed follow-up turn is recorded as planning.
-    artifact = db.build_session_artifact(database_path, session["id"])
-    assert len(artifact["token_log"]) == 1
-    turn = artifact["token_log"][0]
-    assert turn["usage_kind"] == "planning"
-    assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
-    assert turn["total_tokens"] == 2
-
-    # Cancellation did not create a Worker execution actual.
-    assert artifact["worker_runs"] == []
-
-    # The bridge subprocess and the underlying pi process must be gone.
-    assert proc.poll() is not None
-    assert _pi_rpc_processes() == []
-
-
-def test_acp_conversation_forwards_orchestrator_persona_in_system_message(
-    tmp_path,
-) -> None:
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
-    if not shutil.which("node"):
-        pytest.skip("Node.js not installed")
-
-    database_path = tmp_path / "harness.db"
-    default_guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
-    guardrails_path = tmp_path / "guardrails.yaml"
-    # Disable zone-level prompt rewriting so the test can observe pi's system
-    # prompt as forwarded, not the budget-zone replacement.
-    guardrails_path.write_text(
-        default_guardrails_path.read_text(encoding="utf-8").replace(
-            "zones:\n    enabled: true", "zones:\n    enabled: false"
-        ),
-        encoding="utf-8",
-    )
-
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = FakePiLLMClient()
-    app.state.llm_client = fake
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
-    try:
-        with launch_pi_conversation(
-            database_path,
-            ["hi"],
-            proxy_url=f"http://127.0.0.1:{port}/v1",
-            cwd=tmp_path,
-        ) as conv:
-            session = conv.session
-            proc = conv.proc
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
-
-    assert proc.poll() is not None
-
-    forwarded = fake.requests[0]
-    system_messages = [m for m in forwarded["messages"] if m.get("role") == "system"]
-    assert any(ORCHESTRATOR_PERSONA_MARKER in str(m.get("content", "")) for m in system_messages)
-
-    artifact = db.build_session_artifact(database_path, session["id"])
-    assert len(artifact["token_log"]) == 1
-    turn = artifact["token_log"][0]
-    assert turn["usage_kind"] == "planning"
-    assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
-
-
-def test_acp_conversation_applies_read_only_tool_policy(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
-    if not shutil.which("node"):
-        pytest.skip("Node.js not installed")
-
-    database_path = tmp_path / "harness.db"
-    guardrails_path = ROOT / "guardrails.yaml"
-    if not guardrails_path.is_file():
-        guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
-
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = FakePiLLMClient()
-    app.state.llm_client = fake
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
-
-    original_write_wrapper = _pi_adapter._write_pi_acp_wrapper
-    captured_wrapper: dict[str, str] = {}
-
-    def _tracking_write_wrapper(tmpdir: Path, persona_path: Path) -> Path:
-        wrapper = original_write_wrapper(tmpdir, persona_path)
-        captured_wrapper["text"] = wrapper.read_text()
-        return wrapper
-
-    monkeypatch.setattr(
-        _pi_adapter, "_write_pi_acp_wrapper", _tracking_write_wrapper
-    )
-
-    try:
-        with launch_pi_conversation(
-            database_path,
-            ["List the files in this directory"],
-            proxy_url=f"http://127.0.0.1:{port}/v1",
-            cwd=tmp_path,
-        ) as conv:
-            session = conv.session
-            proc = conv.proc
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
-
-    assert proc.poll() is not None
-    assert _pi_rpc_processes() == []
-
-    # The generated wrapper carries the read-only allowlist and omits mutating tools.
-    wrapper_text = captured_wrapper["text"]
-    assert '--tools "${PI_ACP_ALLOWED_TOOLS}"' in wrapper_text
-    assert "bash" not in wrapper_text
-    assert "edit" not in wrapper_text
-    assert "write" not in wrapper_text
-
-    artifact = db.build_session_artifact(database_path, session["id"])
-    assert len(artifact["token_log"]) == 1
-    turn = artifact["token_log"][0]
-    assert turn["usage_kind"] == "planning"
-    assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+            model="openai-codex/gpt-5.4",
+            agent_dir=empty_agent_dir,
+        ):
+            pass

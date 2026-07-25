@@ -27,7 +27,12 @@ export function PlanningChatState({
 }) {
   const safeError = (err) => {
     if (!err) return null;
-    if (err.status === 401) return "Planning Chat requires sign-in.";
+    if (err.status === 401) {
+      if (typeof err.message === "string" && err.message.toLowerCase().includes("provider")) {
+        return err.message;
+      }
+      return "Planning Chat requires sign-in.";
+    }
     if (err.status === 503) return err.message || "Planning conversation capacity full.";
     if (err.status === 404) return started ? "Planning conversation is no longer active." : "Project not found.";
     return err.message || "Could not load Planning Chat.";
