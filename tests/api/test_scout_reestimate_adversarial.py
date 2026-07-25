@@ -23,6 +23,7 @@ from foreman_ai_hq.needs_you import _redact_findings_text, build_findings_excerp
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_kind import read_task_kind
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,6 +41,7 @@ class FakeEstimatorLLM:
             "shadow_token_estimate": 9000,
             "complexity": "modest",
             "confidence": 0.85,
+            "investigation_recommended": False,
             "rationale": "Scout findings reduce uncertainty.",
             "assumptions": ["Findings are representative."],
             "risk_flags": [],
@@ -87,7 +89,7 @@ def _request(client: TestClient, llm: FakeEstimatorLLM):
             state=SimpleNamespace(
                 settings=client.app.state.settings,
                 guardrails=load_guardrails(ROOT / "guardrails.yaml"),
-                llm_client=llm,
+                orchestrator_job_runner=FakeOrchestratorJobRunner(llm),
             )
         )
     )
@@ -300,7 +302,7 @@ async def test_concurrent_request_reestimate_races_to_one_attempt(tmp_path):
     parent = _parent_task(db_path, project)
     llm = FakeEstimatorLLM(delay=0.05)
     request = _request(client, llm)
-    sessions_before = len(db.list_sessions(db_path))
+    sessions_before = len(db.list_sessions(db_path, kind=None))
 
     async def call():
         try:
@@ -322,7 +324,7 @@ async def test_concurrent_request_reestimate_races_to_one_attempt(tmp_path):
     assert pending is not None
     assert pending["state"] in ("ready", "running")
     assert "started_at" in pending
-    assert len(db.list_sessions(db_path)) == sessions_before + 1
+    assert len(db.list_sessions(db_path, kind=None)) == sessions_before + 1
 
 
 @pytest.mark.asyncio
@@ -340,7 +342,8 @@ async def test_request_reestimate_records_estimation_token_turn(tmp_path):
     artifact = db.build_session_artifact(db_path, session_id)
     assert len(artifact["token_log"]) == 1
     assert artifact["token_log"][0]["usage_kind"] == "estimation"
-    assert artifact["token_log"][0]["raw_usage"]["spend_category"] == "orchestration"
+    assert artifact["token_log"][0]["raw_usage"]["spend_category"] == "control_plane"
+    assert artifact["token_log"][0]["raw_usage"]["usage_source"] == "native_usage"
     assert artifact["token_log"][0]["total_tokens"] == 70
 
 

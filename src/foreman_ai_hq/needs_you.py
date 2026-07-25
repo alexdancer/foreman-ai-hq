@@ -25,7 +25,10 @@ def is_low_confidence(metadata: dict[str, Any] | None) -> bool:
     """Return True when an automatic estimate has a confidence below the advisory threshold."""
     metadata = metadata if isinstance(metadata, dict) else {}
     confidence = _as_finite_confidence(metadata.get("confidence"))
-    if confidence is None or confidence >= LOW_CONFIDENCE_THRESHOLD:
+    investigation_recommended = metadata.get("investigation_recommended") is True
+    if confidence is None or (
+        confidence >= LOW_CONFIDENCE_THRESHOLD and not investigation_recommended
+    ):
         return False
     source = str(metadata.get("estimation_source") or "")
     if source in ("manual", "manual_required", "manual_estimate"):
@@ -301,13 +304,18 @@ def low_confidence_item(
     pending = _pending_reestimate(metadata)
     actions = _decision_actions(state, project_id, task["id"], task_kind, estimate_revision, scout, pending, session_href)
     scout_id = None if state == "scout_unavailable" else _linked_scout_id(metadata)
+    investigation_recommended = metadata.get("investigation_recommended") is True
+    reason = (
+        f"Automatic estimate confidence is {confidence:.2f}, which is below the advisory threshold of {LOW_CONFIDENCE_THRESHOLD:.2f}. "
+        if confidence < LOW_CONFIDENCE_THRESHOLD
+        else "Estimator explicitly recommends repository investigation before relying on this estimate. "
+    )
     return {
         "id": f"task:{task['id']}:low_confidence_estimate"[:200],
         "kind": "low_confidence_estimate",
-        "title": "Low confidence estimate"[:200],
+        "title": ("Investigation recommended" if investigation_recommended else "Low confidence estimate")[:200],
         "reason": _bounded(
-            f"Automatic estimate confidence is {confidence:.2f}, which is below the advisory threshold of {LOW_CONFIDENCE_THRESHOLD:.2f}. "
-            "Review the estimate, enter a manual value, or create a linked Scout to gather more information.",
+            reason + "Review the estimate, enter a manual value, or create a linked Scout to gather more information.",
             1000,
         ),
         "created_at": _bounded(task.get("created_at"), 64) or None,

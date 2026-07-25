@@ -1,17 +1,17 @@
 ## ADDED Requirements
 
 ### Requirement: Estimation and task breakdown run as Orchestrator agent turns
-The system SHALL conduct Task Estimation and Task Breakdown as Orchestrator agent turns on the Orchestrator's own configured model provider, rather than as single-shot direct model calls. Each job SHALL run with its own persona and its own read-only tool allowlist; neither SHALL be able to write code, run a shell, or launch Workers. The spend of each job SHALL be accounted from the runtime's native usage evidence as Orchestration Tokens, labeled `estimation` or `task breakdown`, held separate from Worker execution spend.
+The system SHALL conduct Task Estimation and Task Breakdown as Orchestrator agent turns on the Orchestrator's own configured model provider, rather than as single-shot direct model calls. Each job SHALL run with its own persona and its own read-only tool allowlist; neither SHALL be able to write code, run a shell, or launch Workers. The spend of each job SHALL be accounted from the runtime's native usage evidence as Orchestration Tokens whose usage kind is `estimation` or `task_breakdown`, held separate from Worker execution spend. Each job's existing spend category SHALL be preserved (`control_plane` for estimation, `task_breakdown` for task breakdown), so orchestration rollups are unchanged by the move onto the Orchestrator runtime.
 
 #### Scenario: Estimation runs as an agent turn accounted from native usage
 - **WHEN** the Harness performs Task Estimation
 - **THEN** it SHALL run as an Orchestrator agent turn on the Orchestrator's own provider
-- **AND** its spend SHALL be accounted from native usage as Orchestration Tokens labeled `estimation`, separate from Worker execution actuals
+- **AND** its spend SHALL be accounted from native usage as an Orchestration Token turn with usage kind `estimation` and spend category `control_plane`, separate from Worker execution actuals
 
 #### Scenario: Task breakdown runs as an agent turn accounted from native usage
 - **WHEN** the Harness performs Task Breakdown
 - **THEN** it SHALL run as an Orchestrator agent turn on the Orchestrator's own provider
-- **AND** its spend SHALL be accounted from native usage as Orchestration Tokens labeled `task breakdown`, separate from Worker execution actuals
+- **AND** its spend SHALL be accounted from native usage as an Orchestration Token turn with usage kind `task_breakdown` and spend category `task_breakdown`, separate from Worker execution actuals
 
 #### Scenario: The jobs cannot write code or launch Workers
 - **WHEN** an estimation or task-breakdown agent turn runs

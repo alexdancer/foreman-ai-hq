@@ -19,7 +19,7 @@ Task Slicing Policy:
 """.strip()
 
 TASK_BREAKDOWN_OUTPUT_SCHEMA = """
-Return ONLY valid JSON with exactly these top-level fields:
+Call submit_breakdown exactly once with exactly these top-level fields:
 - decision: single_task or proposed_task_breakdown
 - candidates: array of candidate objects
 - rejected_items: array of objects with text and reason

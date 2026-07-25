@@ -12,7 +12,6 @@ from fastapi import HTTPException, Request
 
 from foreman_ai_hq import db
 from foreman_ai_hq.estimation import estimate_task, EstimatorError, EstimateResult
-from foreman_ai_hq.llm import extract_usage, resolve_cost, response_to_dict
 from foreman_ai_hq.model_routing import route_worker_model, WorkerModelRoutingResult
 from foreman_ai_hq.project_context import project_task_metadata, resolve_task_project, task_matches_project
 from foreman_ai_hq.task_kind import read_task_kind
@@ -291,10 +290,11 @@ async def create_scout_for_task(
     estimator_model = settings.estimator_model
     adapter = _selected_worker_adapter(database_path, None)
     try:
-        result, llm_response = await estimate_task(
+        result, job_result = await estimate_task(
             scout["description"],
             request.app.state.guardrails,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
             estimator_model=estimator_model,
             project_root=project.get("root_path"),
             project_profile=project.get("profile") or {},
@@ -329,14 +329,7 @@ async def create_scout_for_task(
             next_href=_safe_href(f"/projects/{project_id}#task-{scout_id}"),
         )
 
-    estimation_session = db.create_session(
-        database_path,
-        task_description=scout["description"],
-        model=estimator_model,
-        session_key_hash=_hash(f"scout-estimation:{scout_id}:{scout['description']}"),
-        guardrail_overrides={},
-        status="completed",
-    )
+    estimation_session = job_result.session
     model_routing = route_worker_model(
         request.app.state.guardrails,
         complexity=result.complexity,
@@ -360,6 +353,7 @@ async def create_scout_for_task(
         "shadow_token_estimate": result.shadow_token_estimate,
         "estimate_disagreement": result.estimate_disagreement,
         "coefficient_provenance": result.coefficient_provenance,
+        "investigation_recommended": result.investigation_recommended,
         "estimation_state": "estimated",
         "session_id": estimation_session["id"],
         **model_routing.metadata,
@@ -387,25 +381,6 @@ async def create_scout_for_task(
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _record_reestimate_token_turn(
-    database_path: Path | str,
-    session_id: str,
-    estimator_model: str,
-    llm_response: Any,
-) -> None:
-    usage = extract_usage(llm_response)
-    db.record_token_turn(
-        database_path,
-        session_id=session_id,
-        usage_kind="estimation",
-        model=estimator_model,
-        prompt_tokens=usage["prompt_tokens"],
-        completion_tokens=usage["completion_tokens"],
-        cost=resolve_cost(estimator_model, llm_response),
-        raw_usage={**usage, "response": response_to_dict(llm_response), "spend_category": "orchestration"},
-    )
 
 
 def _model_allowed_for_task(database_path: Path | str, model: str, adapter_id: str | None = None) -> bool:
@@ -464,7 +439,7 @@ def _claim_initial_reestimate(
                 _hash(f"reestimate:{task_id}:{pending['scout_task_id']}:{pending['attempt_id']}"),
                 pending["started_at"],
                 "running",
-                _to_json({}),
+                _to_json({"session_kind": "planning", "tracking_mode": "native_usage"}),
             ),
         )
         metadata["pending_reestimate"] = pending
@@ -511,6 +486,9 @@ def _claim_retry_reestimate(
             "update tasks set metadata_json = ? where id = ?",
             (_to_json(metadata), task_id),
         )
+        session_id = str(claimed.get("session_id") or "")
+        if session_id:
+            conn.execute("update sessions set status = 'running' where id = ?", (session_id,))
     return claimed
 
 
@@ -601,10 +579,12 @@ async def request_scout_reestimate(
     )
     adapter = _selected_worker_adapter(database_path, None)
     try:
-        result, llm_response = await estimate_task(
+        result, job_result = await estimate_task(
             task["description"],
             request.app.state.guardrails,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
+            existing_session_id=session_id,
             estimator_model=estimator_model,
             project_root=project.get("root_path"),
             project_profile=project.get("profile") or {},
@@ -624,8 +604,6 @@ async def request_scout_reestimate(
         _set_pending_reestimate(database_path, task_id, failed_pending)
         raise HTTPException(status_code=503, detail="re-estimation unavailable") from exc
 
-    _record_reestimate_token_turn(database_path, session_id, estimator_model, llm_response)
-    db.update_session_status(database_path, session_id, "completed")
     model_routing = route_worker_model(
         request.app.state.guardrails,
         complexity=result.complexity,
@@ -651,6 +629,7 @@ async def request_scout_reestimate(
             "shadow_token_estimate": result.shadow_token_estimate,
             "estimate_disagreement": result.estimate_disagreement,
             "coefficient_provenance": result.coefficient_provenance,
+            "investigation_recommended": result.investigation_recommended,
         },
     }
     _set_pending_reestimate(database_path, task_id, ready_pending)
@@ -700,6 +679,7 @@ def apply_reestimate(
         shadow_token_estimate=int(result_data.get("shadow_token_estimate") or 0),
         estimate_disagreement=float(result_data.get("estimate_disagreement") or 0.0),
         coefficient_provenance=dict(result_data.get("coefficient_provenance") or {}),
+        investigation_recommended=bool(result_data.get("investigation_recommended")),
     )
     model_routing = WorkerModelRoutingResult(
         selected_model=recommended_model,
@@ -810,10 +790,12 @@ async def retry_reestimate(
     estimator_model = settings.estimator_model
     adapter = _selected_worker_adapter(database_path, None)
     try:
-        result, llm_response = await estimate_task(
+        result, job_result = await estimate_task(
             task["description"],
             request.app.state.guardrails,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
+            existing_session_id=str(pending.get("session_id") or "") or None,
             estimator_model=estimator_model,
             project_root=project.get("root_path"),
             project_profile=project.get("profile") or {},
@@ -833,9 +815,6 @@ async def retry_reestimate(
         _set_pending_reestimate(database_path, task_id, failed_pending)
         raise HTTPException(status_code=503, detail="re-estimation unavailable") from exc
 
-    session_id = str(pending.get("session_id") or "")
-    if session_id:
-        _record_reestimate_token_turn(database_path, session_id, estimator_model, llm_response)
     model_routing = route_worker_model(
         request.app.state.guardrails,
         complexity=result.complexity,
@@ -861,6 +840,7 @@ async def retry_reestimate(
             "shadow_token_estimate": result.shadow_token_estimate,
             "estimate_disagreement": result.estimate_disagreement,
             "coefficient_provenance": result.coefficient_provenance,
+            "investigation_recommended": result.investigation_recommended,
         },
     }
     _set_pending_reestimate(database_path, task_id, ready_pending)

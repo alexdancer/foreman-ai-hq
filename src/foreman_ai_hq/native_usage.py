@@ -467,6 +467,33 @@ def extract_pi_assistant_text(text: str) -> str:
     return "".join(chunks)
 
 
+def extract_pi_successful_tool_calls(text: str, *, tool_name: str) -> list[dict[str, Any]]:
+    """Return schema-validated successful calls for one tool from a pi JSON stream."""
+    starts: dict[str, dict[str, Any]] = {}
+    successful: set[str] = set()
+    for item in _parse_json_stream(text):
+        if not isinstance(item, dict):
+            continue
+        call_id = item.get("toolCallId")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        if item.get("type") == "tool_execution_start" and item.get("toolName") == tool_name:
+            args = item.get("args")
+            if not isinstance(args, dict):
+                continue
+            previous = starts.get(call_id)
+            if previous is not None and previous != args:
+                raise ValueError(f"conflicting arguments for {tool_name} call {call_id}")
+            starts[call_id] = args
+        elif (
+            item.get("type") == "tool_execution_end"
+            and item.get("toolName") == tool_name
+            and item.get("isError") is False
+        ):
+            successful.add(call_id)
+    return [starts[call_id] for call_id in starts if call_id in successful]
+
+
 def _looks_like_usage_key(key: str) -> bool:
     normalized = key.lower()
     return normalized in {

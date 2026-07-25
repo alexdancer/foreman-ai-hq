@@ -437,10 +437,11 @@ async def _estimate_and_create_task(
         task_kind = read_task_kind(extra_metadata) if extra_metadata else DEFAULT_TASK_KIND
     try:
         project_root = (extra_metadata or {}).get("project_root_path")
-        result, llm_response = await estimate_task(
+        result, job_result = await estimate_task(
             description,
             request.app.state.guardrails,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
             estimator_model=estimator_model,
             remaining_daily_tokens=remaining_daily_tokens,
             daily_cap_tokens=daily_cap_tokens,
@@ -470,25 +471,7 @@ async def _estimate_and_create_task(
             },
         )
 
-    estimation_session = db.create_session(
-        database_path,
-        task_description=description,
-        model=estimator_model,
-        session_key_hash=_estimation_session_key_hash(description),
-        guardrail_overrides={},
-        status="completed",
-    )
-    usage = extract_usage(llm_response)
-    db.record_token_turn(
-        database_path,
-        session_id=estimation_session["id"],
-        usage_kind="estimation",
-        model=estimator_model,
-        prompt_tokens=usage["prompt_tokens"],
-        completion_tokens=usage["completion_tokens"],
-        cost=resolve_cost(estimator_model, llm_response),
-        raw_usage={**usage, "response": response_to_dict(llm_response)},
-    )
+    estimation_session = job_result.session
     # Route Worker model choice after estimation so allowlists and budgets can constrain it.
     model_routing = route_worker_model(
         request.app.state.guardrails,
@@ -512,6 +495,7 @@ async def _estimate_and_create_task(
         "shadow_token_estimate": result.shadow_token_estimate,
         "estimate_disagreement": result.estimate_disagreement,
         "coefficient_provenance": result.coefficient_provenance,
+        "investigation_recommended": result.investigation_recommended,
         **(extra_metadata or {}),
         **model_routing.metadata,
         "task_kind": task_kind,
@@ -1070,35 +1054,17 @@ async def _task_breakdown_agent_updates(
     model = settings.task_breakdown_model
     repo_context, repo_context_evidence = _build_breakdown_repo_context(intake_metadata)
     try:
-        result, response = await breakdown_task_source(
+        result, job_result = await breakdown_task_source(
             description,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
             task_breakdown_model=model,
             intake_metadata=intake_metadata,
             structure_hints=_markdown_task_items(description),
             repo_context=repo_context,
             timeout_seconds=settings.task_breakdown_timeout_seconds,
         )
-        session = db.create_session(
-            database_path,
-            task_description=f"Task breakdown review for {source_sha256[:12]}",
-            model=model,
-            session_key_hash=_task_breakdown_session_key_hash(source_sha256),
-            guardrail_overrides={"spend_category": "task_breakdown"},
-            status="completed",
-        )
-        response_body = response_to_dict(response)
-        usage = extract_usage(response_body)
-        db.record_token_turn(
-            database_path,
-            session_id=session["id"],
-            usage_kind="task_breakdown",
-            model=model,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
-            cost=resolve_cost(model, response_body),
-            raw_usage={**usage, "spend_category": "task_breakdown", "usage_source": "control_plane"},
-        )
+        session = job_result.session
         payload = result.as_dict()
         return {
             "status": "proposed",
@@ -1128,7 +1094,7 @@ async def _task_breakdown_agent_updates(
             "status": "failed",
             "decision": "manual_required",
             "model": model,
-            "session_id": None,
+            "session_id": getattr(exc, "session_id", None),
             "candidates": [],
             "rejected_items": [],
             "global_contract_summary": "",
@@ -1556,10 +1522,6 @@ def _textarea_lines(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
-def _task_breakdown_session_key_hash(source_sha256: str) -> str:
-    return hashlib.sha256(f"task-breakdown:v1:{source_sha256}:{_now_iso()}".encode("utf-8")).hexdigest()
-
-
 async def _description_from_intake_form(
     description: str, markdown_file: UploadFile | None
 ) -> tuple[str, dict[str, Any]]:
@@ -1984,11 +1946,6 @@ def _now_iso() -> str:
 
 def _current_day_start_iso(timezone: str) -> str:
     return db.current_day_start_iso(timezone)
-
-
-def _estimation_session_key_hash(description: str) -> str:
-    stable_key = f"estimation:v1:{description}"
-    return hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
 
 
 def _form_project_id(form: Any) -> str | None:
