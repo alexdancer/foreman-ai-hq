@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 from datetime import UTC, datetime
 
@@ -756,6 +757,47 @@ def test_create_planning_session_returns_bearer_key_and_kind(tmp_path):
     assert bearer_key.startswith("sk_plan_")
     loaded = db.get_session_by_key_hash(db_path, session["session_key_hash"])
     assert db.read_session_kind(loaded) == "planning"
+
+
+def test_create_planning_session_mints_no_bearer_for_native_usage(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+
+    session, bearer_key = db.create_planning_session(
+        db_path,
+        task_description="Native planning anchor",
+        model="gpt-5.4",
+        tracking_mode="native_usage",
+    )
+
+    assert bearer_key == ""
+    assert db.read_session_kind(session) == "planning"
+    assert session["guardrail_overrides"]["tracking_mode"] == "native_usage"
+    # No bearer can hash to this marker, so the session cannot authenticate to the proxy.
+    assert session["session_key_hash"].startswith("native-planning:")
+    assert session["session_key_hash"] != hashlib.sha256(b"").hexdigest()
+
+    # The mode is readable through the canonical reader and stated in the evidence
+    # record, before any turn lands.
+    assert db.read_session_tracking_mode(session) == "native_usage"
+    artifact = db.build_session_artifact(db_path, session["id"])
+    assert artifact["tracking_mode"] == "native_usage"
+    assert artifact["token_log"] == []
+
+
+def test_session_tracking_mode_defaults_to_proxy_governed(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="Worker session",
+        model="claude-haiku",
+        session_key_hash="worker-hash",
+        guardrail_overrides={},
+    )
+
+    assert db.read_session_tracking_mode(session) == "proxy_governed"
+    assert db.build_session_artifact(db_path, session["id"])["tracking_mode"] == "proxy_governed"
 
 
 def test_list_sessions_excludes_planning_by_default(tmp_path):

@@ -521,15 +521,25 @@ def create_planning_session(
     *,
     task_description: str,
     model: str,
+    tracking_mode: str = "proxy_governed",
 ) -> tuple[dict[str, Any], str]:
-    """Create a planning-kind metering-anchor session and return (session, bearer_key)."""
-    bearer_key = f"sk_plan_{uuid.uuid4().hex}"
+    """Create a planning-kind metering-anchor session and return (session, bearer_key).
+
+    A ``native_usage`` planning session never authenticates to the proxy, so no bearer
+    is minted for it and its key hash is a marker no bearer can hash to.
+    """
+    if tracking_mode == "native_usage":
+        bearer_key = ""
+        session_key_hash = f"native-planning:{uuid.uuid4().hex}"
+    else:
+        bearer_key = f"sk_plan_{uuid.uuid4().hex}"
+        session_key_hash = hashlib.sha256(bearer_key.encode("utf-8")).hexdigest()
     session = create_session(
         path,
         task_description=task_description,
         model=model,
-        session_key_hash=hashlib.sha256(bearer_key.encode("utf-8")).hexdigest(),
-        guardrail_overrides={},
+        session_key_hash=session_key_hash,
+        guardrail_overrides={"tracking_mode": tracking_mode},
         status="running",
         session_kind="planning",
     )
@@ -1504,6 +1514,11 @@ def read_session_kind(session: dict[str, Any]) -> str:
     return str((session.get("guardrail_overrides") or {}).get("session_kind") or "worker")
 
 
+def read_session_tracking_mode(session: dict[str, Any]) -> str:
+    """Canonical session tracking-mode reader. Legacy sessions default to 'proxy_governed'."""
+    return str((session.get("guardrail_overrides") or {}).get("tracking_mode") or "proxy_governed")
+
+
 def list_sessions(path: Path | str, *, kind: str | None = "worker") -> list[dict[str, Any]]:
     with connect(path) as conn:
         rows = conn.execute("select * from sessions order by started_at, id").fetchall()
@@ -2074,8 +2089,12 @@ def build_session_artifact(path: Path | str, session_id: str) -> dict[str, Any]:
             "select * from worker_run_events where session_id = ? order by created_at, id", (session_id,)
         ).fetchall()
 
+    session = _session_from_row(session_row)
     return {
-        "session": _session_from_row(session_row),
+        "session": session,
+        # How this session's spend was metered, so the evidence record states it even
+        # before any turn lands.
+        "tracking_mode": read_session_tracking_mode(session),
         "token_log": [_token_turn_from_row(row) for row in token_rows],
         "tool_trace": [_tool_trace_from_row(row) for row in tool_trace_rows],
         "alarms": [_alarm_from_row(row) for row in alarm_rows],

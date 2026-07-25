@@ -10,17 +10,24 @@ import subprocess
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
 from foreman_ai_hq import db
+from foreman_ai_hq.native_usage import (
+    NativeUsageEvidence,
+    extract_pi_assistant_text,
+    parse_pi_usage_stream,
+)
 
-DEFAULT_PI_PROVIDER = "harness"
-DEFAULT_PI_MODEL = "harness/proxy"
-PI_HARNESS_API_KEY_ENV = "PI_HARNESS_API_KEY"
+DEFAULT_PI_MODEL = "gpt-5.4"
 PI_ACP_PI_COMMAND_ENV = "PI_ACP_PI_COMMAND"
 PI_ACP_PERSONA_PATH_ENV = "PI_ACP_PERSONA_PATH"
 PI_ACP_ALLOWED_TOOLS_ENV = "PI_ACP_ALLOWED_TOOLS"
+PI_ACP_PROVIDER_ENV = "PI_ACP_PROVIDER"
+PI_ACP_MODEL_ENV = "PI_ACP_MODEL"
+PI_ACP_SESSION_DIR_ENV = "PI_ACP_SESSION_DIR"
 
 PI_ORCHESTRATOR_ALLOWED_TOOLS = ("read", "grep", "find", "ls")
 DEFAULT_PROFILE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "profile"
@@ -28,28 +35,44 @@ DEFAULT_BRIDGE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "
 PI_ACP_PACKAGE = "pi-acp"
 
 
+class PiAuthRequired(RuntimeError):
+    """Raised when pi cannot run because the operator has not authenticated with the provider."""
+
+
+class AcpRuntimeError(RuntimeError):
+    """Raised when the ACP stdio conversation with pi fails."""
+
+
 def _persona_path(profile_dir: Path) -> Path:
     """Return the path to the git-tracked orchestrator persona."""
     return profile_dir / "orchestrator.md"
 
 
-def _write_pi_acp_wrapper(tmpdir: Path, persona_path: Path) -> Path:
-    """Write a generated POSIX wrapper that execs pi with the persona and tool allowlist appended.
+def _default_pi_agent_dir() -> Path:
+    return Path.home() / ".pi" / "agent"
 
-    The wrapper is content-free of policy text; it reads the persona path and
-    comma-joined allowlist from environment variables set by the adapter.
+
+def _pi_default_provider() -> str | None:
+    """Return the default provider from the operator's pi settings, if present."""
+    settings_path = _default_pi_agent_dir() / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return settings.get("defaultProvider") or None
+
+
+def _resolve_pi_provider_model(model: str) -> tuple[str | None, str]:
+    """Split a pi provider/model id into (provider, model_id).
+
+    If the id does not include a provider prefix, fall back to the operator's
+    default pi provider.  This lets ``orchestrator_model`` be written either as
+    ``gpt-5.4`` (when the default provider supports it) or ``openai-codex/gpt-5.4``.
     """
-    wrapper = tmpdir / "pi-wrapper.sh"
-    wrapper.write_text(
-        '#!/bin/sh\nexec pi --append-system-prompt "${PI_ACP_PERSONA_PATH}" --tools "${PI_ACP_ALLOWED_TOOLS}" "$@"\n',
-        encoding="utf-8",
-    )
-    wrapper.chmod(0o755)
-    return wrapper
-
-
-def _default_proxy_url() -> str:
-    return f"http://127.0.0.1:{os.environ.get('PORT', '8000')}/v1"
+    if "/" in model:
+        provider, model_id = model.split("/", 1)
+        return provider, model_id
+    return _pi_default_provider(), model
 
 
 def _pi_acp_command(bridge_dir: Path) -> list[str]:
@@ -58,7 +81,9 @@ def _pi_acp_command(bridge_dir: Path) -> list[str]:
     version = "0.0.31"
     if package_json.is_file():
         try:
-            version = json.loads(package_json.read_text(encoding="utf-8")).get("dependencies", {}).get(PI_ACP_PACKAGE, version)
+            version = json.loads(package_json.read_text(encoding="utf-8")).get(
+                "dependencies", {}
+            ).get(PI_ACP_PACKAGE, version)
         except (json.JSONDecodeError, OSError):
             pass
     local_main = bridge_dir / "node_modules" / PI_ACP_PACKAGE / "dist" / "index.js"
@@ -68,88 +93,129 @@ def _pi_acp_command(bridge_dir: Path) -> list[str]:
 
 
 def _prepare_pi_env(
-    bearer_key: str,
-    proxy_url: str,
-    profile_dir: Path,
-    provider: str,
-    agent_dir: Path,
     sessions_dir: Path,
+    *,
+    agent_dir: Path | None = None,
 ) -> dict[str, str]:
-    """Build the environment for a pi launch with the bearer injected as the provider API key."""
-    source_models = profile_dir / "models.json"
-    if not source_models.is_file():
-        raise FileNotFoundError(f"pi orchestrator profile not found: {source_models}")
+    """Build the environment for a pi launch.
 
-    config = json.loads(source_models.read_text(encoding="utf-8"))
-    provider_config = config.get("providers", {}).get(provider)
-    if provider_config is None:
-        raise KeyError(f"provider '{provider}' not found in pi profile")
-    provider_config["baseUrl"] = proxy_url
-
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    (agent_dir / "models.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    pi reads the operator's real auth from ``PI_CODING_AGENT_DIR`` and writes
+    transient session files to ``PI_CODING_AGENT_SESSION_DIR``.  No provider
+    credentials are written to the repo or a retained tmp dir.
+    """
+    selected_agent_dir = agent_dir or _default_pi_agent_dir()
+    selected_agent_dir.mkdir(parents=True, exist_ok=True)
     sessions_dir.mkdir(parents=True, exist_ok=True)
-
     return {
         **os.environ,
-        "PI_CODING_AGENT_DIR": str(agent_dir),
+        "PI_CODING_AGENT_DIR": str(selected_agent_dir),
         "PI_CODING_AGENT_SESSION_DIR": str(sessions_dir),
-        PI_HARNESS_API_KEY_ENV: bearer_key,
     }
+
+
+def _write_pi_acp_wrapper(
+    tmpdir: Path,
+    persona_path: Path,
+    sessions_dir: Path,
+    provider: str | None,
+    model: str,
+) -> Path:
+    """Write a generated POSIX wrapper that execs pi with provider/model/persona/tools.
+
+    The wrapper is content-free of policy text and secrets; it reads the persona
+    path, allowlist, provider, model, and session dir from environment variables
+    set by the adapter.
+    """
+    wrapper = tmpdir / "pi-wrapper.sh"
+    provider_block = (
+        'if [ -n "$PI_ACP_PROVIDER" ]; then\n  set -- --provider "$PI_ACP_PROVIDER" "$@"\nfi\n'
+        if provider
+        else ""
+    )
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f'{provider_block}'
+        'exec pi --model "$PI_ACP_MODEL" --append-system-prompt "$PI_ACP_PERSONA_PATH" '
+        '--tools "$PI_ACP_ALLOWED_TOOLS" --session-dir "$PI_ACP_SESSION_DIR" --no-approve "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    return wrapper
+
+
+# Markers pi actually emits when the configured provider has no usable credentials.
+# Deliberately narrow: an unrecognized failure must surface as itself, not as a
+# misleading sign-in prompt.
+PI_AUTH_ERROR_MARKERS = (
+    "authentication required",  # ACP session/new with no provider auth configured
+    "no api key found",  # `pi -p` against a provider with no key
+    "use /login",  # pi's own sign-in guidance
+    "invalid api key",
+    "unauthorized",
+)
+
+
+def _is_auth_error(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in PI_AUTH_ERROR_MARKERS)
+
+
+def _raise_for_auth_error(exc: AcpRuntimeError) -> None:
+    message = str(exc)
+    if _is_auth_error(message):
+        raise PiAuthRequired(
+            "Provider authentication required; run `pi /login` or add an API key in pi."
+        ) from exc
+
+
+@dataclass
+class PiOnceResult:
+    """Result of a one-shot pi launch."""
+
+    stdout: str
+    stderr: str
+    returncode: int
+    args: list[str]
 
 
 def launch_pi_once(
     database_path: Path | str,
     prompt: str,
     *,
-    proxy_url: str | None = None,
     profile_dir: Path | str | None = None,
-    provider: str = DEFAULT_PI_PROVIDER,
     model: str = DEFAULT_PI_MODEL,
+    agent_dir: Path | str | None = None,
     timeout: float = 60,
-) -> tuple[dict[str, Any], subprocess.CompletedProcess[str]]:
-    """Mint a planning session and run pi once through the Harness Proxy.
+) -> tuple[dict[str, Any], PiOnceResult]:
+    """Mint a planning session and run pi once on its native provider.
 
-    The tracked pi profile is read, its provider baseUrl is rewritten to the
-    running proxy URL, and the result is written into a temporary agent directory
-    so pi's runtime files (sessions, trust, settings) never land in the repo.
-    The planning bearer is injected as the provider API key via a per-process
-    environment variable; it is never written to the tracked profile.
+    The planning session is anchored in the ledger, but no planning bearer is
+    minted or injected: pi authenticates with the operator's existing provider
+    credentials.  Usage evidence from pi's ``--mode json`` output is parsed and
+    recorded as a ``planning`` token turn.
     """
-    session, bearer_key = db.create_planning_session(
+    provider, model_id = _resolve_pi_provider_model(model)
+    session, _bearer_key = db.create_planning_session(
         database_path,
         task_description="pi orchestrator launch",
-        model=model,
+        model=model_id,
+        tracking_mode="native_usage",
     )
-    selected_proxy_url = proxy_url or _default_proxy_url()
     selected_profile_dir = Path(profile_dir) if profile_dir else DEFAULT_PROFILE_DIR
+    selected_agent_dir = Path(agent_dir) if agent_dir else None
+    persona_path = _persona_path(selected_profile_dir)
 
     with tempfile.TemporaryDirectory(prefix="pi-orchestrator-") as tmpdir:
-        agent_dir = Path(tmpdir) / "agent"
         sessions_dir = Path(tmpdir) / "sessions"
-        env = _prepare_pi_env(
-            bearer_key,
-            selected_proxy_url,
-            selected_profile_dir,
-            provider,
-            agent_dir,
-            sessions_dir,
-        )
-        persona_path = _persona_path(selected_profile_dir)
-        command = [
-            "pi",
-            "-p",
-            "--offline",
-            "--append-system-prompt",
-            str(persona_path),
-            "--tools",
-            ",".join(PI_ORCHESTRATOR_ALLOWED_TOOLS),
-            "--provider",
-            provider,
-            "--model",
-            model,
-            prompt,
-        ]
+        env = _prepare_pi_env(sessions_dir, agent_dir=selected_agent_dir)
+        command: list[str] = ["pi", "-p", "--mode", "json", "--no-session"]
+        if provider:
+            command.extend(["--provider", provider])
+        command.extend(["--model", model_id])
+        command.extend(["--append-system-prompt", str(persona_path)])
+        command.extend(["--tools", ",".join(PI_ORCHESTRATOR_ALLOWED_TOOLS)])
+        command.extend(["--no-approve", prompt])
+
         result = subprocess.run(
             command,
             env=env,
@@ -158,11 +224,34 @@ def launch_pi_once(
             timeout=timeout,
         )
 
-    return session, result
+    if result.returncode != 0 and _is_auth_error(result.stderr):
+        raise PiAuthRequired(
+            "Provider authentication required; run `pi /login` or add an API key in pi."
+        )
 
+    evidence = parse_pi_usage_stream(result.stdout, model=model_id)
+    if evidence is not None:
+        db.record_token_turn(
+            database_path,
+            session_id=session["id"],
+            usage_kind="planning",
+            model=model_id,
+            prompt_tokens=evidence.prompt_tokens,
+            completion_tokens=evidence.completion_tokens,
+            cost=evidence.cost,
+            raw_usage=evidence.raw_usage,
+        )
 
-class AcpRuntimeError(RuntimeError):
-    """Raised when the ACP stdio conversation with pi fails."""
+    stdout_text = extract_pi_assistant_text(result.stdout)
+    if not stdout_text.strip():
+        stdout_text = result.stdout.strip()
+
+    return session, PiOnceResult(
+        stdout=stdout_text,
+        stderr=result.stderr,
+        returncode=result.returncode,
+        args=command,
+    )
 
 
 class _AcpJsonRpcTransport:
@@ -267,7 +356,10 @@ class PiConversation:
         transport: _AcpJsonRpcTransport,
         session_id: str,
         default_timeout: float,
-        workdir: Path | None = None,
+        workdir: Path | None,
+        database_path: Path | str,
+        model: str,
+        sessions_dir: Path,
     ) -> None:
         self.session = session
         self.proc = proc
@@ -276,22 +368,71 @@ class PiConversation:
         self._session_id = session_id
         self._default_timeout = default_timeout
         self._workdir = workdir
+        self._database_path = database_path
+        self._model = model
+        self._sessions_dir = sessions_dir
+        self._session_file_path: Path | None = None
+        self._seen_response_ids: set[str] = set()
 
     def prompt(self, text: str, *, timeout: float | None = None) -> tuple[str, str]:
         """Drive one turn and return (text, stop_reason)."""
         deadline = timeout if timeout is not None else self._default_timeout
-        result, notifications = self._transport.call(
-            "session/prompt",
-            {"sessionId": self._session_id, "prompt": [{"type": "text", "text": text}]},
-            timeout=deadline,
-        )
+        try:
+            result, notifications = self._transport.call(
+                "session/prompt",
+                {"sessionId": self._session_id, "prompt": [{"type": "text", "text": text}]},
+                timeout=deadline,
+            )
+        except AcpRuntimeError as exc:
+            # Provider auth can expire mid-conversation; the operator needs the
+            # sign-in state, not a generic runtime failure.
+            _raise_for_auth_error(exc)
+            raise
         # Trailing ``agent_message_chunk`` notifications may arrive after the
         # prompt response; give them a moment to land.
         notifications.extend(self._transport.drain(timeout=0.5))
         stop_reason = result.get("stopReason", "end_turn") if isinstance(result, dict) else "end_turn"
         text = _extract_text_chunks(notifications)
         self.responses.append(text)
+        self._record_usage()
         return text, stop_reason
+
+    def _session_file(self) -> Path | None:
+        if self._session_file_path is not None:
+            return self._session_file_path
+        files = sorted(
+            self._sessions_dir.glob("*.jsonl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if files:
+            self._session_file_path = files[0]
+            return files[0]
+        return None
+
+    def _record_usage(self) -> None:
+        """Record any new native usage from the pi session file as a planning turn."""
+        session_file = self._session_file()
+        if session_file is None:
+            return
+        evidence = parse_pi_usage_stream(
+            session_file.read_text(encoding="utf-8"),
+            model=self._model,
+            exclude_response_ids=self._seen_response_ids,
+        )
+        if evidence is None:
+            return
+        self._seen_response_ids.update(evidence.raw_usage.get("response_ids", []))
+        db.record_token_turn(
+            self._database_path,
+            session_id=self.session["id"],
+            usage_kind="planning",
+            model=self._model,
+            prompt_tokens=evidence.prompt_tokens,
+            completion_tokens=evidence.completion_tokens,
+            cost=evidence.cost,
+            raw_usage=evidence.raw_usage,
+        )
 
     def cancel(self) -> None:
         """Send a ``session/cancel`` notification for the active session."""
@@ -339,48 +480,47 @@ def _terminate_process_group(proc: subprocess.Popen) -> None:
 def open_pi_conversation(
     database_path: Path | str,
     *,
-    proxy_url: str | None = None,
     profile_dir: Path | str | None = None,
-    provider: str = DEFAULT_PI_PROVIDER,
     model: str = DEFAULT_PI_MODEL,
     cwd: Path | str | None = None,
     timeout: float = 60,
+    agent_dir: Path | str | None = None,
 ) -> PiConversation:
     """Open a governed pi conversation and return a long-lived handle.
 
-    The planning bearer is injected as the provider API key for the subprocess only;
-    it is never written to the tracked profile.  The returned ``PiConversation`` handle
-    exposes ``prompt(text)``, ``cancel()``, ``session``, ``proc``, ``responses`` and
-    ``close()``.  The caller is responsible for calling ``close()`` to terminate the
-    subprocess and remove the temporary workdir.
+    The conversation runs on pi's native provider using the operator's existing
+    pi authentication.  The returned ``PiConversation`` handle exposes
+    ``prompt(text)``, ``cancel()``, ``close()``, ``session``, and ``proc``.
+    The caller is responsible for calling ``close()`` to terminate the subprocess
+    and remove the temporary workdir.
     """
-    session, bearer_key = db.create_planning_session(
+    provider, model_id = _resolve_pi_provider_model(model)
+    session, _bearer_key = db.create_planning_session(
         database_path,
         task_description="pi orchestrator ACP conversation",
-        model=model,
+        model=model_id,
+        tracking_mode="native_usage",
     )
-    selected_proxy_url = proxy_url or _default_proxy_url()
     selected_profile_dir = Path(profile_dir) if profile_dir else DEFAULT_PROFILE_DIR
     selected_cwd = Path(cwd) if cwd else Path.cwd()
+    selected_agent_dir = Path(agent_dir) if agent_dir else None
     bridge_dir = DEFAULT_BRIDGE_DIR
 
     tmpdir = tempfile.mkdtemp(prefix="pi-orchestrator-acp-")
     try:
-        agent_dir = Path(tmpdir) / "agent"
         sessions_dir = Path(tmpdir) / "sessions"
-        env = _prepare_pi_env(
-            bearer_key,
-            selected_proxy_url,
-            selected_profile_dir,
-            provider,
-            agent_dir,
-            sessions_dir,
-        )
+        env = _prepare_pi_env(sessions_dir, agent_dir=selected_agent_dir)
         persona_path = _persona_path(selected_profile_dir)
-        wrapper = _write_pi_acp_wrapper(Path(tmpdir), persona_path)
+        wrapper = _write_pi_acp_wrapper(
+            Path(tmpdir), persona_path, sessions_dir, provider, model_id
+        )
         env[PI_ACP_PI_COMMAND_ENV] = str(wrapper)
         env[PI_ACP_PERSONA_PATH_ENV] = str(persona_path)
         env[PI_ACP_ALLOWED_TOOLS_ENV] = ",".join(PI_ORCHESTRATOR_ALLOWED_TOOLS)
+        if provider:
+            env[PI_ACP_PROVIDER_ENV] = provider
+        env[PI_ACP_MODEL_ENV] = model_id
+        env[PI_ACP_SESSION_DIR_ENV] = str(sessions_dir)
 
         command = _pi_acp_command(bridge_dir)
         proc = subprocess.Popen(
@@ -394,19 +534,24 @@ def open_pi_conversation(
             start_new_session=True,
         )
         transport = _AcpJsonRpcTransport(proc)
-        transport.call(
-            "initialize",
-            {
-                "protocolVersion": 1,
-                "clientInfo": {"name": "foreman-ai-hq", "version": "0.1.0"},
-            },
-            timeout=timeout,
-        )
-        new_result, _ = transport.call(
-            "session/new",
-            {"cwd": str(selected_cwd), "mcpServers": []},
-            timeout=timeout,
-        )
+        try:
+            transport.call(
+                "initialize",
+                {
+                    "protocolVersion": 1,
+                    "clientInfo": {"name": "foreman-ai-hq", "version": "0.1.0"},
+                },
+                timeout=timeout,
+            )
+            new_result, _ = transport.call(
+                "session/new",
+                {"cwd": str(selected_cwd), "mcpServers": []},
+                timeout=timeout,
+            )
+        except AcpRuntimeError as exc:
+            _raise_for_auth_error(exc)
+            _terminate_process_group(proc)
+            raise
         session_id = new_result["sessionId"]
         # Discard pi startup info / available-commands notifications so they
         # do not mix into the first prompt response.
@@ -419,6 +564,9 @@ def open_pi_conversation(
             session_id,
             timeout,
             workdir=Path(tmpdir),
+            database_path=database_path,
+            model=model_id,
+            sessions_dir=sessions_dir,
         )
     except Exception:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -430,11 +578,10 @@ def launch_pi_conversation(
     database_path: Path | str,
     prompts: list[str] | None = None,
     *,
-    proxy_url: str | None = None,
     profile_dir: Path | str | None = None,
-    provider: str = DEFAULT_PI_PROVIDER,
     model: str = DEFAULT_PI_MODEL,
     cwd: Path | str | None = None,
+    agent_dir: Path | str | None = None,
     timeout: float = 60,
 ) -> Iterator[PiConversation]:
     """Mint one planning session and yield a handle inside a ``with`` block.
@@ -445,12 +592,11 @@ def launch_pi_conversation(
     """
     conv = open_pi_conversation(
         database_path,
-        proxy_url=proxy_url,
         profile_dir=profile_dir,
-        provider=provider,
         model=model,
         cwd=cwd,
         timeout=timeout,
+        agent_dir=Path(agent_dir) if agent_dir else None,
     )
     try:
         if prompts:

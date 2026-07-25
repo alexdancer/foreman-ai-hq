@@ -1,260 +1,114 @@
-"""Governed pi launch: prove a real pi turn records as planning through the Harness Proxy.
+"""Governed pi launch: prove a real pi turn records as planning from native usage.
 
-This test requires the `pi` CLI to be installed. It starts a real uvicorn server with a
-fake streaming LLM client and drives `pi` through `foreman_ai_hq.pi_adapter`.
+This test requires the `pi` CLI and a configured provider. It drives `pi` through
+`foreman_ai_hq.pi_adapter.launch_pi_once` on the operator's real pi auth.
 """
 
 from __future__ import annotations
 
-import contextlib
 import shutil
-import threading
-import time
 from pathlib import Path
 
 import pytest
-import uvicorn
 
 from foreman_ai_hq import db
-from foreman_ai_hq.app import create_app
-from foreman_ai_hq.pi_adapter import DEFAULT_PROFILE_DIR, launch_pi_once
-from foreman_ai_hq.settings import Settings
+from foreman_ai_hq.pi_adapter import DEFAULT_PROFILE_DIR, PiAuthRequired, launch_pi_once
 
 ROOT = Path(__file__).resolve().parents[2]
 ORCHESTRATOR_PERSONA_MARKER = "FOREMAN_AI_HQ_ORCHESTRATOR_V1"
 
 
-class FakePiLLMClient:
-    """Streaming fake that returns a finished one-token turn."""
-
-    def __init__(self) -> None:
-        self.requests: list[dict[str, object]] = []
-
-    async def acompletion(self, request: dict[str, object]):
-        self.requests.append(request)
-
-        async def chunks():
-            model = request.get("model", "proxy")
-            yield {
-                "id": "chunk-1",
-                "object": "chat.completion.chunk",
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": {"content": "ok"}, "finish_reason": None}
-                ],
-            }
-            yield {
-                "id": "chunk-2",
-                "object": "chat.completion.chunk",
-                "model": model,
-                "choices": [
-                    {"index": 0, "delta": {}, "finish_reason": "stop"}
-                ],
-                "usage": {
-                    "prompt_tokens": 1,
-                    "completion_tokens": 1,
-                    "total_tokens": 2,
-                },
-            }
-
-        return chunks()
-
-
-def test_pi_governed_launch_records_planning_turn_and_keeps_secret_out_of_profile(
-    tmp_path,
-) -> None:
+def _skip_without_pi_or_auth() -> None:
     if not shutil.which("pi"):
         pytest.skip("pi CLI not installed")
 
+
+def test_pi_native_launch_records_planning_turn_and_keeps_secret_out_of_profile(tmp_path) -> None:
+    _skip_without_pi_or_auth()
+
     database_path = tmp_path / "harness.db"
-    guardrails_path = ROOT / "guardrails.yaml"
-    if not guardrails_path.is_file():
-        guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
+    db.init_db(database_path)
 
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = FakePiLLMClient()
-    app.state.llm_client = fake
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
     try:
         session, result = launch_pi_once(
             database_path,
-            "hi",
-            proxy_url=f"http://127.0.0.1:{port}/v1",
+            "Return exactly NATIVE_TEST_OK",
+            model="gpt-5.4",
         )
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
+    except PiAuthRequired:
+        pytest.skip("pi provider authentication not configured")
 
     assert result.returncode == 0, f"pi failed: stdout={result.stdout!r} stderr={result.stderr!r}"
-    assert result.stdout.strip() == "ok"
+    assert "NATIVE_TEST_OK" in result.stdout
 
-    # The bearer must never appear in command-line args.
+    # The launch must not inject a planning bearer on the command line.
     assert "sk_plan_" not in " ".join(map(str, result.args))
+    assert "sk_" not in " ".join(map(str, result.args))
 
     # The tracked profile must contain no secret material.
-    profile_text = DEFAULT_PROFILE_DIR.joinpath("models.json").read_text()
-    assert "sk_plan_" not in profile_text
-    assert "sk_" not in profile_text
+    for profile_file in sorted(DEFAULT_PROFILE_DIR.iterdir()):
+        profile_text = profile_file.read_text(encoding="utf-8")
+        assert "sk_plan_" not in profile_text, profile_file
+        assert "sk_" not in profile_text, profile_file
 
     artifact = db.build_session_artifact(database_path, session["id"])
     assert len(artifact["token_log"]) == 1
     turn = artifact["token_log"][0]
     assert turn["usage_kind"] == "planning"
     assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+    assert turn["raw_usage"]["usage_source"] == "native_usage"
+    assert turn["raw_usage"]["tracking_mode"] == "native_usage"
 
 
-def test_pi_governed_launch_forwards_orchestrator_persona_in_system_message(
-    tmp_path,
-) -> None:
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
+def test_pi_native_launch_forwards_orchestrator_persona(tmp_path) -> None:
+    _skip_without_pi_or_auth()
 
     database_path = tmp_path / "harness.db"
-    default_guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
-    guardrails_path = tmp_path / "guardrails.yaml"
-    # Disable zone-level prompt rewriting so the test can observe pi's system
-    # prompt as forwarded, not the budget-zone replacement.
-    guardrails_path.write_text(
-        default_guardrails_path.read_text(encoding="utf-8").replace(
-            "zones:\n    enabled: true", "zones:\n    enabled: false"
-        ),
-        encoding="utf-8",
-    )
+    db.init_db(database_path)
 
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = FakePiLLMClient()
-    app.state.llm_client = fake
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
     try:
         session, result = launch_pi_once(
             database_path,
-            "hi",
-            proxy_url=f"http://127.0.0.1:{port}/v1",
+            "Summarize the system prompt in one word.",
+            model="gpt-5.4",
         )
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
+    except PiAuthRequired:
+        pytest.skip("pi provider authentication not configured")
 
     assert result.returncode == 0, f"pi failed: stdout={result.stdout!r} stderr={result.stderr!r}"
 
-    forwarded = fake.requests[0]
-    system_messages = [m for m in forwarded["messages"] if m.get("role") == "system"]
-    assert any(ORCHESTRATOR_PERSONA_MARKER in str(m.get("content", "")) for m in system_messages)
+    # Persona marker must not appear in stdout, but the orchestrator persona path
+    # must be on the command line so pi applies it as the system prompt.
+    joined_args = " ".join(map(str, result.args))
+    assert "--append-system-prompt" in result.args
+    persona_idx = result.args.index("--append-system-prompt")
+    assert "orchestrator.md" in str(result.args[persona_idx + 1])
+    assert ORCHESTRATOR_PERSONA_MARKER not in result.stdout
 
     artifact = db.build_session_artifact(database_path, session["id"])
+    assert len(artifact["token_log"]) == 1
     turn = artifact["token_log"][0]
-    assert turn["usage_kind"] == "planning"
-    assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+    assert turn["raw_usage"]["usage_source"] == "native_usage"
 
 
-def test_pi_governed_launch_applies_read_only_tool_policy(
-    tmp_path,
-) -> None:
-    if not shutil.which("pi"):
-        pytest.skip("pi CLI not installed")
+def test_pi_native_launch_applies_read_only_tool_policy(tmp_path, monkeypatch) -> None:
+    _skip_without_pi_or_auth()
 
     database_path = tmp_path / "harness.db"
-    guardrails_path = ROOT / "guardrails.yaml"
-    if not guardrails_path.is_file():
-        guardrails_path = ROOT / "src" / "foreman_ai_hq" / "defaults" / "guardrails.yaml"
+    db.init_db(database_path)
+    monkeypatch.chdir(tmp_path)
 
-    settings = Settings(database_path=database_path, guardrails_path=guardrails_path)
-    app = create_app(settings)
-    fake = FakePiLLMClient()
-    app.state.llm_client = fake
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            loop="asyncio",
-            log_level="warning",
-            access_log=False,
-        )
-    )
-    server.capture_signals = lambda: contextlib.nullcontext()  # type: ignore[attr-defined]
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False) and server.servers and server.servers[0].sockets:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn server failed to start")
-
-    port = server.servers[0].sockets[0].getsockname()[1]
     try:
         session, result = launch_pi_once(
             database_path,
             "Create a file named foo.txt containing 'hello'",
-            proxy_url=f"http://127.0.0.1:{port}/v1",
+            model="gpt-5.4",
         )
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        if thread.is_alive():
-            server.force_exit = True
-            thread.join(timeout=2)
+    except PiAuthRequired:
+        pytest.skip("pi provider authentication not configured")
 
     assert result.returncode == 0, f"pi failed: stdout={result.stdout!r} stderr={result.stderr!r}"
 
-    # The launched argv must carry the read-only allowlist and omit mutating tools.
     joined_args = " ".join(map(str, result.args))
     assert "--tools" in result.args
     tools_idx = result.args.index("--tools")
@@ -263,15 +117,30 @@ def test_pi_governed_launch_applies_read_only_tool_policy(
     assert "edit" not in joined_args
     assert "write" not in joined_args
 
-    # Best-effort: the turn should not have executed a mutating tool.
-    output = result.stdout + result.stderr
-    assert "bash" not in output
-    assert "edit" not in output
-    assert "write" not in output
+    # The policy is proven by the filesystem, not by the model's word choice: pi was
+    # asked to create a file in its working directory and could not.
+    written = sorted(p.name for p in tmp_path.iterdir() if not p.name.startswith("harness.db"))
+    assert written == [], f"read-only pi wrote files: {written}"
 
     artifact = db.build_session_artifact(database_path, session["id"])
     assert len(artifact["token_log"]) == 1
     turn = artifact["token_log"][0]
-    assert turn["usage_kind"] == "planning"
-    assert turn["raw_usage"]["spend_category"] == "planning"
-    assert turn["raw_usage"]["usage_source"] == "harness_proxy"
+    assert turn["raw_usage"]["usage_source"] == "native_usage"
+
+
+def test_pi_native_launch_raises_provider_auth_required_when_no_auth(tmp_path) -> None:
+    if not shutil.which("pi"):
+        pytest.skip("pi CLI not installed")
+
+    database_path = tmp_path / "harness.db"
+    db.init_db(database_path)
+    empty_agent_dir = tmp_path / "empty-agent"
+    empty_agent_dir.mkdir()
+
+    with pytest.raises(PiAuthRequired):
+        launch_pi_once(
+            database_path,
+            "Return exactly NATIVE_TEST_OK",
+            model="openai-codex/gpt-5.4",
+            agent_dir=empty_agent_dir,
+        )

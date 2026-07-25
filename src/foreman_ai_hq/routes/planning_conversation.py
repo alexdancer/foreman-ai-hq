@@ -11,7 +11,12 @@ from pydantic import BaseModel, Field
 
 from foreman_ai_hq import db
 from foreman_ai_hq.auth import require_portal_auth
-from foreman_ai_hq.pi_adapter import PiConversation, open_pi_conversation
+from foreman_ai_hq.pi_adapter import (
+    AcpRuntimeError,
+    PiAuthRequired,
+    PiConversation,
+    open_pi_conversation,
+)
 
 router = APIRouter()
 
@@ -59,7 +64,7 @@ class PlanningConversationRegistry:
         self,
         project_id: str,
         database_path: Path | str,
-        proxy_url: str,
+        model: str,
         cwd: Path | str,
         timeout: float = 60,
     ) -> str:
@@ -87,7 +92,7 @@ class PlanningConversationRegistry:
                 self._live.pop(lru_pid).conv.close()
             conv = open_pi_conversation(
                 database_path,
-                proxy_url=proxy_url,
+                model=model,
                 cwd=cwd,
                 timeout=timeout,
             )
@@ -133,10 +138,6 @@ class PlanningConversationRegistry:
             self._live.clear()
 
 
-def _proxy_url_for_request(request: Request) -> str:
-    return f"{str(request.base_url).rstrip('/')}/v1"
-
-
 @router.post("/api/projects/{project_id}/planning/start", dependencies=[Depends(require_portal_auth)])
 def start_planning_conversation(project_id: str, request: Request) -> dict[str, Any]:
     database_path = request.app.state.settings.database_path
@@ -149,9 +150,14 @@ def start_planning_conversation(project_id: str, request: Request) -> dict[str, 
         session_id = registry.start(
             project_id,
             database_path,
-            proxy_url=_proxy_url_for_request(request),
+            model=request.app.state.settings.orchestrator_model,
             cwd=project["root_path"],
         )
+    except PiAuthRequired as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Provider authentication required; run `pi /login` or add an API key in pi.",
+        ) from exc
     except PlanningConversationCapacityError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"planning_session_id": session_id}
@@ -169,7 +175,15 @@ def message_planning_conversation(
         live = registry.get(project_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="planning conversation not started") from exc
-    text, stop_reason = live.conv.prompt(payload.message)
+    try:
+        text, stop_reason = live.conv.prompt(payload.message)
+    except PiAuthRequired as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Provider authentication required; run `pi /login` or add an API key in pi.",
+        ) from exc
+    except AcpRuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     registry.touch(project_id)
     db.record_planning_turn_event(
         database_path,

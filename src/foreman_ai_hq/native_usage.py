@@ -370,6 +370,103 @@ def _codex_stream_binding(values: list[Any], *, selected_model: str) -> dict[str
     return None
 
 
+def _pi_cost_total(usage: dict[str, Any]) -> float:
+    cost = usage.get("cost")
+    if isinstance(cost, dict):
+        return _float_from_any(cost.get("total"))
+    return _float_from_any(cost)
+
+
+def parse_pi_usage_stream(
+    text: str,
+    *,
+    model: str | None = None,
+    exclude_response_ids: set[str] | None = None,
+) -> NativeUsageEvidence | None:
+    """Parse a pi `--mode json` stream (stdout or session file) for assistant usage.
+
+    Sums per-model-call usage for all assistant messages not already seen.
+    """
+    excluded = set(exclude_response_ids or ())
+    parsed = _parse_json_stream(text)
+    response_ids: list[str] = []
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    cost = 0.0
+    provider: str | None = None
+    event_model: str | None = None
+    for item in _walk_json_dicts(parsed):
+        if item.get("type") not in ("turn_end", "message_end", "message"):
+            continue
+        msg = item.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        usage = msg.get("usage")
+        if not isinstance(usage, dict) or not any(_looks_like_usage_key(k) for k in usage):
+            continue
+        rid = msg.get("responseId") or item.get("id")
+        if not rid or rid in excluded:
+            continue
+        excluded.add(rid)
+        response_ids.append(rid)
+        p = (
+            _int_from_any(usage.get("input"))
+            + _int_from_any(usage.get("cacheRead"))
+            + _int_from_any(usage.get("cacheWrite"))
+        )
+        c = _int_from_any(usage.get("output"))
+        t = _int_from_any(usage.get("totalTokens"))
+        if t <= 0:
+            t = p + c
+        prompt_tokens += p
+        completion_tokens += c
+        total_tokens += t
+        cost += _pi_cost_total(usage)
+        if provider is None:
+            provider = msg.get("provider")
+        if event_model is None:
+            event_model = msg.get("model")
+    if total_tokens <= 0:
+        return None
+    return NativeUsageEvidence(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        cost=cost,
+        raw_usage={
+            "provider": provider,
+            "model": event_model or model,
+            "response_ids": response_ids,
+            "total_tokens": total_tokens,
+            "usage_source": "native_usage",
+            "tracking_mode": "native_usage",
+        },
+    )
+
+
+def extract_pi_assistant_text(text: str) -> str:
+    """Return the assistant text from a pi `--mode json` stream."""
+    parsed = _parse_json_stream(text)
+    seen: set[str] = set()
+    chunks: list[str] = []
+    for item in _walk_json_dicts(parsed):
+        if item.get("type") not in ("turn_end", "message_end", "message"):
+            continue
+        msg = item.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        rid = msg.get("responseId") or item.get("id")
+        if rid and rid in seen:
+            continue
+        if rid:
+            seen.add(rid)
+        for piece in msg.get("content", []):
+            if piece.get("type") == "text" and isinstance(piece.get("text"), str):
+                chunks.append(piece["text"])
+    return "".join(chunks)
+
+
 def _looks_like_usage_key(key: str) -> bool:
     normalized = key.lower()
     return normalized in {
@@ -390,6 +487,9 @@ def _looks_like_usage_key(key: str) -> bool:
         "cache_creation_input_tokens",
         "cached_input_tokens",
         "cached_tokens",
+        "cacheRead",
+        "cacheWrite",
+        "totalTokens",
     }
 
 
