@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from foreman_ai_hq.llm import response_to_dict
+from foreman_ai_hq.pi_adapter import PiStructuredOutputError, run_pi_structured_job
 from foreman_ai_hq.task_slicing_policy import (
     DEFAULT_TASK_BREAKDOWN_EXECUTION_MODE,
     TASK_BREAKDOWN_EXECUTION_MODES,
@@ -115,8 +115,9 @@ class TaskBreakdownResult:
 async def breakdown_task_source(
     source_text: str,
     *,
-    llm_client: Any,
     task_breakdown_model: str,
+    database_path: Any = None,
+    job_runner: Any = None,
     intake_metadata: dict[str, Any] | None = None,
     structure_hints: list[str] | None = None,
     repo_context: dict[str, Any] | None = None,
@@ -130,32 +131,37 @@ async def breakdown_task_source(
     if repo_context:
         # Repo context is optional evidence; validation still depends on the task source contract.
         user_payload["repo_context"] = repo_context
-    request = {
-        "model": task_breakdown_model,
-        "messages": [
-            {"role": "system", "content": _system_prompt()},
-            {
-                "role": "user",
-                "content": json.dumps(user_payload, sort_keys=True),
-            },
-        ],
-        "temperature": 0,
-        "max_tokens": TASK_BREAKDOWN_MAX_TOKENS,
-        "timeout_seconds": timeout_seconds,
-        "response_format": {"type": "json_object"},
-    }
+    runner = job_runner or run_pi_structured_job
     try:
-        response = await llm_client.acompletion(request)
+        job = await runner(
+            database_path,
+            instructions=_system_prompt(),
+            input_payload=user_payload,
+            model=task_breakdown_model,
+            persona_filename="task_breakdown.md",
+            extension_filename="submit-breakdown.ts",
+            submit_tool="submit_breakdown",
+            usage_kind="task_breakdown",
+            task_description=f"Task breakdown: {source_text[:200]}",
+            timeout=timeout_seconds,
+            result_validator=validate_breakdown_result,
+        )
+    except PiStructuredOutputError as exc:
+        error = TaskBreakdownValidationError(str(exc))
+        error.session_id = exc.session_id
+        raise error from exc
     except Exception as exc:  # pragma: no cover - exercised through route tests
-        raise TaskBreakdownUnavailableError(
-            _provider_failure_message(
+        error = TaskBreakdownUnavailableError(
+            _runtime_failure_message(
                 exc,
                 model=task_breakdown_model,
                 source_text=source_text,
                 timeout_seconds=timeout_seconds,
             )
-        ) from exc
-    return _parse_response(response), response
+        )
+        error.session_id = getattr(exc, "session_id", None)
+        raise error from exc
+    return job.validated, job
 
 
 def _system_prompt() -> str:
@@ -179,7 +185,7 @@ def _system_prompt() -> str:
     )
 
 
-def _provider_failure_message(
+def _runtime_failure_message(
     exc: Exception,
     *,
     model: str,
@@ -192,8 +198,8 @@ def _provider_failure_message(
         f"max_output_tokens={TASK_BREAKDOWN_MAX_TOKENS}; timeout_seconds={timeout_seconds}"
     )
     if _looks_like_timeout(exc, reason):
-        return f"provider timeout ({context}); {reason}"
-    return f"provider rejection or transport failure ({context}); {reason}"
+        return f"orchestrator runtime timeout ({context}); {reason}"
+    return f"orchestrator runtime failure ({context}); {reason}"
 
 
 def _safe_failure_detail(detail: str, *, source_text: str) -> str:
@@ -228,34 +234,6 @@ def _source_text_redaction_variants(source_text: str) -> list[str]:
 
 def _looks_like_timeout(exc: Exception, detail: str) -> bool:
     return isinstance(exc, TimeoutError) or "timeout" in detail.lower() or "timed out" in detail.lower()
-
-
-def _parse_response(response: Any) -> TaskBreakdownResult:
-    try:
-        data = json.loads(_task_breakdown_json_text(_response_content(response)))
-    except Exception as exc:
-        raise TaskBreakdownValidationError("task breakdown returned invalid JSON") from exc
-    if not isinstance(data, dict):
-        raise TaskBreakdownValidationError("task breakdown JSON must be an object")
-    return validate_breakdown_result(data)
-
-
-def _task_breakdown_json_text(content: str) -> str:
-    text = content.strip()
-    if not text.startswith("```"):
-        return text
-
-    # Accept fenced JSON because some providers wrap structured output in markdown.
-    lines = text.splitlines()
-    if len(lines) < 3:
-        raise TaskBreakdownValidationError("task breakdown returned invalid JSON")
-    opening = lines[0].strip()
-    language = opening[3:].strip().lower()
-    if language not in {"", "json"}:
-        raise TaskBreakdownValidationError("task breakdown returned invalid JSON")
-    if lines[-1].strip() != "```":
-        raise TaskBreakdownValidationError("task breakdown returned invalid JSON")
-    return "\n".join(lines[1:-1]).strip()
 
 
 def validate_breakdown_result(
@@ -514,15 +492,3 @@ def _string_or_joined_strings(value: Any, field: str) -> str:
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return "\n".join(item.strip() for item in value if item.strip())
     raise TaskBreakdownValidationError(f"{field} must be a string or array of strings")
-
-
-def _response_content(response: Any) -> str:
-    payload = response_to_dict(response)
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise TaskBreakdownValidationError("task breakdown response missing choices")
-    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str) or not content.strip():
-        raise TaskBreakdownValidationError("task breakdown response missing content")
-    return content

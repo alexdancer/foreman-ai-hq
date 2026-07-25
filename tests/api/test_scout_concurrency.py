@@ -19,6 +19,7 @@ from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import react_shell
 from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_kind import read_task_kind
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,7 @@ class FakeEstimatorLLM:
             "shadow_token_estimate": 11000,
             "complexity": "modest",
             "confidence": 0.82,
+            "investigation_recommended": False,
             "rationale": "Synthetic estimate.",
             "assumptions": [],
             "risk_flags": [],
@@ -102,7 +104,7 @@ def _request(client: TestClient, llm: FakeEstimatorLLM):
             state=SimpleNamespace(
                 settings=client.app.state.settings,
                 guardrails=load_guardrails(ROOT / "guardrails.yaml"),
-                llm_client=llm,
+                orchestrator_job_runner=FakeOrchestratorJobRunner(llm),
             )
         )
     )
@@ -142,6 +144,24 @@ async def test_low_confidence_threshold_and_advisory(tmp_path):
             assert item["advisory"] is True
             assert item["task_kind"] == "implementation"
             assert item["decision_state"] == "decision_required"
+
+
+def test_explicit_investigation_signal_surfaces_scout_path_at_high_confidence(tmp_path):
+    client = _client(tmp_path)
+    db_path = client.app.state.settings.database_path
+    project = db.list_connected_projects(db_path)[0]
+    task = _low_confidence_task(db_path, project, task_id="task-investigate", confidence=0.9)
+    db.update_task(
+        db_path,
+        task["id"],
+        {"metadata": {**task["metadata"], "investigation_recommended": True}},
+    )
+
+    item = low_confidence_item(project["id"], db.get_task(db_path, task["id"]), db_path)
+
+    assert item is not None
+    assert item["title"] == "Investigation recommended"
+    assert any(action["kind"] == "create_scout" for action in item["actions"])
 
 
 @pytest.mark.asyncio

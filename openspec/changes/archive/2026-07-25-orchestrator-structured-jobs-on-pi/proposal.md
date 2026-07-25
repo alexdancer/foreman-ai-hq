@@ -23,11 +23,13 @@ context and escalate real code-reading to a visible Scout, never crawl inline
 
 - **Estimation and breakdown run as Orchestrator agent turns**, on the Orchestrator's
   own provider, accounted from native usage as Orchestration Tokens (labeled
-  `estimation` / `task breakdown`), separate from Worker execution spend. They replace
+  usage kind `estimation` / `task_breakdown`, keeping each job's existing spend
+  category), separate from Worker execution spend. They replace
   the single-shot `llm_client` structured calls.
 - **Per-job personas and read-only tool allowlists.** Each job is configured with its
-  own persona and its own allowlist (read-only nav tools + that job's submit tool).
-  Neither can write code, run a shell, or launch Workers.
+  own persona and an allowlist containing only a pathless curated-input reader plus
+  that job's submit tool. Neither can crawl the repository, write code, run a shell,
+  or launch Workers.
 - **Structured output via submit tools.** Each job terminates by calling
   `submit_estimate` / `submit_breakdown`, whose `JsonSchema` parameters *are* the
   result schema; the tool-call arguments are the validated structured result. Free
@@ -60,7 +62,8 @@ context and escalate real code-reading to a visible Scout, never crawl inline
   per-job personas and tool allowlists under the pi profile. Native-usage recorder
   reused for estimation/breakdown turns.
 - **Tracking.** Estimation and breakdown spend accounted from native usage, labeled
-  `estimation` / `task breakdown`, separate from `worker_execution`.
+  usage kind `estimation` / `task_breakdown` under their existing spend categories
+  (`control_plane` / `task_breakdown`), separate from `worker_execution`.
 - **Scout.** Wire the investigation-recommended signal from estimation/breakdown to a
   Scout Task candidate (reuse the existing Scout path).
 - **Docs.** `CONTEXT.md` already updated (Orchestrator Agent, Task Estimation, Task

@@ -12,6 +12,7 @@ from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import tasks as task_routes
 from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_launch import refresh_task_from_session
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -209,6 +210,7 @@ class FakeEstimatorLLM:
             "shadow_token_estimate": 11_000,
             "complexity": "modest",
             "confidence": 0.82,
+            "investigation_recommended": False,
             "rationale": "Endpoint plus tests is a modest task.",
             "assumptions": ["No schema migration is needed."],
             "risk_flags": ["integration tests may expand scope"],
@@ -240,6 +242,7 @@ def _client_with_llm(
     app = create_app(settings)
     db.init_db(settings.database_path)
     app.state.llm_client = llm
+    app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
     if connected_project:
         project_root = tmp_path / "connected-project"
         project_root.mkdir(exist_ok=True)
@@ -610,16 +613,21 @@ def test_estimate_uses_llm_structured_json_creates_estimated_task_and_tracks_usa
     assert task["metadata"]["worker_model_constraint"]["state"] == "no_allowed_models"
     assert task["metadata"]["worker_model_constraint"]["selected_model"] is None
     assert llm.requests[0]["model"] == "openai/gpt-4.1-mini"
-    assert "Return ONLY valid JSON" in llm.requests[0]["messages"][0]["content"]
+    assert "Call submit_estimate exactly once" in llm.requests[0]["messages"][0]["content"]
     assert "Add an endpoint and tests for sessions" in llm.requests[0]["messages"][1]["content"]
     assert token_turn["usage_kind"] == "estimation"
     assert token_turn["prompt_tokens"] == 111
     assert token_turn["completion_tokens"] == 22
     assert token_turn["total_tokens"] == 133
     assert estimation_session["status"] == "completed"
-    assert estimation_session["session_key_hash"] != "estimation:Add an endpoint and tests for sessions"
-    assert len(estimation_session["session_key_hash"]) == 64
-    assert all(char in "0123456789abcdef" for char in estimation_session["session_key_hash"])
+    assert estimation_session["session_key_hash"].startswith("native-planning:")
+    session_overrides = json.loads(estimation_session["guardrail_overrides_json"])
+    assert session_overrides["session_kind"] == "planning"
+    assert session_overrides["tracking_mode"] == "native_usage"
+    assert all(
+        char in "0123456789abcdef"
+        for char in estimation_session["session_key_hash"].removeprefix("native-planning:")
+    )
     assert dashboard.json()["budget"]["total_tokens"] == 133
 
 
@@ -688,6 +696,7 @@ def test_estimate_uses_configured_estimator_model_when_distinct_from_control_pla
     )
     app = create_app(settings)
     app.state.llm_client = llm
+    app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
 
     with TestClient(app) as client:
         response = client.post(
@@ -948,9 +957,9 @@ def test_accepting_legacy_afk_breakdown_preserves_afk_and_clears_hitl_reason(tmp
     assert "Stale operator approval reason" not in tasks[0]["description"]
 
 
-def test_accepting_breakdown_estimates_candidates_with_fenced_estimator_json(tmp_path, monkeypatch):
+def test_accepting_breakdown_estimates_candidates_from_submit_arguments(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    estimator_response = f"```json\n{json.dumps(FakeEstimatorLLM().content)}\n```"
+    estimator_response = json.dumps(FakeEstimatorLLM().content)
     llm = FakeSequentialLLM(
         [
             _breakdown_content("Add parser", "Add tests"),
@@ -1375,12 +1384,15 @@ def test_estimate_form_invalid_breakdown_output_creates_manual_recovery_review(t
             follow_redirects=False,
         )
         retried = db.get_task_breakdown(tmp_path / "harness.db", breakdown_id)
+        failed_session = db.get_session(tmp_path / "harness.db", breakdown["session_id"])
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/task-breakdowns/")
     assert db.list_tasks(tmp_path / "harness.db") == []
     assert breakdown["status"] == "failed"
     assert breakdown["failure_type"] == "TaskBreakdownValidationError"
+    assert failed_session["status"] == "failed"
+    assert db.session_token_usage(tmp_path / "harness.db", failed_session["id"]) > 0
     review_json = review.json()
     assert review_json["review"]["status"] == "failed"
     assert review_json["controls"]["can_retry"] is True
@@ -1411,11 +1423,13 @@ def test_estimate_form_timeout_breakdown_failure_has_safe_actionable_diagnostics
         breakdown_id = response.headers["location"].split("/")[2]
         breakdown = db.get_task_breakdown(tmp_path / "harness.db", breakdown_id)
         review = client.get(f"/api/task-breakdowns/{breakdown_id}/review", headers=_auth_headers())
+        failed_session = db.get_session(tmp_path / "harness.db", breakdown["session_id"])
 
     assert response.status_code == 303
     assert breakdown["status"] == "failed"
     assert breakdown["failure_type"] == "TaskBreakdownUnavailableError"
-    assert "provider timeout" in breakdown["failure_message"]
+    assert failed_session["status"] == "failed"
+    assert "orchestrator runtime timeout" in breakdown["failure_message"]
     assert "model=" in breakdown["failure_message"]
     assert "source_chars=" in breakdown["failure_message"]
     assert "max_output_tokens=16384" in breakdown["failure_message"]
@@ -1451,7 +1465,7 @@ def test_estimate_form_provider_rejection_breakdown_failure_is_sanitized(tmp_pat
 
     assert response.status_code == 303
     assert breakdown["status"] == "failed"
-    assert "provider rejection or transport failure" in breakdown["failure_message"]
+    assert "orchestrator runtime failure" in breakdown["failure_message"]
     assert "HTTP 400" in breakdown["failure_message"]
     assert "temperature is deprecated" in breakdown["failure_message"]
     assert "DEMO_SECRET_2099_VALUE" not in breakdown["failure_message"]
@@ -1532,7 +1546,8 @@ def test_estimate_provider_exception_is_sanitized_and_creates_no_usage_session(t
     assert task["metadata"]["blocked_reason"] == "Estimator unavailable or invalid; manual estimate required."
     assert raw_error not in json.dumps(task)
     assert task["metadata"]["estimator_failure_type"] == "EstimatorUnavailableError"
-    assert sessions == []
+    assert len(sessions) == 1
+    assert sessions[0]["status"] == "failed"
     assert token_turns == []
 
 def test_estimate_source_becomes_driver_arithmetic(tmp_path, monkeypatch):

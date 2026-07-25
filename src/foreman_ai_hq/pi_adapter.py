@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -12,12 +13,13 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from foreman_ai_hq import db
 from foreman_ai_hq.native_usage import (
     NativeUsageEvidence,
     extract_pi_assistant_text,
+    extract_pi_successful_tool_calls,
     parse_pi_usage_stream,
 )
 
@@ -30,7 +32,9 @@ PI_ACP_MODEL_ENV = "PI_ACP_MODEL"
 PI_ACP_SESSION_DIR_ENV = "PI_ACP_SESSION_DIR"
 
 PI_ORCHESTRATOR_ALLOWED_TOOLS = ("read", "grep", "find", "ls")
+PI_STRUCTURED_JOB_ALLOWED_READ_TOOLS = ("read_curated_input",)
 DEFAULT_PROFILE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "profile"
+DEFAULT_EXTENSIONS_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "extensions"
 DEFAULT_BRIDGE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "bridge"
 PI_ACP_PACKAGE = "pi-acp"
 
@@ -38,14 +42,30 @@ PI_ACP_PACKAGE = "pi-acp"
 class PiAuthRequired(RuntimeError):
     """Raised when pi cannot run because the operator has not authenticated with the provider."""
 
+    def __init__(self, message: str, *, session_id: str | None = None) -> None:
+        super().__init__(message)
+        self.session_id = session_id
+
 
 class AcpRuntimeError(RuntimeError):
     """Raised when the ACP stdio conversation with pi fails."""
 
 
-def _persona_path(profile_dir: Path) -> Path:
-    """Return the path to the git-tracked orchestrator persona."""
-    return profile_dir / "orchestrator.md"
+class PiStructuredJobError(RuntimeError):
+    """Raised when a structured pi job cannot run successfully."""
+
+    def __init__(self, message: str, *, session_id: str | None = None) -> None:
+        super().__init__(message)
+        self.session_id = session_id
+
+
+class PiStructuredOutputError(PiStructuredJobError):
+    """Raised when a structured pi job does not submit exactly one valid result."""
+
+
+def _persona_path(profile_dir: Path, filename: str = "orchestrator.md") -> Path:
+    """Return a tracked persona path under the pi profile."""
+    return profile_dir / filename
 
 
 def _default_pi_agent_dir() -> Path:
@@ -178,6 +198,16 @@ class PiOnceResult:
     args: list[str]
 
 
+@dataclass(frozen=True)
+class PiStructuredJobResult:
+    """Validated submit arguments plus native-usage session evidence."""
+
+    arguments: dict[str, Any]
+    validated: Any
+    session: dict[str, Any]
+    args: list[str]
+
+
 def launch_pi_once(
     database_path: Path | str,
     prompt: str,
@@ -252,6 +282,204 @@ def launch_pi_once(
         returncode=result.returncode,
         args=command,
     )
+
+
+async def run_pi_structured_job(
+    database_path: Path | str,
+    *,
+    instructions: str,
+    input_payload: dict[str, Any],
+    model: str,
+    persona_filename: str,
+    extension_filename: str,
+    submit_tool: str,
+    usage_kind: str,
+    task_description: str,
+    timeout: float = 120,
+    profile_dir: Path | str | None = None,
+    extensions_dir: Path | str | None = None,
+    agent_dir: Path | str | None = None,
+    session_id: str | None = None,
+    result_validator: Callable[[dict[str, Any]], Any] | None = None,
+) -> PiStructuredJobResult:
+    """Run one bounded pi agent turn and accept only its successful submit tool call."""
+    provider, model_id = _resolve_pi_provider_model(model)
+    if session_id:
+        session = db.get_session(database_path, session_id)
+    else:
+        session, _ = db.create_planning_session(
+            database_path,
+            task_description=task_description,
+            model=model,
+            tracking_mode="native_usage",
+        )
+
+    selected_profile_dir = Path(profile_dir) if profile_dir else DEFAULT_PROFILE_DIR
+    selected_extensions_dir = Path(extensions_dir) if extensions_dir else DEFAULT_EXTENSIONS_DIR
+    selected_agent_dir = Path(agent_dir) if agent_dir else None
+    persona_path = _persona_path(selected_profile_dir, persona_filename)
+    extension_path = selected_extensions_dir / extension_filename
+    allowed_tools = (*PI_STRUCTURED_JOB_ALLOWED_READ_TOOLS, submit_tool)
+
+    with tempfile.TemporaryDirectory(prefix=f"pi-{usage_kind}-") as tmpdir:
+        root = Path(tmpdir)
+        workdir = root / "input"
+        sessions_dir = root / "sessions"
+        workdir.mkdir()
+        (workdir / "job-input.json").write_text(
+            json.dumps(
+                {"instructions": instructions, "input": input_payload},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        env = _prepare_pi_env(sessions_dir, agent_dir=selected_agent_dir)
+        command: list[str] = [
+            "pi",
+            "-p",
+            "--mode",
+            "json",
+            "--no-session",
+            "--no-extensions",
+            "--extension",
+            str(extension_path),
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--no-approve",
+        ]
+        if provider:
+            command.extend(["--provider", provider])
+        command.extend(["--model", model_id])
+        command.extend(["--append-system-prompt", str(persona_path)])
+        command.extend(["--tools", ",".join(allowed_tools)])
+        command.append(
+            f"Call read_curated_input once. Use only that curated input. Call {submit_tool} exactly once as your final action."
+        )
+
+        proc = None
+        communication = None
+        timed_out = False
+        started_at = time.monotonic()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=str(workdir),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+            communication = asyncio.create_task(proc.communicate())
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    asyncio.shield(communication), timeout=timeout
+                )
+            except TimeoutError:
+                # Keep communicate alive so already-emitted native usage remains accountable.
+                timed_out = True
+                _kill_async_process(proc)
+                await proc.wait()
+                stdout_bytes, stderr_bytes = await communication
+        except BaseException as exc:
+            if proc is not None and proc.returncode is None:
+                _kill_async_process(proc)
+                await proc.wait()
+            if communication is not None and not communication.done():
+                communication.cancel()
+            db.update_session_status(database_path, session["id"], "failed")
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            raise PiStructuredJobError(
+                f"pi {usage_kind} job could not run: {exc}", session_id=session["id"]
+            ) from exc
+
+    elapsed = time.monotonic() - started_at
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    evidence = parse_pi_usage_stream(stdout, model=model_id)
+    if evidence is not None:
+        db.record_token_turn(
+            database_path,
+            session_id=session["id"],
+            usage_kind=usage_kind,
+            model=model,
+            prompt_tokens=evidence.prompt_tokens,
+            completion_tokens=evidence.completion_tokens,
+            cost=evidence.cost,
+            raw_usage=evidence.raw_usage,
+        )
+
+    if timed_out:
+        db.update_session_status(database_path, session["id"], "failed")
+        # A hung run is only diagnosable after the fact if the error carries how long
+        # it ran and what pi last said; a bare "timed out" leaves nothing to act on.
+        raise PiStructuredJobError(
+            f"pi {usage_kind} job timed out after {elapsed:.1f}s (limit {timeout:.0f}s); "
+            f"pi stderr tail: {_stderr_tail(stderr)}",
+            session_id=session["id"],
+        )
+    if proc.returncode != 0:
+        db.update_session_status(database_path, session["id"], "failed")
+        if _is_auth_error(stderr):
+            raise PiAuthRequired(
+                "Provider authentication required; run `pi /login` or add an API key in pi.",
+                session_id=session["id"],
+            )
+        raise PiStructuredJobError(
+            f"pi {usage_kind} job failed with exit code {proc.returncode} after {elapsed:.1f}s; "
+            f"pi stderr tail: {_stderr_tail(stderr)}",
+            session_id=session["id"],
+        )
+    if evidence is None:
+        db.update_session_status(database_path, session["id"], "failed")
+        raise PiStructuredJobError(
+            f"pi {usage_kind} job emitted no native usage evidence", session_id=session["id"]
+        )
+
+    try:
+        submissions = extract_pi_successful_tool_calls(stdout, tool_name=submit_tool)
+    except ValueError as exc:
+        db.update_session_status(database_path, session["id"], "failed")
+        raise PiStructuredOutputError(str(exc), session_id=session["id"]) from exc
+    if len(submissions) != 1:
+        db.update_session_status(database_path, session["id"], "failed")
+        raise PiStructuredOutputError(
+            f"pi {usage_kind} job must call {submit_tool} exactly once; got {len(submissions)}",
+            session_id=session["id"],
+        )
+    try:
+        validated = result_validator(submissions[0]) if result_validator else submissions[0]
+    except Exception as exc:
+        db.update_session_status(database_path, session["id"], "failed")
+        raise PiStructuredOutputError(str(exc), session_id=session["id"]) from exc
+
+    session = db.update_session_status(database_path, session["id"], "completed")
+    return PiStructuredJobResult(
+        arguments=submissions[0], validated=validated, session=session, args=command
+    )
+
+
+def _stderr_tail(stderr: str, limit: int = 300) -> str:
+    """Return a bounded single-line tail of pi's stderr for failure diagnostics."""
+    collapsed = " ".join(stderr.split())
+    if not collapsed:
+        return "<empty>"
+    return collapsed[-limit:]
+
+
+def _kill_async_process(proc: asyncio.subprocess.Process) -> None:
+    """Terminate a pi process group without leaving provider/tool children behind."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except ProcessLookupError:
+        pass
 
 
 class _AcpJsonRpcTransport:

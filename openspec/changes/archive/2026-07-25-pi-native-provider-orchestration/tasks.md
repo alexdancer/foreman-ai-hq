@@ -22,7 +22,8 @@
 ## 5. Spec-debt fix
 
 - [x] 5.1 Rewrite the `orchestrator-runtime` capability off the proxy per the spec delta: remove the proxy-custom-provider and planning-bearer requirements; re-meter ACP/persona/tools/cancellation/held-conversation as native usage.
-- [ ] 5.2 At archive time only: `openspec archive` applies requirement deltas but never touches a capability's `## Purpose`, so set both by hand after archiving (do NOT pre-apply them to `openspec/specs/` — `openspec archive` aborts with "REMOVED failed ... not found" if the canonical spec already carries the delta):
+- [x] 5.2 Amend `proxy-governed-orchestration`'s "Sessions carry a kind" so the presentable-bearer clause applies to `proxy_governed` planning sessions only; a `native_usage` planning session mints no bearer.
+- [x] 5.3 At archive time only: `openspec archive` applies requirement deltas but never touches a capability's `## Purpose`, so set both by hand after archiving (do NOT pre-apply them to `openspec/specs/` — `openspec archive` aborts with "REMOVED failed ... not found" if the canonical spec already carries the delta):
   - `openspec/specs/orchestrator-runtime/spec.md` → "Run the `pi` planning Orchestrator on its own configured model provider with the operator's existing pi authentication, while recording every turn as a native-usage `planning` token turn against a single planning session."
   - `openspec/specs/proxy-governed-orchestration/spec.md` → "Classify orchestration `planning` sessions distinctly from Worker execution sessions, meter orchestration turns through the Harness Proxy as `planning` token turns, and also support a `native_usage` orchestration mode where the runtime calls the provider directly while still recording spend as `planning`." (replaces the stale `TBD - created by archiving change ...` placeholder)
 

@@ -10,7 +10,10 @@ from foreman_ai_hq.estimation_coefficients import (
     estimate_from_drivers,
 )
 from foreman_ai_hq.guardrails import GuardrailConfig
-from foreman_ai_hq.llm import response_to_dict
+from foreman_ai_hq.pi_adapter import (
+    PiStructuredOutputError,
+    run_pi_structured_job,
+)
 from foreman_ai_hq.repo_context import build_repo_context_brief
 from foreman_ai_hq.task_kind import DEFAULT_TASK_KIND, is_canonical_task_kind
 
@@ -29,6 +32,7 @@ class EstimateResult:
     shadow_token_estimate: int
     estimate_disagreement: float
     coefficient_provenance: dict[str, str]
+    investigation_recommended: bool
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +48,7 @@ class EstimateResult:
             "shadow_token_estimate": self.shadow_token_estimate,
             "estimate_disagreement": self.estimate_disagreement,
             "coefficient_provenance": self.coefficient_provenance,
+            "investigation_recommended": self.investigation_recommended,
         }
 
 
@@ -63,8 +68,10 @@ async def estimate_task(
     description: str,
     config: GuardrailConfig,
     *,
-    llm_client: Any,
     estimator_model: str,
+    database_path: Any = None,
+    job_runner: Any = None,
+    existing_session_id: str | None = None,
     remaining_daily_tokens: int | None = None,
     daily_cap_tokens: int | None = None,
     project_root: str | None = None,
@@ -95,23 +102,39 @@ async def estimate_task(
         user_payload["calibration_context"] = calibration_context
     if scout_context:
         user_payload["scout_findings"] = scout_context
-    request = {
-        "model": estimator_model,
-        "messages": [
-            {"role": "system", "content": _system_prompt(config, project_context, calibration_context, scout_findings=scout_context, task_kind=task_kind)},
-            {
-                "role": "user",
-                "content": json.dumps(user_payload, sort_keys=True),
-            },
-        ],
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-    }
+    runner = job_runner or run_pi_structured_job
     try:
-        response = await llm_client.acompletion(request)
+        job = await runner(
+            database_path,
+            instructions=_system_prompt(
+                config,
+                project_context,
+                calibration_context,
+                scout_findings=scout_context,
+                task_kind=task_kind,
+            ),
+            input_payload=user_payload,
+            model=estimator_model,
+            persona_filename="estimator.md",
+            extension_filename="submit-estimate.ts",
+            submit_tool="submit_estimate",
+            usage_kind="estimation",
+            task_description=f"Task estimation: {description[:200]}",
+            timeout=120,
+            session_id=existing_session_id,
+            result_validator=lambda data: _validate_result(
+                data, config, adapter=adapter, task_kind=task_kind
+            ),
+        )
+    except PiStructuredOutputError as exc:
+        error = EstimatorValidationError(str(exc))
+        error.session_id = exc.session_id
+        raise error from exc
     except Exception as exc:  # pragma: no cover - exercised through route tests
-        raise EstimatorUnavailableError(str(exc)) from exc
-    return _parse_response(response, config, adapter=adapter, task_kind=task_kind), response
+        error = EstimatorUnavailableError(str(exc))
+        error.session_id = getattr(exc, "session_id", None)
+        raise error from exc
+    return job.validated, job
 
 
 def _build_project_context(project_root: str | None) -> str:
@@ -192,18 +215,19 @@ def _system_prompt(
         ),
     }.get(task_kind, "")
     prompt = (
-        "You estimate software task implementation token budgets. Return ONLY valid JSON "
+        "You estimate software task implementation token budgets. Call submit_estimate exactly once "
         "with exactly these fields: "
         "drivers (object containing files_to_read: non-negative integer, "
         "files_to_modify: non-negative integer, expected_turns: positive integer, "
         "needs_test_run: boolean), "
         "shadow_token_estimate (positive integer — your own guess, not the product estimate), "
         "complexity (simple|modest|complex), confidence (number 0-1), "
+        "investigation_recommended (boolean; true when a governed Scout is needed), "
         "rationale (string), assumptions (array of strings), risk_flags (array of strings), "
         "budget_note (string), source (string, use 'llm'). "
         "Do not include a top-level token_estimate; the harness computes it arithmetically from the drivers. "
         "Do not choose or recommend a Worker model; deterministic adapter-aware routing handles that after estimation. "
-        "Do not include markdown or extra keys. Complexity policy: "
+        "Do not emit the result as prose and do not include extra keys. Complexity policy: "
         f"{json.dumps(routing, sort_keys=True)}. Budget clamp: "
         f"enabled={clamp.enabled}, remaining_daily_threshold={clamp.remaining_daily_threshold}, "
         f"note_template={clamp.note!r}.{kind_note}"
@@ -227,52 +251,13 @@ def _system_prompt(
     return prompt
 
 
-def _parse_response(response: Any, config: GuardrailConfig, *, adapter: dict[str, Any] | None, task_kind: str = DEFAULT_TASK_KIND) -> EstimateResult:
-    try:
-        data = json.loads(_estimator_json_text(_response_content(response)))
-    except Exception as exc:
-        raise EstimatorValidationError("estimator returned invalid JSON") from exc
-    if not isinstance(data, dict):
-        raise EstimatorValidationError("estimator JSON must be an object")
-    return _validate_result(data, config, adapter=adapter, task_kind=task_kind)
-
-
-def _estimator_json_text(content: str) -> str:
-    text = content.strip()
-    if not text.startswith("```"):
-        return text
-
-    # Accept a fenced JSON object because some providers wrap json_object responses anyway.
-    lines = text.splitlines()
-    if len(lines) < 3:
-        raise EstimatorValidationError("estimator returned invalid JSON")
-    opening = lines[0].strip()
-    language = opening[3:].strip().lower()
-    if language not in {"", "json"}:
-        raise EstimatorValidationError("estimator returned invalid JSON")
-    if lines[-1].strip() != "```":
-        raise EstimatorValidationError("estimator returned invalid JSON")
-    return "\n".join(lines[1:-1]).strip()
-
-
-def _response_content(response: Any) -> str:
-    payload = response_to_dict(response)
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise EstimatorValidationError("estimator response missing choices")
-    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str) or not content.strip():
-        raise EstimatorValidationError("estimator response missing content")
-    return content
-
-
 def _validate_result(data: dict[str, Any], config: GuardrailConfig, *, adapter: dict[str, Any] | None, task_kind: str = DEFAULT_TASK_KIND) -> EstimateResult:
     required = {
         "drivers",
         "shadow_token_estimate",
         "complexity",
         "confidence",
+        "investigation_recommended",
         "rationale",
         "assumptions",
         "risk_flags",
@@ -301,6 +286,9 @@ def _validate_result(data: dict[str, Any], config: GuardrailConfig, *, adapter: 
         raise EstimatorValidationError("drivers.expected_turns must be a positive integer")
     if not isinstance(drivers["needs_test_run"], bool):
         raise EstimatorValidationError("drivers.needs_test_run must be a boolean")
+    extra_drivers = sorted(drivers.keys() - driver_fields)
+    if extra_drivers:
+        raise EstimatorValidationError(f"drivers included extra fields: {', '.join(extra_drivers)}")
 
     shadow_token_estimate = data["shadow_token_estimate"]
     if isinstance(shadow_token_estimate, bool) or not isinstance(shadow_token_estimate, int) or shadow_token_estimate <= 0:
@@ -314,6 +302,8 @@ def _validate_result(data: dict[str, Any], config: GuardrailConfig, *, adapter: 
     confidence = data["confidence"]
     if isinstance(confidence, bool) or not isinstance(confidence, int | float) or not 0 <= float(confidence) <= 1:
         raise EstimatorValidationError("confidence must be a number between 0 and 1")
+    if not isinstance(data["investigation_recommended"], bool):
+        raise EstimatorValidationError("investigation_recommended must be a boolean")
 
     for key in ["rationale", "budget_note", "source"]:
         if not isinstance(data[key], str):
@@ -351,4 +341,5 @@ def _validate_result(data: dict[str, Any], config: GuardrailConfig, *, adapter: 
         shadow_token_estimate=shadow_token_estimate,
         estimate_disagreement=disagreement,
         coefficient_provenance=coefficients.provenance,
+        investigation_recommended=data["investigation_recommended"],
     )

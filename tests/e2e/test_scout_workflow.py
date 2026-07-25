@@ -10,6 +10,7 @@ import pytest
 from foreman_ai_hq import db
 
 from tests.e2e.recorded_demo import DEMO_MODEL, DEMO_SESSION_ID, DEMO_SENTINEL, RecordedDemo
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
 SCOUT_PARENT_TASK_ID = "DEMO_999_SCOUT_PARENT"
@@ -36,6 +37,7 @@ class _FakeScoutEstimatorLLM:
             "shadow_token_estimate": 11000,
             "complexity": "modest",
             "confidence": 0.82,
+            "investigation_recommended": False,
             "rationale": "Synthetic estimate from Scout findings.",
             "assumptions": ["Synthetic fixture assumption."],
             "risk_flags": [],
@@ -124,7 +126,9 @@ class _ScoutWorkflowDemo(RecordedDemo):
         self.task_id = task["id"]
 
     def _seed_llm_client(self, app) -> None:
-        app.state.llm_client = _FakeScoutEstimatorLLM()
+        llm = _FakeScoutEstimatorLLM()
+        app.state.llm_client = llm
+        app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
 
 
 def _parse_action(action: dict) -> tuple[str, dict[str, str]]:
