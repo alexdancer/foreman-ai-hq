@@ -65,7 +65,7 @@ def start_session(payload: SessionStartRequest, request: Request) -> dict[str, A
     }
 
 
-@router.get("/session/{session_id}/report")
+@router.get("/session/{session_id}/report", dependencies=[Depends(require_portal_auth)])
 def session_report(session_id: str, request: Request) -> dict[str, Any]:
     artifact = _artifact_or_404(request, session_id)
     token_totals = _token_totals(artifact)
@@ -95,7 +95,7 @@ def session_artifact(session_id: str, request: Request) -> dict[str, Any]:
     return _artifact_or_404(request, session_id)
 
 
-@router.post("/session/{session_id}/checkpoint/evaluate")
+@router.post("/session/{session_id}/checkpoint/evaluate", dependencies=[Depends(require_portal_auth)])
 def evaluate_session_checkpoints(session_id: str, request: Request) -> dict[str, Any]:
     artifact = _artifact_or_404(request, session_id)
     results = [result.as_dict() for result in evaluate_checkpoints(artifact, _guardrails(request))]

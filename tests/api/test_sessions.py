@@ -63,7 +63,7 @@ def test_session_report_current_zone_includes_prior_daily_budget_usage(tmp_path)
                 "budget": {"daily_used_tokens": 900_000, "daily_cap_tokens": 1_000_000},
             },
         ).json()
-        report = client.get(f"/session/{started['session_id']}/report")
+        report = client.get(f"/session/{started['session_id']}/report", headers=_portal_headers())
 
     assert started["starting_zone"] == "red"
     assert report.status_code == 200
@@ -109,11 +109,11 @@ def test_session_report_artifact_and_checkpoint_evaluation(tmp_path, monkeypatch
             },
         )
 
-        report = client.get(f"/session/{session_id}/report")
+        report = client.get(f"/session/{session_id}/report", headers=_portal_headers())
         artifact_without_auth = client.get(f"/session/{session_id}/artifact")
         artifact = client.get(f"/session/{session_id}/artifact", headers=_portal_headers())
-        checkpoints = client.post(f"/session/{session_id}/checkpoint/evaluate")
-        report_after = client.get(f"/session/{session_id}/report")
+        checkpoints = client.post(f"/session/{session_id}/checkpoint/evaluate", headers=_portal_headers())
+        report_after = client.get(f"/session/{session_id}/report", headers=_portal_headers())
 
     assert report.status_code == 200
     report_body = report.json()
@@ -137,6 +137,40 @@ def test_session_report_artifact_and_checkpoint_evaluation(tmp_path, monkeypatch
 
 def test_session_routes_return_404_for_missing_session(tmp_path):
     with _client(tmp_path) as client:
-        response = client.get("/session/missing/report")
+        response = client.get("/session/missing/report", headers=_portal_headers())
 
     assert response.status_code == 404
+
+
+def test_session_report_requires_portal_auth(tmp_path):
+    with _client(tmp_path) as client:
+        started = client.post(
+            "/session/start",
+            headers=_portal_headers(),
+            json={"task_description": "Report leaks spend evidence", "model": "claude-haiku"},
+        ).json()
+        without_auth = client.get(f"/session/{started['session_id']}/report")
+        with_auth = client.get(f"/session/{started['session_id']}/report", headers=_portal_headers())
+
+    assert without_auth.status_code == 401
+    assert with_auth.status_code == 200
+    assert with_auth.json()["session"]["id"] == started["session_id"]
+
+
+def test_session_checkpoint_evaluation_requires_portal_auth(tmp_path):
+    with _client(tmp_path) as client:
+        started = client.post(
+            "/session/start",
+            headers=_portal_headers(),
+            json={"task_description": "Checkpoint writes need auth", "model": "claude-haiku"},
+        ).json()
+        session_id = started["session_id"]
+        without_auth = client.post(f"/session/{session_id}/checkpoint/evaluate")
+        # An unauthenticated call must not have persisted checkpoint rows before the auth check.
+        report_after_rejection = client.get(f"/session/{session_id}/report", headers=_portal_headers())
+        with_auth = client.post(f"/session/{session_id}/checkpoint/evaluate", headers=_portal_headers())
+
+    assert without_auth.status_code == 401
+    assert report_after_rejection.json()["checkpoints"] == []
+    assert with_auth.status_code == 200
+    assert with_auth.json()["session_id"] == session_id
