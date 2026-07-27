@@ -23,7 +23,48 @@ DEMO_TASK_ID = "DEMO_999_TASK_001"
 DEMO_SESSION_ID = "session_2099_demo_claude"
 DEMO_ADAPTER_ID = "claude_code"
 DEMO_MODEL = "claude-sonnet-4-6"
+# Seeded explicitly because there is no code default for the Orchestrator Model:
+# a Recorded Demo Run configures it as ordinary scenario state, provider-qualified
+# like any value pi's inventory would offer.
+DEMO_ORCHESTRATOR_MODEL = "anthropic/claude-sonnet-4-6"
 DEMO_SENTINEL = "DEMO streamed progress 2099"
+
+
+def _seed_orchestrator_inventory(database_path) -> None:
+    """Seed pi's discovery evidence the way a real refresh would write it.
+
+    The readiness gate reads this row, so a demo passes it through the production
+    code path rather than through an environment bypass that would weaken it.
+    """
+    from foreman_ai_hq import db
+    from foreman_ai_hq.pi_adapter import (
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        ORCHESTRATOR_STATUS_RECORD_NAME,
+    )
+
+    db.upsert_execution_backend_status(
+        database_path,
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        name=ORCHESTRATOR_STATUS_RECORD_NAME,
+        online=True,
+        details={
+            "model_discovery": {
+                "state": "ready",
+                "models": [DEMO_ORCHESTRATOR_MODEL],
+                "discovered_at": "2099-01-01T00:00:00+00:00",
+                "returncode": 0,
+                "reasons": [],
+            },
+            "verification": {
+                "model": DEMO_ORCHESTRATOR_MODEL,
+                "passed": True,
+                "verified_at": "2099-01-01T00:00:00+00:00",
+                "sentinel_matched": True,
+                "token_recorded": True,
+                "reasons": [],
+            },
+        },
+    )
 DEMO_PORTAL_TOKEN_ENV = "DEMO_999_PORTAL_TOKEN"
 
 
@@ -267,7 +308,9 @@ class RecordedDemo:
             local_runner_enabled=True,
             timezone="UTC",
             operator_config={},
+            orchestrator_model=DEMO_ORCHESTRATOR_MODEL,
         )
+        _seed_orchestrator_inventory(self.database_path)
         app = create_app(settings)
         self._seed_llm_client(app)
 
@@ -344,6 +387,8 @@ class RecordedDemo:
         from foreman_ai_hq.project_context import project_task_metadata
 
         db.init_db(self.database_path)
+        # After init_db, so the demo's own Orchestrator Model is the one that survives.
+        _seed_orchestrator_inventory(self.database_path)
 
         adapter = db.get_worker_adapter(self.database_path, DEMO_ADAPTER_ID)
         config = dict(adapter.get("config") or {})

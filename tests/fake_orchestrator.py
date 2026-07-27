@@ -69,6 +69,20 @@ class FakeOrchestratorJobRunner:
 
         if session is not None:
             usage = extract_usage(response)
+            raw_usage: dict[str, Any] = {**usage, "usage_source": "native_usage", "tracking_mode": "native_usage"}
+            if usage_kind == "reporting":
+                raw_usage.update(
+                    {
+                        "spend_category": "reporting_summary",
+                        "usage_source": "control_plane",
+                        "reporting_kind": "agent_review",
+                        "response": response_to_dict(response),
+                    }
+                )
+            elif usage_kind == "estimation":
+                raw_usage["spend_category"] = "control_plane"
+            elif usage_kind == "task_breakdown":
+                raw_usage["spend_category"] = "task_breakdown"
             db.record_token_turn(
                 database_path,
                 session_id=session["id"],
@@ -77,11 +91,7 @@ class FakeOrchestratorJobRunner:
                 prompt_tokens=usage["prompt_tokens"],
                 completion_tokens=usage["completion_tokens"],
                 cost=resolve_cost(model, response),
-                raw_usage={
-                    **usage,
-                    "usage_source": "native_usage",
-                    "tracking_mode": "native_usage",
-                },
+                raw_usage=raw_usage,
             )
 
         body = response_to_dict(response)

@@ -7,23 +7,30 @@ import os
 import queue
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from foreman_ai_hq import db
+from foreman_ai_hq.model_identity import MODEL_ID_PATTERN, looks_like_model_id
+from foreman_ai_hq.native_cli_diagnostics import redact_cli_value
 from foreman_ai_hq.native_usage import (
     NativeUsageEvidence,
     extract_pi_assistant_text,
     extract_pi_successful_tool_calls,
+    native_sentinel_matched,
     parse_pi_usage_stream,
 )
+# The orchestrator proves itself against the same sentinel a Worker Adapter does,
+# so the two verification bars stay literally the same string.
+from foreman_ai_hq.worker_adapters import SENTINEL_PROMPT, SENTINEL_RESPONSE
 
-DEFAULT_PI_MODEL = "gpt-5.4"
 PI_ACP_PI_COMMAND_ENV = "PI_ACP_PI_COMMAND"
 PI_ACP_PERSONA_PATH_ENV = "PI_ACP_PERSONA_PATH"
 PI_ACP_ALLOWED_TOOLS_ENV = "PI_ACP_ALLOWED_TOOLS"
@@ -37,6 +44,20 @@ DEFAULT_PROFILE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / 
 DEFAULT_EXTENSIONS_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "extensions"
 DEFAULT_BRIDGE_DIR = Path(__file__).resolve().parent / "orchestrator" / "pi" / "bridge"
 PI_ACP_PACKAGE = "pi-acp"
+
+PI_LIST_MODELS_COMMAND = ("pi", "--list-models")
+PI_LIST_MODELS_TIMEOUT_SECONDS = 30
+# A verification turn is a real model call, so it gets the launch budget a governed
+# turn gets rather than the short budget a local inventory listing needs.
+ORCHESTRATOR_VERIFICATION_TIMEOUT_SECONDS = 120
+# Legacy internal naming, deliberately not renamed: this is the `execution_backend_status`
+# row id for the Orchestrator Model, invisible to operators and referenced across src/.
+ORCHESTRATOR_STATUS_RECORD_ID = "control_plane_model"
+ORCHESTRATOR_STATUS_RECORD_NAME = "Orchestrator Model"
+
+DISCOVERY_READY = "ready"
+DISCOVERY_NEEDS_AUTHENTICATION = "needs_authentication"
+DISCOVERY_FAILED = "failed"
 
 
 class PiAuthRequired(RuntimeError):
@@ -72,27 +93,56 @@ def _default_pi_agent_dir() -> Path:
     return Path.home() / ".pi" / "agent"
 
 
-def _pi_default_provider() -> str | None:
-    """Return the default provider from the operator's pi settings, if present."""
-    settings_path = _default_pi_agent_dir() / "settings.json"
-    try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return settings.get("defaultProvider") or None
+def is_provider_qualified_model(model: str | None) -> bool:
+    """True only for an exact ``provider/model`` pi id.
+
+    pi's ``--model`` accepts glob and fuzzy patterns as well as ids, so a looser
+    value would make the configured model and the model that actually ran two
+    different things, knowable only after the turn.  The model column carries the
+    id shape, which is also what rejects a table header or sign-in guidance line.
+    """
+    if not model:
+        return False
+    provider, separator, model_id = model.partition("/")
+    if not separator or not provider or not model_id:
+        return False
+    return bool(MODEL_ID_PATTERN.fullmatch(provider)) and looks_like_model_id(model_id)
+
+
+def recorded_model_from_usage(
+    raw_usage: dict[str, Any] | None,
+    configured_model: str | None = None,
+) -> str | None:
+    """Return the provider-qualified model string to record for a pi turn.
+
+    pi messages may report only the model id without a provider, or the
+    configured fallback may be the only full ``provider/model`` string available.
+    The caller's configured model is the authority for the full id, so a bare id
+    is never auto-qualified by guessing a provider.
+    """
+    usage = raw_usage or {}
+    model = usage.get("model")
+    if is_provider_qualified_model(model):
+        return str(model)
+    provider = usage.get("provider")
+    if provider and model:
+        candidate = f"{provider}/{model}"
+        if is_provider_qualified_model(candidate):
+            return candidate
+    if is_provider_qualified_model(configured_model):
+        return str(configured_model)
+    return configured_model
 
 
 def _resolve_pi_provider_model(model: str) -> tuple[str | None, str]:
-    """Split a pi provider/model id into (provider, model_id).
+    """Split a provider-qualified pi id into (provider, model_id).
 
-    If the id does not include a provider prefix, fall back to the operator's
-    default pi provider.  This lets ``orchestrator_model`` be written either as
-    ``gpt-5.4`` (when the default provider supports it) or ``openai-codex/gpt-5.4``.
+    An unqualified value reaching here is a bug: guessing a provider is what let
+    a bare id resolve to a working launch against the wrong provider entirely.
+    Qualification is enforced at validation time, before launch.
     """
-    if "/" in model:
-        provider, model_id = model.split("/", 1)
-        return provider, model_id
-    return _pi_default_provider(), model
+    provider, _, model_id = model.partition("/")
+    return (provider, model_id) if model_id else (None, provider)
 
 
 def _pi_acp_command(bridge_dir: Path) -> list[str]:
@@ -131,6 +181,327 @@ def _prepare_pi_env(
         "PI_CODING_AGENT_DIR": str(selected_agent_dir),
         "PI_CODING_AGENT_SESSION_DIR": str(sessions_dir),
     }
+
+
+@dataclass(frozen=True)
+class OrchestratorModelDiscoveryResult:
+    """Outcome of one ``pi --list-models`` inventory refresh.
+
+    ``state`` keeps an empty-but-successful run distinct from a failed one: pi's
+    inventory is auth-filtered, so no models means "sign in to a provider", which
+    needs the opposite operator action from "discovery broke".
+    """
+
+    state: str
+    models: list[str]
+    reasons: list[str]
+    evidence: dict[str, Any]
+
+    @property
+    def passed(self) -> bool:
+        return self.state == DISCOVERY_READY
+
+    @property
+    def needs_authentication(self) -> bool:
+        return self.state == DISCOVERY_NEEDS_AUTHENTICATION
+
+
+PiCommandRunner = Callable[[list[str], dict[str, str]], "subprocess.CompletedProcess[str]"]
+
+
+def _run_pi_command(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=PI_LIST_MODELS_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+def _parse_pi_model_inventory(stdout: str) -> list[str]:
+    """Join the provider and model columns of ``pi --list-models`` into pi ids.
+
+    The output is a fixed-width table behind a ``provider model context ...``
+    header.  Guarding the *model* column is what rejects both non-model lines:
+    the header's column reads ``model`` and the empty-auth line reads
+    ``No models available. Use /login ...``.
+    """
+    models: list[str] = []
+    seen: set[str] = set()
+    for line in stdout.splitlines():
+        columns = line.split()
+        if len(columns) < 2:
+            continue
+        model = f"{columns[0]}/{columns[1]}"
+        if not is_provider_qualified_model(model) or model in seen:
+            continue
+        seen.add(model)
+        models.append(model)
+    return models
+
+
+def discover_orchestrator_models(
+    database_path: Path | str,
+    *,
+    agent_dir: Path | str | None = None,
+    runner: PiCommandRunner | None = None,
+) -> OrchestratorModelDiscoveryResult:
+    """Refresh the Orchestrator Model inventory from pi and persist the evidence.
+
+    Evidence is persisted rather than re-derived on demand because readiness must
+    be answerable from the database alone; shelling out to pi on every check would
+    make a Recorded Demo Run impossible without real provider auth.
+    """
+    command = list(PI_LIST_MODELS_COMMAND)
+    with tempfile.TemporaryDirectory(prefix="pi-list-models-") as tmpdir:
+        env = _prepare_pi_env(
+            Path(tmpdir) / "sessions",
+            agent_dir=Path(agent_dir) if agent_dir else None,
+        )
+        try:
+            completed = (runner or _run_pi_command)(command, env)
+        except Exception as exc:
+            # A missing or unlaunchable pi is a discovery failure, not an empty inventory.
+            completed = subprocess.CompletedProcess(
+                command,
+                127,
+                stdout="",
+                stderr=f"Failed to launch command {command[0]!r}: {type(exc).__name__}",
+            )
+
+    returncode = int(completed.returncode or 0)
+    stdout = str(completed.stdout or "")
+    stderr = str(completed.stderr or "")
+    models = _parse_pi_model_inventory(stdout) if returncode == 0 else []
+    if returncode != 0:
+        state = DISCOVERY_FAILED
+        reasons = [f"`{' '.join(command)}` exited with {returncode}."]
+    elif not models:
+        state = DISCOVERY_NEEDS_AUTHENTICATION
+        reasons = ["pi reported no models. Run `pi /login` to authenticate a provider."]
+    else:
+        state = DISCOVERY_READY
+        reasons = []
+
+    evidence = {
+        "state": state,
+        "models": models,
+        "discovered_at": datetime.now(UTC).isoformat(),
+        "returncode": returncode,
+        "stdout": redact_cli_value(stdout.strip()),
+        "stderr": redact_cli_value(stderr.strip()),
+        "command": command,
+        "reasons": reasons,
+    }
+    _persist_orchestrator_discovery(database_path, evidence)
+    return OrchestratorModelDiscoveryResult(
+        state=state, models=models, reasons=reasons, evidence=evidence
+    )
+
+
+def _persist_orchestrator_discovery(
+    database_path: Path | str, evidence: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge inventory evidence into the orchestrator status row's details blob."""
+    try:
+        existing = db.get_execution_backend_status(database_path, ORCHESTRATOR_STATUS_RECORD_ID)
+        details = dict(existing.get("details") or {})
+        # Discovery is not verification: listing the inventory must neither claim
+        # nor revoke the online state that a verification turn establishes.
+        online = bool(existing.get("online"))
+    except KeyError:
+        details, online = {}, False
+    details["model_discovery"] = evidence
+    return db.upsert_execution_backend_status(
+        database_path,
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        name=ORCHESTRATOR_STATUS_RECORD_NAME,
+        online=online,
+        details=details,
+    )
+
+
+def persisted_orchestrator_discovery(database_path: Path | str) -> dict[str, Any]:
+    """Return the persisted inventory evidence, or an empty blob when there is none.
+
+    An un-migrated database has no evidence rather than a broken read, so callers
+    that run before `init_db` — `htb check` against a fresh root — see *not
+    configured* instead of a sqlite error.
+    """
+    try:
+        status = db.get_execution_backend_status(database_path, ORCHESTRATOR_STATUS_RECORD_ID)
+    except (KeyError, sqlite3.OperationalError):
+        return {}
+    discovery = (status.get("details") or {}).get("model_discovery")
+    return dict(discovery) if isinstance(discovery, dict) else {}
+
+
+def discovered_orchestrator_models(database_path: Path | str) -> list[str]:
+    """Return the provider-qualified ids pi last reported."""
+    models = persisted_orchestrator_discovery(database_path).get("models") or []
+    return [str(model) for model in models if is_provider_qualified_model(str(model))]
+
+
+def resolve_orchestrator_model(database_path: Path | str, model: str | None) -> str | None:
+    """Return the configured model only when pi's inventory still offers it.
+
+    An absent, unqualified, or pattern-shaped value is *not configured*.  It is
+    deliberately not repaired by inferring a provider: that would make the harness
+    a second authority over pi's own inventory.
+    """
+    if not is_provider_qualified_model(model):
+        return None
+    return model if model in discovered_orchestrator_models(database_path) else None
+
+
+@dataclass(frozen=True)
+class OrchestratorVerificationResult:
+    """Outcome of one sentinel turn proving the configured Orchestrator Model runs."""
+
+    passed: bool
+    model: str
+    session_id: str | None
+    reasons: list[str]
+    evidence: dict[str, Any]
+
+
+def _persist_orchestrator_verification(
+    database_path: Path | str, evidence: dict[str, Any], *, passed: bool
+) -> dict[str, Any]:
+    """Merge verification evidence into the orchestrator status row.
+
+    Unlike discovery, verification owns the ``online`` flag: it is the only check
+    that proves a turn ran and was metered.
+    """
+    try:
+        existing = db.get_execution_backend_status(database_path, ORCHESTRATOR_STATUS_RECORD_ID)
+        details = dict(existing.get("details") or {})
+    except KeyError:
+        details = {}
+    details["verification"] = evidence
+    return db.upsert_execution_backend_status(
+        database_path,
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        name=ORCHESTRATOR_STATUS_RECORD_NAME,
+        online=passed,
+        details=details,
+    )
+
+
+def persisted_orchestrator_verification(database_path: Path | str) -> dict[str, Any]:
+    """Return the persisted verification evidence, or an empty blob when there is none."""
+    try:
+        status = db.get_execution_backend_status(database_path, ORCHESTRATOR_STATUS_RECORD_ID)
+    except (KeyError, sqlite3.OperationalError):
+        return {}
+    verification = (status.get("details") or {}).get("verification")
+    return dict(verification) if isinstance(verification, dict) else {}
+
+
+def orchestrator_verification_is_stale(evidence: dict[str, Any], model: str | None) -> bool:
+    """True when evidence exists but proves a different model than the configured one.
+
+    Derived by comparison rather than written as a flag on save, so a stale marker
+    cannot drift out of step with the value it describes.
+    """
+    if not evidence:
+        return False
+    return str(evidence.get("model") or "") != str(model or "")
+
+
+def verify_orchestrator_model(
+    database_path: Path | str,
+    model: str | None,
+    *,
+    agent_dir: Path | str | None = None,
+    timeout: float = ORCHESTRATOR_VERIFICATION_TIMEOUT_SECONDS,
+    launcher: Callable[..., tuple[dict[str, Any], "PiOnceResult"]] | None = None,
+) -> OrchestratorVerificationResult:
+    """Run one sentinel turn through the governed launch path and prove it was metered.
+
+    A matched sentinel alone only proves the command ran; without a recorded token
+    turn there is no evidence spend is accounted, which is the bar Worker Adapter
+    verification already clears.
+    """
+    reasons: list[str] = []
+    if not is_provider_qualified_model(model):
+        # No turn is started for a value the launcher would have to guess at.
+        evidence = {
+            "model": model,
+            "passed": False,
+            "verified_at": datetime.now(UTC).isoformat(),
+            "reasons": ["Orchestrator Model is not a provider-qualified id from pi's inventory."],
+        }
+        _persist_orchestrator_verification(database_path, evidence, passed=False)
+        return OrchestratorVerificationResult(
+            passed=False, model=str(model or ""), session_id=None, reasons=list(evidence["reasons"]), evidence=evidence
+        )
+
+    selected_model = str(model)
+    _, model_id = _resolve_pi_provider_model(selected_model)
+    try:
+        session, result = (launcher or launch_pi_once)(
+            database_path,
+            SENTINEL_PROMPT,
+            model=selected_model,
+            agent_dir=agent_dir,
+            timeout=timeout,
+            usage_kind="adapter_verification",
+        )
+    except PiAuthRequired as exc:
+        evidence = {
+            "model": selected_model,
+            "passed": False,
+            "verified_at": datetime.now(UTC).isoformat(),
+            "reasons": [str(exc)],
+            "needs_authentication": True,
+        }
+        _persist_orchestrator_verification(database_path, evidence, passed=False)
+        return OrchestratorVerificationResult(
+            passed=False, model=selected_model, session_id=None, reasons=list(evidence["reasons"]), evidence=evidence
+        )
+    except Exception as exc:
+        evidence = {
+            "model": selected_model,
+            "passed": False,
+            "verified_at": datetime.now(UTC).isoformat(),
+            "reasons": [f"Verification turn failed to launch: {type(exc).__name__}"],
+        }
+        _persist_orchestrator_verification(database_path, evidence, passed=False)
+        return OrchestratorVerificationResult(
+            passed=False, model=selected_model, session_id=None, reasons=list(evidence["reasons"]), evidence=evidence
+        )
+
+    sentinel_matched = native_sentinel_matched(result.stdout, SENTINEL_RESPONSE)
+    token_recorded = db.has_adapter_verification_token(
+        database_path, session_id=session["id"], model=selected_model
+    )
+    if result.returncode != 0:
+        reasons.append("Orchestrator verification turn exited non-zero.")
+    if not sentinel_matched:
+        reasons.append("Orchestrator did not return the exact verification sentinel.")
+    if not token_recorded:
+        reasons.append("No adapter_verification token turn was recorded for the Orchestrator Model.")
+
+    passed = sentinel_matched and token_recorded
+    evidence = {
+        "model": selected_model,
+        "passed": passed,
+        "verified_at": datetime.now(UTC).isoformat(),
+        "session_id": session["id"],
+        "sentinel_matched": sentinel_matched,
+        "token_recorded": token_recorded,
+        "returncode": result.returncode,
+        "stdout": redact_cli_value(result.stdout.strip()),
+        "stderr": redact_cli_value(result.stderr.strip()),
+        "reasons": reasons,
+    }
+    _persist_orchestrator_verification(database_path, evidence, passed=passed)
+    return OrchestratorVerificationResult(
+        passed=passed, model=selected_model, session_id=session["id"], reasons=reasons, evidence=evidence
+    )
 
 
 def _write_pi_acp_wrapper(
@@ -213,9 +584,10 @@ def launch_pi_once(
     prompt: str,
     *,
     profile_dir: Path | str | None = None,
-    model: str = DEFAULT_PI_MODEL,
+    model: str,
     agent_dir: Path | str | None = None,
     timeout: float = 60,
+    usage_kind: str = "planning",
 ) -> tuple[dict[str, Any], PiOnceResult]:
     """Mint a planning session and run pi once on its native provider.
 
@@ -228,7 +600,7 @@ def launch_pi_once(
     session, _bearer_key = db.create_planning_session(
         database_path,
         task_description="pi orchestrator launch",
-        model=model_id,
+        model=model,
         tracking_mode="native_usage",
     )
     selected_profile_dir = Path(profile_dir) if profile_dir else DEFAULT_PROFILE_DIR
@@ -259,13 +631,13 @@ def launch_pi_once(
             "Provider authentication required; run `pi /login` or add an API key in pi."
         )
 
-    evidence = parse_pi_usage_stream(result.stdout, model=model_id)
+    evidence = parse_pi_usage_stream(result.stdout, model=model)
     if evidence is not None:
         db.record_token_turn(
             database_path,
             session_id=session["id"],
-            usage_kind="planning",
-            model=model_id,
+            usage_kind=usage_kind,
+            model=recorded_model_from_usage(evidence.raw_usage, configured_model=model),
             prompt_tokens=evidence.prompt_tokens,
             completion_tokens=evidence.completion_tokens,
             cost=evidence.cost,
@@ -400,13 +772,13 @@ async def run_pi_structured_job(
     elapsed = time.monotonic() - started_at
     stdout = stdout_bytes.decode("utf-8", errors="replace")
     stderr = stderr_bytes.decode("utf-8", errors="replace")
-    evidence = parse_pi_usage_stream(stdout, model=model_id)
+    evidence = parse_pi_usage_stream(stdout, model=model)
     if evidence is not None:
         db.record_token_turn(
             database_path,
             session_id=session["id"],
             usage_kind=usage_kind,
-            model=model,
+            model=recorded_model_from_usage(evidence.raw_usage, configured_model=model),
             prompt_tokens=evidence.prompt_tokens,
             completion_tokens=evidence.completion_tokens,
             cost=evidence.cost,
@@ -655,7 +1027,7 @@ class PiConversation:
             self._database_path,
             session_id=self.session["id"],
             usage_kind="planning",
-            model=self._model,
+            model=recorded_model_from_usage(evidence.raw_usage, configured_model=self._model),
             prompt_tokens=evidence.prompt_tokens,
             completion_tokens=evidence.completion_tokens,
             cost=evidence.cost,
@@ -709,7 +1081,7 @@ def open_pi_conversation(
     database_path: Path | str,
     *,
     profile_dir: Path | str | None = None,
-    model: str = DEFAULT_PI_MODEL,
+    model: str,
     cwd: Path | str | None = None,
     timeout: float = 60,
     agent_dir: Path | str | None = None,
@@ -726,7 +1098,7 @@ def open_pi_conversation(
     session, _bearer_key = db.create_planning_session(
         database_path,
         task_description="pi orchestrator ACP conversation",
-        model=model_id,
+        model=model,
         tracking_mode="native_usage",
     )
     selected_profile_dir = Path(profile_dir) if profile_dir else DEFAULT_PROFILE_DIR
@@ -793,7 +1165,7 @@ def open_pi_conversation(
             timeout,
             workdir=Path(tmpdir),
             database_path=database_path,
-            model=model_id,
+            model=model,
             sessions_dir=sessions_dir,
         )
     except Exception:
@@ -807,7 +1179,7 @@ def launch_pi_conversation(
     prompts: list[str] | None = None,
     *,
     profile_dir: Path | str | None = None,
-    model: str = DEFAULT_PI_MODEL,
+    model: str,
     cwd: Path | str | None = None,
     agent_dir: Path | str | None = None,
     timeout: float = 60,

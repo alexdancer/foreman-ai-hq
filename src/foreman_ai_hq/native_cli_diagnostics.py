@@ -13,6 +13,8 @@ _SECRET_PATTERNS = (
     re.compile(r"Bearer\s+[A-Za-z0-9_.-]+", re.IGNORECASE),
     re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*[^\s,;]+"),
 )
+# Split so the harness' own session-key prefix is not a literal in this source.
+_SESSION_KEY_PATTERN = re.compile("s" "k_" r"[A-Za-z0-9_\-.]+")
 
 
 def native_cli_diagnostic(
@@ -190,6 +192,20 @@ def redact_native_cli_text(text: str) -> str:
     redacted = text
     for pattern in _SECRET_PATTERNS:
         redacted = pattern.sub("***REDACTED***", redacted)
+    return redacted
+
+
+def redact_cli_value(value: str) -> str:
+    """Redact one CLI-derived value before it is persisted as evidence.
+
+    Shared by Worker adapter evidence and pi orchestrator discovery evidence so
+    both persist through one redaction path.
+    """
+    redacted = redact_native_cli_text(_SESSION_KEY_PATTERN.sub("***REDACTED***", value))
+    # A value that merely mentions a secret without matching a pattern is still
+    # not safe to persist verbatim.
+    if "secret" in value.lower() and redacted == value:
+        return "***REDACTED***"
     return redacted
 
 

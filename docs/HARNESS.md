@@ -89,7 +89,7 @@ The harness tracks project capability explicitly:
 | Launch-ready via Hosted Workspace/Sandbox | A hosted execution environment is sandboxed, configured, and verified. |
 | Blocked | The project exists, but no backend satisfies launch requirements. |
 
-The current operator path is local-first: `foremanctl init`, `foremanctl serve`, connect a local project, configure the orchestrator model, verify a Worker Adapter, then launch from the project board.
+The current operator path is local-first: `foremanctl init`, `foremanctl serve`, connect a local project, run `pi /login` and choose the orchestrator model from pi's inventory, verify a Worker Adapter, then launch from the project board.
 
 Hosted workspaces are useful for analysis and estimation before they are launch-ready. Hosted Worker execution requires a verified sandbox, credentials policy, and Worker Adapter installation before it should be presented as launchable.
 

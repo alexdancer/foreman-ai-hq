@@ -48,12 +48,18 @@ from foreman_ai_hq.evidence_reporting import (
 )
 from foreman_ai_hq.guardrails import get_budget_zone
 from foreman_ai_hq.llm import LLMClient, extract_usage, resolve_cost, response_to_dict
-from foreman_ai_hq.operator_config import (
-    control_plane_provider_defaults,
-    ensure_secret_placeholder,
-    load_operator_secrets_env,
-    update_operator_config,
-    write_control_plane_secret,
+from foreman_ai_hq.operator_config import update_operator_config
+from foreman_ai_hq.orchestrator_gate import require_configured_orchestrator
+from foreman_ai_hq.pi_adapter import (
+    ORCHESTRATOR_STATUS_RECORD_ID,
+    ORCHESTRATOR_STATUS_RECORD_NAME,
+    discover_orchestrator_models,
+    is_provider_qualified_model,
+    orchestrator_verification_is_stale,
+    persisted_orchestrator_discovery,
+    persisted_orchestrator_verification,
+    resolve_orchestrator_model,
+    verify_orchestrator_model,
 )
 from foreman_ai_hq.project_context import task_project_id
 from foreman_ai_hq.routes.react_shell import _budget_json, react_shell_or_missing_build
@@ -212,69 +218,26 @@ class TokenBudgetSettingsRequest(BaseModel):
 
 
 class ControlPlaneSettingsRequest(BaseModel):
+    """The Orchestrator Model is the whole setting.
+
+    Provider, base URL, and API credentials are gone from this surface: pi owns
+    provider authentication, so collecting them here only ever produced a page
+    that could report ready against a provider the Orchestrator never calls.
+    Inventory membership needs the database, so it is enforced in the route.
+    """
+
     model_config = ConfigDict(populate_by_name=True)
-    control_plane_provider: str = Field(min_length=1, pattern="^(openai|anthropic|openai-compatible|openrouter)$")
     orchestrator_model: str = Field(min_length=1, alias="control_plane_model")
-    control_plane_base_url: str = ""
-    control_plane_api_key_env: str = ""
-    control_plane_api_key: str = ""
-    apply_to_estimator_breakdown: bool = True
 
     @field_validator("orchestrator_model")
     @classmethod
-    def _model_must_not_be_blank(cls, value: str) -> str:
+    def _model_must_be_provider_qualified(cls, value: str) -> str:
         model = value.strip()
         if not model:
             raise ValueError("model must not be blank")
-        if model == "__custom__":
-            raise ValueError("custom model value is required")
+        if not is_provider_qualified_model(model):
+            raise ValueError("model must be a provider-qualified id from pi's inventory")
         return model
-
-    @field_validator("control_plane_base_url")
-    @classmethod
-    def _base_url_must_be_http_url(cls, value: str) -> str:
-        base_url = value.strip()
-        if not base_url:
-            return ""
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("base URL must be an http(s) URL")
-        return base_url.rstrip("/")
-
-    @field_validator("control_plane_api_key")
-    @classmethod
-    def _api_key_blank_means_keep_existing(cls, value: str) -> str:
-        return value.strip()
-
-    @model_validator(mode="after")
-    def _compatible_provider_requires_base_url(self) -> "ControlPlaneSettingsRequest":
-        defaults = control_plane_provider_defaults(self.control_plane_provider)
-        if not self.control_plane_api_key_env:
-            self.control_plane_api_key_env = defaults.get("control_plane_api_key_env", "")
-        if not self.control_plane_base_url:
-            self.control_plane_base_url = defaults.get("control_plane_base_url", "")
-        if self.control_plane_provider == "openai-compatible" and not self.control_plane_base_url:
-            raise ValueError("openai-compatible provider requires a base URL")
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.control_plane_api_key_env):
-            raise ValueError("API key env name is invalid")
-        return self
-
-
-# Authoritative curated control-plane provider/model choices. Every renderer
-# (JSON handoff and React shell) consumes this list so the dropdown cannot drift
-# between surfaces.
-CURATED_CONTROL_PLANE_MODELS: tuple[tuple[str, str, str], ...] = (
-    ("openai", "gpt-5.6-sol", "OpenAI · gpt-5.6-sol"),
-    ("openai", "gpt-5.6-terra", "OpenAI · gpt-5.6-terra"),
-    ("openai", "gpt-5.6-luna", "OpenAI · gpt-5.6-luna"),
-    ("anthropic", "claude-fable-5", "Anthropic · Claude Fable 5"),
-    ("anthropic", "claude-sonnet-5", "Anthropic · Claude Sonnet 5"),
-    ("anthropic", "claude-opus-4-8", "Anthropic · Claude Opus 4.8"),
-    ("anthropic", "claude-haiku-4-5", "Anthropic · Claude Haiku 4.5"),
-    ("openrouter", "anthropic/claude-sonnet-5", "OpenRouter · Claude Sonnet 5 (recommended)"),
-    ("openrouter", "openai/gpt-5.6-terra", "OpenRouter · GPT-5.6 Terra (recommended)"),
-    ("openrouter", "google/gemini-3.5-flash", "OpenRouter · Gemini 3.5 Flash (recommended)"),
-)
 
 
 @router.get("/")
@@ -470,13 +433,18 @@ def projects(request: Request):
 
 @router.get("/projects/{project_id}", response_class=HTMLResponse, dependencies=[Depends(require_portal_auth)])
 def project_workspace(project_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
+    settings = request.app.state.settings
+    database_path = settings.database_path
     # Existence stays backend-authoritative: an unknown project is a 404 whether
     # or not the frontend is built.
     try:
         db.get_connected_project(database_path, project_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="connected project not found") from exc
+    # An HTML surface is redirected rather than 503'd: "direct the operator to
+    # orchestrator setup" is a page they can act on, not an error code.
+    if not orchestrator_is_configured(database_path, settings.orchestrator_model):
+        return RedirectResponse("/settings/control-plane", status_code=status.HTTP_303_SEE_OTHER)
     return react_shell_or_missing_build()
 
 
@@ -869,7 +837,10 @@ def project_queue_stop(project_id: str, request: Request):
     return RedirectResponse(f"/projects/{project_id}/floor", status_code=303)
 
 
-@router.get("/projects/{project_id}/board/status", dependencies=[Depends(require_portal_auth)])
+@router.get(
+    "/projects/{project_id}/board/status",
+    dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)],
+)
 async def project_board_status(project_id: str, request: Request):
     database_path = request.app.state.settings.database_path
     try:
@@ -1264,22 +1235,29 @@ def control_plane_settings(request: Request):
 async def save_control_plane_settings(request: Request):
     payload, wants_html = await _control_plane_payload_from_request(request)
     current: Settings = request.app.state.settings
+
+    # Revalidate against a fresh inventory rather than the persisted snapshot, so a
+    # cache that went stale between render and save cannot store an unrunnable model.
+    discovery = discover_orchestrator_models(current.database_path)
+    if payload.orchestrator_model not in discovery.models:
+        detail = (
+            "Sign in to a provider with `pi /login` before choosing an Orchestrator Model."
+            if discovery.needs_authentication
+            else "That model is no longer in pi's inventory. Refresh and choose again."
+        )
+        if _wants_react_json(request):
+            return _react_control_plane_outcome(ok=False, error=detail, status_code=422)
+        return JSONResponse(status_code=422, content={"detail": detail})
+
+    # One Orchestrator Model drives every orchestration job; there is no per-job opt-in.
     updates: dict[str, Any] = {
-        "control_plane_provider": payload.control_plane_provider,
         "control_plane_model": payload.orchestrator_model,
-        "control_plane_base_url": payload.control_plane_base_url.strip(),
-        "control_plane_api_key_env": payload.control_plane_api_key_env,
+        "orchestrator_model": payload.orchestrator_model,
+        "estimator_model": payload.orchestrator_model,
+        "task_breakdown_model": payload.orchestrator_model,
     }
-    if payload.apply_to_estimator_breakdown:
-        updates["estimator_model"] = payload.orchestrator_model
-        updates["task_breakdown_model"] = payload.orchestrator_model
     try:
         config = update_operator_config(**updates)
-        if payload.control_plane_api_key:
-            write_control_plane_secret(payload.control_plane_api_key_env, payload.control_plane_api_key)
-        else:
-            ensure_secret_placeholder(payload.control_plane_api_key_env)
-            load_operator_secrets_env(config)
         _sync_control_plane_env(payload)
     except OSError as exc:
         safe_message = "Could not save control-plane config."
@@ -1303,26 +1281,33 @@ async def save_control_plane_settings(request: Request):
     )
     request.app.state.settings = new_settings
     request.app.state.llm_client = LLMClient(new_settings)
+    # Merge rather than replace: the details blob also carries discovery and
+    # verification evidence, and a save must not erase the inventory it validated against.
+    try:
+        existing_details = dict(
+            (db.get_execution_backend_status(new_settings.database_path, ORCHESTRATOR_STATUS_RECORD_ID).get("details") or {})
+        )
+    except KeyError:
+        existing_details = {}
+    # Saving a different model does not invalidate the run that proved the old one;
+    # staleness is derived by comparing the evidence's model to the configured one.
+    existing_details.update(
+        {
+            "status": "needs_verification",
+            "reason": "configuration changed; verification required",
+            "model": new_settings.orchestrator_model,
+        }
+    )
     status_record = db.upsert_execution_backend_status(
         new_settings.database_path,
-        "control_plane_model",
-        name="Orchestrator Model",
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        name=ORCHESTRATOR_STATUS_RECORD_NAME,
         online=False,
-        details={
-            # A saved config is not trusted until the explicit connection test passes.
-            "status": "needs_test",
-            "reason": "configuration changed; test required",
-            "provider": new_settings.control_plane_provider,
-            "model": new_settings.orchestrator_model,
-            "api_key_env": new_settings.control_plane_api_key_env,
-        },
+        details=existing_details,
     )
     status_with_state = {**status_record, "state": _control_plane_connection_state(status_record)}
     settings_json = {
-        "control_plane_provider": new_settings.control_plane_provider,
         "orchestrator_model": new_settings.orchestrator_model,
-        "control_plane_base_url": new_settings.control_plane_base_url,
-        "control_plane_api_key_env": new_settings.control_plane_api_key_env,
         "estimator_model": new_settings.estimator_model,
         "task_breakdown_model": new_settings.task_breakdown_model,
     }
@@ -1334,62 +1319,57 @@ async def save_control_plane_settings(request: Request):
             settings=settings_json,
             status=status_with_state,
             shadowed_settings=_control_plane_shadowed_settings(new_settings),
+            diverging_jobs=_orchestrator_job_divergence(new_settings),
         )
     return {
         "settings": settings_json,
         "status": status_with_state,
         "shadowed_settings": _control_plane_shadowed_settings(new_settings),
+        "diverging_jobs": _orchestrator_job_divergence(new_settings),
     }
 
 
-@router.post("/settings/control-plane/test", dependencies=[Depends(require_portal_auth)])
-async def test_control_plane_connection(request: Request):
+@router.post("/settings/control-plane/discover", dependencies=[Depends(require_portal_auth)])
+def discover_control_plane_models(request: Request):
+    """Refresh pi's model inventory on explicit operator request."""
+    settings = request.app.state.settings
+    result = discover_orchestrator_models(settings.database_path)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "state": result.state,
+            "models": result.models,
+            "reasons": result.reasons,
+            "discovered_at": result.evidence.get("discovered_at"),
+            "needs_authentication": result.needs_authentication,
+        },
+    )
+
+
+@router.post("/settings/control-plane/verify", dependencies=[Depends(require_portal_auth)])
+def verify_control_plane_model(request: Request):
+    """Prove the configured Orchestrator Model by running one metered sentinel turn."""
     settings = request.app.state.settings
     accept = request.headers.get("accept", "")
     wants_html = "text/html" in accept and "application/json" not in accept
-    payload = {
-        "model": settings.orchestrator_model,
-        "messages": [{"role": "user", "content": "Return exactly FOREMAN_AI_HQ_CONTROL_PLANE_OK."}],
-    }
+    result = verify_orchestrator_model(settings.database_path, settings.orchestrator_model)
     try:
-        response = await request.app.state.llm_client.acompletion(payload)
-        status_record = db.upsert_execution_backend_status(
-            settings.database_path,
-            "control_plane_model",
-            name="Orchestrator Model",
-            online=True,
-            details={
-                "provider": settings.control_plane_provider,
-                "model": settings.orchestrator_model,
-                "api_key_env": settings.control_plane_api_key_env,
-                "usage": extract_usage(response),
-                "cost": resolve_cost(settings.orchestrator_model, response),
-                "response": _safe_worker_evidence(response_to_dict(response)),
-            },
-        )
-        status_with_state = {**status_record, "state": _control_plane_connection_state(status_record)}
-        if wants_html:
-            return RedirectResponse("/settings/control-plane", status_code=status.HTTP_303_SEE_OTHER)
-        return JSONResponse(status_code=200, content={"passed": True, "status": status_with_state, "error": None})
-    except Exception as exc:
-        status_record = db.upsert_execution_backend_status(
-            settings.database_path,
-            "control_plane_model",
-            name="Orchestrator Model",
-            online=False,
-            details={
-                "provider": settings.control_plane_provider,
-                "model": settings.orchestrator_model,
-                "api_key_env": settings.control_plane_api_key_env,
-                "error_type": type(exc).__name__,
-                "error": _safe_worker_evidence(str(exc)),
-            },
-        )
-        status_with_state = {**status_record, "state": _control_plane_connection_state(status_record)}
-        if wants_html:
-            return RedirectResponse("/settings/control-plane", status_code=status.HTTP_303_SEE_OTHER)
-        error_summary = (status_with_state.get("details") or {}).get("error") or "control-plane connection test failed"
-        return JSONResponse(status_code=503, content={"passed": False, "status": status_with_state, "error": error_summary})
+        status_record = db.get_execution_backend_status(settings.database_path, ORCHESTRATOR_STATUS_RECORD_ID)
+    except KeyError:
+        status_record = None
+    status_with_state = (
+        {**status_record, "state": _control_plane_connection_state(status_record)} if status_record else None
+    )
+    if wants_html:
+        return RedirectResponse("/settings/control-plane", status_code=status.HTTP_303_SEE_OTHER)
+    return JSONResponse(
+        status_code=200 if result.passed else 503,
+        content={
+            "passed": result.passed,
+            "status": status_with_state,
+            "error": None if result.passed else "; ".join(result.reasons) or "orchestrator verification failed",
+        },
+    )
 
 
 @router.get("/settings/project", response_class=HTMLResponse, dependencies=[Depends(require_portal_auth)])
@@ -1580,10 +1560,6 @@ async def _control_plane_payload_from_request(request: Request) -> tuple[Control
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
         form = await request.form()
         raw: dict[str, Any] = {key: value for key, value in form.items() if value not in (None, "")}
-        if raw.get("control_plane_model") == "__custom__":
-            raw["control_plane_model"] = str(form.get("custom_control_plane_model") or "").strip()
-        raw.pop("custom_control_plane_model", None)
-        raw["apply_to_estimator_breakdown"] = "apply_to_estimator_breakdown" in raw
         try:
             return ControlPlaneSettingsRequest.model_validate(raw), True
         except ValidationError as exc:
@@ -1601,23 +1577,48 @@ def _validation_error_details(exc: ValidationError) -> list[dict[str, Any]]:
     return details
 
 
+def orchestrator_is_configured(database_path: Path | str, model: str | None) -> bool:
+    """True when a provider-qualified model is configured AND pi last reported it.
+
+    Read from persisted evidence only — never by invoking pi — so a Recorded Demo
+    Run seeds it as ordinary scenario state and no environment setting can bypass it.
+    """
+    return resolve_orchestrator_model(database_path, model) is not None
+
+
 def _control_plane_setup_state(settings: Settings, control_status: dict[str, Any] | None) -> str:
-    if control_status and (control_status.get("details") or {}).get("status") == "needs_test":
-        return "needs test"
-    if bool(os.getenv(settings.control_plane_api_key_env)) or (control_status and control_status.get("online")):
+    # Readiness is inventory membership, never `bool(os.getenv(api_key_env))`: an
+    # exported key proved nothing about whether pi can run the configured model.
+    if not orchestrator_is_configured(settings.database_path, settings.orchestrator_model):
+        return "needs setup"
+    if control_status and control_status.get("online"):
         return "ready"
-    return "needs setup"
+    return "needs verification"
 
 
 def _control_plane_connection_state(control_status: dict[str, Any] | None) -> str:
     if control_status is None:
         return "offline"
     details = control_status.get("details") or {}
-    if details.get("status") == "needs_test":
-        return "needs_test"
+    if details.get("status") == "needs_verification":
+        return "needs_verification"
     if control_status.get("online"):
         return "online"
     return "offline"
+
+
+def _orchestrator_job_divergence(settings: Settings) -> dict[str, str]:
+    """Per-job model keys that disagree with the Orchestrator Model.
+
+    Save writes all of them together, so divergence only arises from a hand-edited
+    config. It surfaces as a warning with a reset rather than as a normal row.
+    """
+    diverging: dict[str, str] = {}
+    for field in ("estimator_model", "task_breakdown_model"):
+        value = getattr(settings, field, None)
+        if value and value != settings.orchestrator_model:
+            diverging[field] = str(value)
+    return diverging
 
 
 def _control_plane_connection_details(control_status: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1637,10 +1638,11 @@ def _react_control_plane_outcome(
     settings: dict[str, Any] | None = None,
     status: dict[str, Any] | None = None,
     shadowed_settings: dict[str, str] | None = None,
+    diverging_jobs: dict[str, str] | None = None,
     error: str | None = None,
     status_code: int = 200,
 ) -> JSONResponse:
-    """Bounded, key-free JSON outcome for control-plane save/test actions."""
+    """Bounded, key-free JSON outcome for control-plane save/verify actions."""
 
     return JSONResponse(
         status_code=status_code,
@@ -1650,24 +1652,17 @@ def _react_control_plane_outcome(
             "settings": settings,
             "status": status,
             "shadowed_settings": shadowed_settings,
+            "diverging_jobs": diverging_jobs,
         },
     )
 
 
 def _control_plane_shadowed_settings(settings: Settings) -> dict[str, str]:
     shadowed: dict[str, str] = {}
+    # Only the surviving override: the legacy aliases and the per-job model env
+    # vars were dropped with the resolution chain.
     checks = {
-        "control_plane_provider": ["FOREMAN_AI_HQ_CONTROL_PROVIDER", "TOKEN_TRACKER_CONTROL_PLANE_PROVIDER"],
-        "orchestrator_model": [
-            "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL",
-            "TOKEN_TRACKER_ORCHESTRATOR_MODEL",
-            "FOREMAN_AI_HQ_CONTROL_MODEL",
-            "TOKEN_TRACKER_CONTROL_PLANE_MODEL",
-        ],
-        "control_plane_base_url": ["FOREMAN_AI_HQ_CONTROL_BASE_URL", "TOKEN_TRACKER_CONTROL_PLANE_BASE_URL"],
-        "control_plane_api_key_env": ["FOREMAN_AI_HQ_CONTROL_API_KEY_ENV", "TOKEN_TRACKER_CONTROL_PLANE_API_KEY_ENV"],
-        "estimator_model": ["FOREMAN_AI_HQ_ESTIMATOR_MODEL", "TOKEN_TRACKER_ESTIMATOR_MODEL"],
-        "task_breakdown_model": ["FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL", "TOKEN_TRACKER_TASK_BREAKDOWN_MODEL"],
+        "orchestrator_model": ["FOREMAN_AI_HQ_ORCHESTRATOR_MODEL"],
     }
     for field, env_names in checks.items():
         for env_name in env_names:
@@ -1679,26 +1674,10 @@ def _control_plane_shadowed_settings(settings: Settings) -> dict[str, str]:
 
 
 def _sync_control_plane_env(payload: ControlPlaneSettingsRequest) -> None:
-    values = {
-        "FOREMAN_AI_HQ_CONTROL_PROVIDER": payload.control_plane_provider,
-        "TOKEN_TRACKER_CONTROL_PLANE_PROVIDER": payload.control_plane_provider,
-        "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL": payload.orchestrator_model,
-        "TOKEN_TRACKER_ORCHESTRATOR_MODEL": payload.orchestrator_model,
-        "FOREMAN_AI_HQ_CONTROL_MODEL": payload.orchestrator_model,
-        "TOKEN_TRACKER_CONTROL_PLANE_MODEL": payload.orchestrator_model,
-        "FOREMAN_AI_HQ_CONTROL_BASE_URL": payload.control_plane_base_url,
-        "TOKEN_TRACKER_CONTROL_PLANE_BASE_URL": payload.control_plane_base_url,
-        "FOREMAN_AI_HQ_CONTROL_API_KEY_ENV": payload.control_plane_api_key_env,
-        "TOKEN_TRACKER_CONTROL_PLANE_API_KEY_ENV": payload.control_plane_api_key_env,
-    }
-    if payload.apply_to_estimator_breakdown:
-        values["FOREMAN_AI_HQ_ESTIMATOR_MODEL"] = payload.orchestrator_model
-        values["TOKEN_TRACKER_ESTIMATOR_MODEL"] = payload.orchestrator_model
-        values["FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL"] = payload.orchestrator_model
-        values["TOKEN_TRACKER_TASK_BREAKDOWN_MODEL"] = payload.orchestrator_model
-    for name, value in values.items():
-        if name in os.environ:
-            os.environ[name] = value
+    # Only an already-exported override is updated, so a save cannot make the
+    # process disagree with the environment the operator set deliberately.
+    if "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL" in os.environ:
+        os.environ["FOREMAN_AI_HQ_ORCHESTRATOR_MODEL"] = payload.orchestrator_model
 
 
 def _local_backend(request: Request) -> LocalExecutionBackend | None:

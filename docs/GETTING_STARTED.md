@@ -17,7 +17,7 @@ This is the first-run guide for operators evaluating Foreman AI HQ in their own 
    ```
    `foremanctl init` keeps the installed CLI global but writes repo-local state under `.foreman/`. Inside a Git repo, it targets the Git root even if you run it from a subdirectory; outside Git, it uses the current directory. It creates `.foreman/config.toml`, `.foreman/secrets.env`, `.foreman/guardrails.yaml`, and `.foreman/harness.db`.
 3. Open `http://localhost:8000/`. The default loopback server does not require a portal login token.
-4. Open `/settings/control-plane`, choose provider/model, paste the provider API key, save, then test the connection.
+4. Open `/settings/control-plane`, run `pi /login` to authenticate with your provider, choose an Orchestrator Model from pi's inventory, then verify it.
 5. Connect a local repository from `/projects`.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify tracking.
 7. Estimate a tiny task in the project's Pipeline, follow it on the Execution Floor, and inspect its Evidence Drawer or full Session Report.

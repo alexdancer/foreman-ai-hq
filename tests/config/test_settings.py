@@ -27,12 +27,15 @@ def test_settings_defaults_point_to_local_development_files(monkeypatch):
     assert settings.guardrails_path == Path("guardrails.yaml")
     assert settings.timezone == "local"
     assert settings.control_plane_provider == "openai"
-    assert settings.control_plane_model == "gpt-5.4"
+    # No code default: pi's inventory is the only authority, so absent
+    # configuration is not configured rather than a fallback model id.
+    assert settings.orchestrator_model is None
+    assert settings.control_plane_model is None
     assert settings.control_plane_api_key_env == "FOREMAN_AI_HQ_CONTROL_API_KEY"
     assert settings.control_plane_base_url == ""
     assert settings.provider_api_key_env == "PROVIDER_API_KEY"
-    assert settings.estimator_model == "gpt-5.4"
-    assert settings.task_breakdown_model == "gpt-5.4"
+    assert settings.estimator_model is None
+    assert settings.task_breakdown_model is None
     assert settings.task_breakdown_timeout_seconds == 120
     assert settings.portal_token_env == "TOKEN_TRACKER_PORTAL_TOKEN"
     assert settings.portal_cookie_secure is False
@@ -45,12 +48,10 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("TOKEN_TRACKER_GUARDRAILS_PATH", str(guardrails_path))
     monkeypatch.setenv("TOKEN_TRACKER_TIMEZONE", "America/Chicago")
     monkeypatch.setenv("FOREMAN_AI_HQ_CONTROL_PROVIDER", "anthropic")
-    monkeypatch.setenv("FOREMAN_AI_HQ_CONTROL_MODEL", "anthropic/claude-sonnet-4-20250514")
+    monkeypatch.setenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", "anthropic/claude-sonnet-4-20250514")
     monkeypatch.setenv("FOREMAN_AI_HQ_CONTROL_API_KEY_ENV", "CUSTOM_CONTROL_KEY")
     monkeypatch.setenv("FOREMAN_AI_HQ_CONTROL_BASE_URL", "https://provider.example/v1")
     monkeypatch.setenv("TOKEN_TRACKER_PROVIDER_API_KEY_ENV", "ANTHROPIC_API_KEY")
-    monkeypatch.setenv("TOKEN_TRACKER_ESTIMATOR_MODEL", "openai/gpt-4.1-mini")
-    monkeypatch.setenv("TOKEN_TRACKER_TASK_BREAKDOWN_MODEL", "openai/gpt-4.1-breakdown")
     monkeypatch.setenv("TOKEN_TRACKER_TASK_BREAKDOWN_TIMEOUT_SECONDS", "240")
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN_ENV", "CUSTOM_PORTAL_TOKEN")
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_COOKIE_SECURE", "true")
@@ -67,23 +68,74 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     assert settings.control_plane_api_key_env == "CUSTOM_CONTROL_KEY"
     assert settings.control_plane_base_url == "https://provider.example/v1"
     assert settings.provider_api_key_env == "ANTHROPIC_API_KEY"
-    assert settings.estimator_model == "openai/gpt-4.1-mini"
-    assert settings.task_breakdown_model == "openai/gpt-4.1-breakdown"
+    # One Orchestrator Model drives every orchestration job; the per-job model
+    # env vars are gone, so both follow the orchestrator.
+    assert settings.estimator_model == "anthropic/claude-sonnet-4-20250514"
+    assert settings.task_breakdown_model == "anthropic/claude-sonnet-4-20250514"
     assert settings.task_breakdown_timeout_seconds == 240
     assert settings.portal_token_env == "CUSTOM_PORTAL_TOKEN"
     assert settings.portal_cookie_secure is True
 
 
-def test_settings_keeps_legacy_estimator_model_as_control_plane_alias(monkeypatch):
-    monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_MODEL", raising=False)
-    monkeypatch.setenv("TOKEN_TRACKER_ESTIMATOR_MODEL", "openai/gpt-4.1-mini")
+def test_settings_ignores_the_retired_model_env_aliases(monkeypatch):
+    """The chain is FOREMAN_AI_HQ_ORCHESTRATOR_MODEL, then config, then not configured.
+
+    The legacy aliases and the per-job model env vars are dropped rather than
+    deprecated: a stale alias silently deciding which model orchestrates is the
+    ambiguity this change exists to remove.
+    """
+
+    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
+    for retired in [
+        "TOKEN_TRACKER_ORCHESTRATOR_MODEL",
+        "FOREMAN_AI_HQ_CONTROL_MODEL",
+        "TOKEN_TRACKER_CONTROL_PLANE_MODEL",
+        "FOREMAN_AI_HQ_ESTIMATOR_MODEL",
+        "TOKEN_TRACKER_ESTIMATOR_MODEL",
+        "FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL",
+        "TOKEN_TRACKER_TASK_BREAKDOWN_MODEL",
+    ]:
+        monkeypatch.setenv(retired, "retired/alias-model")
 
     from foreman_ai_hq.settings import Settings
 
     settings = Settings(operator_config={})
 
-    assert settings.control_plane_model == "openai/gpt-4.1-mini"
-    assert settings.estimator_model == "openai/gpt-4.1-mini"
+    assert settings.orchestrator_model is None
+    assert settings.estimator_model is None
+    assert settings.task_breakdown_model is None
+
+
+def test_settings_prefers_config_orchestrator_model_over_control_plane_model(monkeypatch):
+    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
+
+    from foreman_ai_hq.settings import Settings
+
+    settings = Settings(
+        operator_config={
+            "orchestrator_model": "anthropic/claude-opus-5",
+            "control_plane_model": "openai-codex/gpt-5.4",
+        }
+    )
+
+    assert settings.orchestrator_model == "anthropic/claude-opus-5"
+
+
+def test_explicit_model_argument_still_wins_over_the_environment(monkeypatch):
+    # Explicit constructor arguments outrank the env chain so a leaked
+    # FOREMAN_AI_HQ_ORCHESTRATOR_MODEL cannot override an explicit model.
+    monkeypatch.setenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", "anthropic/leaked-env-model")
+
+    from foreman_ai_hq.settings import Settings
+
+    assert (
+        Settings(orchestrator_model="anthropic/claude-opus-5", operator_config={}).orchestrator_model
+        == "anthropic/claude-opus-5"
+    )
+    assert (
+        Settings(control_plane_model="anthropic/claude-opus-5", operator_config={}).orchestrator_model
+        == "anthropic/claude-opus-5"
+    )
 
 
 def test_settings_reads_operator_config_when_env_missing(monkeypatch):
@@ -111,7 +163,7 @@ def test_settings_reads_operator_config_when_env_missing(monkeypatch):
 
 
 def test_settings_environment_overrides_operator_config(monkeypatch):
-    monkeypatch.setenv("FOREMAN_AI_HQ_CONTROL_MODEL", "env-model")
+    monkeypatch.setenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", "env-model")
     monkeypatch.setenv("TOKEN_TRACKER_LOCAL_RUNNER", "0")
 
     from foreman_ai_hq.settings import Settings

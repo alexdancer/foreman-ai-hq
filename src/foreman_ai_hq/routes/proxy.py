@@ -30,14 +30,6 @@ async def chat_completions(payload: dict[str, Any], request: Request):
     zone = get_budget_zone(daily_used_before, _daily_cap_tokens(budget, config, database_path), config)
     decision = apply_governance(payload, zone, config)
 
-    # Orchestration (planning) sessions run on the operator's orchestration model,
-    # not the model string the client sent. The pi profile forwards a fixed "proxy"
-    # placeholder, so without this override that literal reaches upstream and the
-    # setting is ignored. Overriding decision.request also fixes turn attribution,
-    # which reads the model back off decision.request (see _persist_turn).
-    if db.read_session_kind(session) == "planning":
-        decision.request["model"] = settings.orchestrator_model
-
     if decision.request.get("stream") is True:
         # Ask providers for usage in the stream tail so streamed turns can be logged.
         decision.request["stream_options"] = {"include_usage": True}

@@ -25,8 +25,13 @@ class FakeLLMClient:
         }
 
 
-def _client(tmp_path):
-    settings = Settings(database_path=tmp_path / "harness.db", guardrails_path=ROOT / "guardrails.yaml")
+def _client(tmp_path, *, orchestrator_model: str | None = None):
+    settings = Settings(
+        database_path=tmp_path / "harness.db",
+        guardrails_path=ROOT / "guardrails.yaml",
+        orchestrator_model=orchestrator_model,
+        operator_config={},
+    )
     app = create_app(settings)
     fake = FakeLLMClient()
     app.state.llm_client = fake
@@ -367,49 +372,6 @@ def test_chat_completions_on_planning_session_does_not_count_against_worker_sess
     artifact = db.build_session_artifact(tmp_path / "harness.db", planning_session["id"])
     assert {alarm["type"] for alarm in artifact["alarms"]} == set()
     assert db.session_token_breakdown(tmp_path / "harness.db", planning_session["id"])["by_category"]["worker_execution"] == 0
-
-
-def test_chat_completions_planning_session_uses_orchestration_model_not_sent_placeholder(tmp_path):
-    # The pi profile forwards a fixed "proxy" placeholder model; a planning session
-    # must run on the operator's orchestration model instead, and a worker session
-    # must keep forwarding whatever model it sent.
-    orchestration_model = Settings(
-        database_path=tmp_path / "harness.db", guardrails_path=ROOT / "guardrails.yaml"
-    ).orchestrator_model
-    client, fake = _client(tmp_path)
-    with client:
-        planning_session, planning_key = db.create_planning_session(
-            tmp_path / "harness.db",
-            task_description="Planning anchor",
-            model="claude-haiku",
-        )
-        planning_response = client.post(
-            "/v1/chat/completions",
-            headers={"Authorization": f"Bearer {planning_key}"},
-            json={"model": "proxy", "messages": [{"role": "user", "content": "plan something"}]},
-        )
-        worker = client.post(
-            "/session/start",
-            headers={"Authorization": "Bearer test-portal-token"},
-            json={"task_description": "Worker request", "model": "claude-haiku"},
-        ).json()
-        worker_response = client.post(
-            "/v1/chat/completions",
-            headers={"Authorization": f"Bearer {worker['session_api_key']}"},
-            json={"model": "claude-haiku", "messages": [{"role": "user", "content": "finish"}]},
-        )
-
-    assert planning_response.status_code == 200
-    assert worker_response.status_code == 200
-    # Placeholder overridden for planning, both upstream and in the recorded turn.
-    assert fake.requests[0]["model"] == orchestration_model
-    assert orchestration_model != "proxy"
-    planning_turn = db.build_session_artifact(tmp_path / "harness.db", planning_session["id"])["token_log"][0]
-    assert planning_turn["model"] == orchestration_model
-    # Worker model is untouched.
-    assert fake.requests[1]["model"] == "claude-haiku"
-    worker_turn = db.build_session_artifact(tmp_path / "harness.db", worker["session_id"])["token_log"][0]
-    assert worker_turn["model"] == "claude-haiku"
 
 
 def test_chat_completions_planning_is_client_agnostic(tmp_path):

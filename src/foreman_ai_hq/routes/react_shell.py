@@ -39,6 +39,12 @@ from foreman_ai_hq.board_workspace import (
 )
 from foreman_ai_hq.evidence_reporting import safe_evidence
 from foreman_ai_hq.needs_you import low_confidence_item
+from foreman_ai_hq.pi_adapter import (
+    DISCOVERY_NEEDS_AUTHENTICATION,
+    orchestrator_verification_is_stale,
+    persisted_orchestrator_discovery,
+    persisted_orchestrator_verification,
+)
 from foreman_ai_hq.task_kind import read_task_kind
 from foreman_ai_hq.task_launch import DEFAULT_PROXY_URL
 from foreman_ai_hq.template_context import portal_template_context
@@ -437,40 +443,51 @@ def react_setup_state(request: Request):
 
 @router.get("/api/settings/control-plane", dependencies=[Depends(require_portal_auth)])
 def react_control_plane_settings(request: Request):
-    """Bounded, authenticated control-plane setup state for the React shell.
+    """Bounded, authenticated Orchestrator Model state for the React shell.
 
-    Reuses the same settings and connection-status computation that powers the
-    canonical control-plane route. The projection is placeholder-only: it never
-    serializes the API key value in any field.
+    Projects pi's discovered inventory and verification evidence. It reads
+    persisted evidence only and never invokes pi, so rendering this page cannot
+    depend on the runtime being reachable.
     """
 
     from foreman_ai_hq.routes.portal import (
-        CURATED_CONTROL_PLANE_MODELS,
+        ORCHESTRATOR_STATUS_RECORD_ID,
         _control_plane_connection_details,
         _control_plane_shadowed_settings,
+        _orchestrator_job_divergence,
+        orchestrator_is_configured,
     )
 
     settings = request.app.state.settings
     try:
         connection_status = db.get_execution_backend_status(
-            settings.database_path, "control_plane_model"
+            settings.database_path, ORCHESTRATOR_STATUS_RECORD_ID
         )
     except KeyError:
         connection_status = None
+    discovery = persisted_orchestrator_discovery(settings.database_path)
+    verification = persisted_orchestrator_verification(settings.database_path)
+    models = [str(model) for model in (discovery.get("models") or [])]
     return {
-        "provider": settings.control_plane_provider,
         "model": settings.orchestrator_model,
-        "base_url": settings.control_plane_base_url or None,
-        "api_key_env": settings.control_plane_api_key_env,
-        "api_key_present": bool(os.getenv(settings.control_plane_api_key_env)),
-        "estimator_model": settings.estimator_model,
-        "task_breakdown_model": settings.task_breakdown_model,
-        "legacy_api_key_configured": bool(os.getenv(settings.provider_api_key_env)),
+        "configured": orchestrator_is_configured(settings.database_path, settings.orchestrator_model),
+        "inventory": {
+            "models": models,
+            "discovered_at": discovery.get("discovered_at"),
+            "state": discovery.get("state"),
+            # Distinct from "discovery failed": the operator's action is `pi /login`.
+            "needs_authentication": discovery.get("state") == DISCOVERY_NEEDS_AUTHENTICATION,
+            "reasons": discovery.get("reasons") or [],
+        },
+        "verification": {
+            "passed": bool(verification.get("passed")),
+            "verified_at": verification.get("verified_at"),
+            "model": verification.get("model"),
+            "stale": orchestrator_verification_is_stale(verification, settings.orchestrator_model),
+            "reasons": verification.get("reasons") or [],
+        },
+        "diverging_jobs": _orchestrator_job_divergence(settings),
         "shadowed_settings": _control_plane_shadowed_settings(settings),
-        "curated_models": [
-            {"provider": provider, "model": model, "label": label}
-            for provider, model, label in CURATED_CONTROL_PLANE_MODELS
-        ],
         "connection_status": _control_plane_connection_details(connection_status),
     }
 

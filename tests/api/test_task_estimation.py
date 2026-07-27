@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from foreman_ai_hq import db
+from tests.conftest import seed_orchestrator_inventory
 from foreman_ai_hq.app import create_app
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import tasks as task_routes
@@ -694,6 +695,10 @@ def test_estimate_uses_configured_estimator_model_when_distinct_from_control_pla
         control_plane_model="openai/gpt-4.1-control",
         estimator_model="openai/gpt-4.1-estimator",
     )
+    db.init_db(settings.database_path)
+    # A divergent per-job model still takes effect; it surfaces as a warning on the
+    # settings surface rather than being silently overridden here.
+    seed_orchestrator_inventory(settings.database_path, model="openai/gpt-4.1-control")
     app = create_app(settings)
     app.state.llm_client = llm
     app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
