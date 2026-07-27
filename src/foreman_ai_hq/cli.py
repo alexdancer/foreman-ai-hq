@@ -261,22 +261,14 @@ def _check_operator_setup() -> int:
     else:
         print(f"PASS portal auth disabled for local-only access; {settings.portal_token_env} not required")
 
-    for env_name, label in [
-        (settings.control_plane_api_key_env, "control-plane API key"),
-    ]:
-        if os.getenv(env_name):
-            print(f"PASS {label} env {env_name} present")
-        else:
-            if label == "control-plane API key":
-                print(
-                    f"FAIL {label} env {env_name} missing; add it in /settings/control-plane, "
-                    ".foreman/secrets.env, or the shell environment. This does not configure native "
-                    "Worker CLI auth. Native Worker CLI auth is separate, and so is the Orchestrator, "
-                    "which authenticates through pi."
-                )
-            else:
-                print(f"FAIL {label} env {env_name} missing")
-            hard_fail = True
+    proxy_key_env = settings.control_plane_api_key_env
+    if os.getenv(proxy_key_env):
+        print(f"PASS Harness Proxy upstream API key env {proxy_key_env} present")
+    else:
+        print(
+            f"WARN Harness Proxy upstream API key env {proxy_key_env} missing; only required for "
+            "proxy_governed Workers. Set it in .foreman/secrets.env or the shell environment."
+        )
 
     # Readiness is pi's inventory, not an API key: the Orchestrator runs on pi's own
     # provider auth, so an exported control-plane key proves nothing about it.

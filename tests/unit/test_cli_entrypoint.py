@@ -259,12 +259,13 @@ def test_check_from_git_subdirectory_reads_repo_root_state(monkeypatch, tmp_path
     capsys.readouterr()
     _clear_cli_env(monkeypatch)
 
-    assert main(["check"]) == 1
+    assert main(["check"]) == 0
 
     output = capsys.readouterr().out
     assert f"PASS config loaded {tmp_path / '.foreman' / 'config.toml'}" in output
     assert f"PASS secrets loaded {tmp_path / '.foreman' / 'secrets.env'}" in output
     assert "PASS portal auth disabled for local-only access; TOKEN_TRACKER_PORTAL_TOKEN not required" in output
+    assert "WARN Harness Proxy upstream API key env FOREMAN_AI_HQ_CONTROL_API_KEY missing" in output
 
 
 def test_init_preserves_existing_config_and_prints_configured_secret_env_names(monkeypatch, tmp_path, capsys):
@@ -399,7 +400,7 @@ def test_serve_preserves_local_runner_env_override_over_config(monkeypatch, tmp_
     assert __import__("os").environ["TOKEN_TRACKER_LOCAL_RUNNER"] == "0"
 
 
-def test_check_reports_missing_required_env_without_secret_values(monkeypatch, tmp_path, capsys):
+def test_check_warns_for_missing_optional_proxy_key_without_secret_values(monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
     assert main(["init"]) == 0
     capsys.readouterr()
@@ -410,15 +411,14 @@ def test_check_reports_missing_required_env_without_secret_values(monkeypatch, t
 
     exit_code = main(["check"])
 
-    assert exit_code == 1
+    assert exit_code == 0
     output = capsys.readouterr().out
     assert "PASS portal auth disabled for local-only access; TOKEN_TRACKER_PORTAL_TOKEN not required" in output
-    assert "FAIL control-plane API key env FOREMAN_AI_HQ_CONTROL_API_KEY missing" in output
-    assert "/settings/control-plane" in output
+    assert "WARN Harness Proxy upstream API key env FOREMAN_AI_HQ_CONTROL_API_KEY missing" in output
+    assert "only required for proxy_governed Workers" in output
+    assert "/settings/control-plane" not in output
     assert ".foreman/secrets.env" in output
     assert "shell environment" in output
-    assert "does not configure native Worker CLI auth" in output
-    assert "Native Worker CLI auth is separate" in output
     assert "sk-" not in output
     assert "portal-secret" not in output
 

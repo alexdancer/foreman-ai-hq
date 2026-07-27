@@ -67,10 +67,10 @@ Orchestrator that is not configured against it does not operate.**
 - **Docker stops advertising dead config.** The five `FOREMAN_AI_HQ_CONTROL_*` variables
   are removed from `docker-compose.yml` and the image is documented as portal/evidence
   only; it ships no Node, no pi, and no provider auth.
-- **The resolution chain collapses from ten sources to two:**
-  `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL` then `config["orchestrator_model"]`, then not
-  configured. The three legacy env aliases and the estimator/breakdown model env vars are
-  dropped.
+- **The resolution chain collapses to one environment override plus config back-compat:**
+  `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`, then `config["orchestrator_model"]`, then the
+  validated legacy candidate `config["control_plane_model"]`, then not configured. The
+  three legacy env aliases and the estimator/breakdown model env vars are dropped.
 
 ## Capabilities
 
@@ -83,8 +83,16 @@ Orchestrator that is not configured against it does not operate.**
 - `control-plane-model-connection`: the direct provider connection is no longer the
   orchestration model connection and loses its operator-facing settings surface; it is
   retained solely as Harness Proxy upstream configuration for `proxy_governed` Workers.
-  The curated model list, the portal-managed API key entry path, and the connection test
-  are retired for orchestration.
+  The curated model list, portal-managed API key entry, live connection editing, split
+  models, OpenRouter presets, placeholder-only connection JSON, and connection test are
+  retired for orchestration.
+- `react-portal-shell`: Control Plane Settings becomes the Orchestrator Model inventory and
+  verification surface; its JSON and actions expose pi discovery, model selection, and
+  verification instead of provider credentials and connection testing.
+- `public-release-onboarding`: first-run setup uses `pi /login`, inventory selection, and
+  Orchestrator verification rather than portal provider/API-key entry.
+- `operator-setup`: `foremanctl check` treats the Harness Proxy upstream key as optional
+  unless `proxy_governed` Workers need it, and setup docs use the pi-backed Orchestrator flow.
 
 ## Impact
 
