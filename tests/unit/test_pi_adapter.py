@@ -23,6 +23,7 @@ from foreman_ai_hq.pi_adapter import (
     PiStructuredOutputError,
     _write_pi_acp_wrapper,
     launch_pi_once,
+    recorded_model_from_usage,
     run_pi_structured_job,
 )
 
@@ -235,13 +236,20 @@ def test_launch_pi_once_records_one_planning_turn_from_native_usage(monkeypatch,
         _pi_stream(_pi_assistant_message("resp_1", input_tokens=38808, output_tokens=20, cost=0.09732)),
     )
 
-    session, result = launch_pi_once(database_path, "hi", profile_dir=DEFAULT_PROFILE_DIR, timeout=1)
+    session, result = launch_pi_once(
+        database_path,
+        "hi",
+        profile_dir=DEFAULT_PROFILE_DIR,
+        model="openai-codex/gpt-5.4",
+        timeout=1,
+    )
 
     assert result.stdout == "OK"
     token_log = db.build_session_artifact(database_path, session["id"])["token_log"]
     assert len(token_log) == 1
     turn = token_log[0]
     assert turn["usage_kind"] == "planning"
+    assert turn["model"] == "openai-codex/gpt-5.4"
     assert turn["prompt_tokens"] == 38808
     assert turn["completion_tokens"] == 20
     assert turn["raw_usage"]["spend_category"] == "planning"
@@ -254,7 +262,13 @@ def test_launch_pi_once_without_usage_evidence_records_no_spend(monkeypatch, tmp
     db.init_db(database_path)
     _fake_pi_run(monkeypatch, _pi_stream(with_usage=False))
 
-    session, _result = launch_pi_once(database_path, "hi", profile_dir=DEFAULT_PROFILE_DIR, timeout=1)
+    session, _result = launch_pi_once(
+        database_path,
+        "hi",
+        profile_dir=DEFAULT_PROFILE_DIR,
+        model="openai-codex/gpt-5.4",
+        timeout=1,
+    )
 
     assert db.build_session_artifact(database_path, session["id"])["token_log"] == []
 
@@ -366,6 +380,7 @@ async def test_structured_job_records_native_usage_and_enforces_isolated_submit_
     artifact = db.build_session_artifact(database_path, result.session["id"])
     assert len(artifact["token_log"]) == 1
     assert artifact["token_log"][0]["usage_kind"] == "estimation"
+    assert artifact["token_log"][0]["model"] == "openai-codex/gpt-5.4"
     assert artifact["token_log"][0]["raw_usage"]["usage_source"] == "native_usage"
 
 
@@ -535,6 +550,7 @@ def test_launch_pi_once_appends_tool_allowlist(monkeypatch, tmp_path) -> None:
         database_path,
         "hi",
         profile_dir=DEFAULT_PROFILE_DIR,
+        model="openai-codex/gpt-5.4",
         timeout=1,
     )
 
@@ -551,3 +567,65 @@ def test_launch_pi_once_appends_tool_allowlist(monkeypatch, tmp_path) -> None:
     assert "--append-system-prompt" in args
     assert "--mode" in args
     assert "json" in args
+
+
+def test_recorded_model_from_usage_prefers_provider_qualified_ids() -> None:
+    assert recorded_model_from_usage({"provider": "openai-codex", "model": "gpt-5.4"}, "fallback/model") == "openai-codex/gpt-5.4"
+    assert recorded_model_from_usage({"model": "openai-codex/gpt-5.4"}, "fallback/model") == "openai-codex/gpt-5.4"
+    assert recorded_model_from_usage({"model": "gpt-5.4"}, "openai-codex/gpt-5.4") == "openai-codex/gpt-5.4"
+    assert recorded_model_from_usage({"model": "gpt-5.4"}) is None
+
+
+@pytest.mark.asyncio
+async def test_planning_and_estimation_record_identical_model_strings(monkeypatch, tmp_path) -> None:
+    """Regression: every pi_adapter recording site resolves to the same configured full id."""
+    database_path = tmp_path / "harness.db"
+    db.init_db(database_path)
+    model = "openai-codex/gpt-5.4"
+
+    _fake_pi_run(
+        monkeypatch,
+        _pi_stream(_pi_assistant_message("resp_plan", input_tokens=1000, output_tokens=10, cost=0.01)),
+    )
+    planning_session, _ = launch_pi_once(
+        database_path,
+        "plan",
+        profile_dir=DEFAULT_PROFILE_DIR,
+        model=model,
+        timeout=1,
+    )
+
+    submitted = {"drivers": {"files_to_read": 1}}
+    stream = _pi_submit_stream("submit_estimate", submitted)
+
+    class FakeProcess:
+        pid = 999999
+        returncode = 0
+
+        async def communicate(self):
+            return stream.encode(), b""
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(_pi_adapter.asyncio, "create_subprocess_exec", fake_exec)
+
+    estimation_result = await run_pi_structured_job(
+        database_path,
+        instructions="Estimate.",
+        input_payload={"task": "DEMO"},
+        model=model,
+        persona_filename="estimator.md",
+        extension_filename="submit-estimate.ts",
+        submit_tool="submit_estimate",
+        usage_kind="estimation",
+        task_description="Task estimation: DEMO",
+        agent_dir=tmp_path / "agent",
+    )
+
+    planning_turn = db.build_session_artifact(database_path, planning_session["id"])["token_log"][0]
+    estimation_turn = db.build_session_artifact(database_path, estimation_result.session["id"])["token_log"][0]
+    assert planning_turn["model"] == estimation_turn["model"] == model

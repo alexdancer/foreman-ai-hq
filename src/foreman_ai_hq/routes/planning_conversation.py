@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from foreman_ai_hq import db
 from foreman_ai_hq.auth import require_portal_auth
+from foreman_ai_hq.orchestrator_gate import require_configured_orchestrator
 from foreman_ai_hq.pi_adapter import (
     AcpRuntimeError,
     PiAuthRequired,
@@ -138,7 +139,7 @@ class PlanningConversationRegistry:
             self._live.clear()
 
 
-@router.post("/api/projects/{project_id}/planning/start", dependencies=[Depends(require_portal_auth)])
+@router.post("/api/projects/{project_id}/planning/start", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 def start_planning_conversation(project_id: str, request: Request) -> dict[str, Any]:
     database_path = request.app.state.settings.database_path
     try:
@@ -163,7 +164,7 @@ def start_planning_conversation(project_id: str, request: Request) -> dict[str, 
     return {"planning_session_id": session_id}
 
 
-@router.post("/api/projects/{project_id}/planning/message", dependencies=[Depends(require_portal_auth)])
+@router.post("/api/projects/{project_id}/planning/message", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 def message_planning_conversation(
     project_id: str,
     payload: PlanningMessageRequest,

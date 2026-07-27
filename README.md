@@ -79,7 +79,7 @@ This updates the global `foremanctl` CLI and preserves repo-local `.foreman/` st
 ```
 2. Open `http://localhost:8000/`.
 3. Open `/settings/control-plane`.
-4. Pick a control-plane provider/model, paste the provider API key, save, then test the connection.
+4. Run `pi /login` to authenticate with your provider, then choose an Orchestrator Model from pi's inventory and verify it.
 5. Connect a local repository from `/projects`.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify token tracking.
 7. Open the project's Pipeline at `/projects/{project_id}`, estimate a tiny implementation task, and launch it.
@@ -198,16 +198,15 @@ Common environment variables:
 | Variable                        | Purpose                                                                       |
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `TOKEN_TRACKER_PORTAL_TOKEN`    | Portal login token for shared/non-loopback access                             |
-| `FOREMAN_AI_HQ_CONTROL_PROVIDER`    | Control-plane provider, such as `openai`, `anthropic`, or `openai-compatible` |
-| `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model for estimates, planning, breakdown, and reports            |
+| `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model chosen from pi's inventory                                 |
 | `TOKEN_TRACKER_ORCHESTRATOR_MODEL` | *(alias)* Alternative env name for `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`         |
-| `FOREMAN_AI_HQ_CONTROL_MODEL`      | *(legacy)* Alias for `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`                       |
-| `TOKEN_TRACKER_CONTROL_PLANE_MODEL`| *(legacy alias)* Legacy alias for the orchestrator model                     |
-| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Base URL for OpenAI-compatible providers                                      |
-| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Control-plane provider API key                                                |
+| `TOKEN_TRACKER_CONTROL_PLANE_MODEL`| *(legacy alias)* Alternative env name for the orchestrator model              |
+| `FOREMAN_AI_HQ_CONTROL_PROVIDER`   | Optional provider for control-plane model traffic (`openai`, `anthropic`, `openai-compatible`) |
+| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Optional base URL for OpenAI-compatible control-plane providers                 |
+| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Optional provider API key for control-plane model traffic; not Worker CLI auth |
 
 
-The Portal writes submitted API keys only to ignored local secret storage and does not display raw key values again.
+The Portal writes submitted API keys only to ignored local secret storage and does not display raw key values again. The Orchestrator Model is selected from pi's discovered inventory, so `FOREMAN_AI_HQ_CONTROL_*` credentials are only needed if you route control-plane model traffic through the local proxy endpoint.
 
 ## Current limits
 

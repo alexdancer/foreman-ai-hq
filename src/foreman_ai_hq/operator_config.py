@@ -20,8 +20,9 @@ DEFAULT_LOCAL_CONFIG: dict[str, Any] = {
     "host": "127.0.0.1",
     "port": 8000,
     "portal_token_env": "TOKEN_TRACKER_PORTAL_TOKEN",
+    # Harness Proxy upstream for proxy_governed Workers only; the Orchestrator Model
+    # is deliberately absent, because seeding one would seed a value pi never offered.
     "control_plane_provider": "openai",
-    "control_plane_model": "gpt-5.4",
     "control_plane_api_key_env": "FOREMAN_AI_HQ_CONTROL_API_KEY",
     "local_runner_enabled": True,
 }
@@ -69,10 +70,8 @@ def update_operator_config(path: Path | str = DEFAULT_CONFIG_PATH, **updates: An
     config = dict(DEFAULT_LOCAL_CONFIG)
     config.update(load_operator_config(config_path))
     config.update({key: value for key, value in updates.items() if value is not None})
-    if updates.get("control_plane_provider") == "openrouter":
-        for key, value in control_plane_provider_defaults("openrouter").items():
-            if key not in updates or updates[key] in (None, ""):
-                config[key] = value
+    # The OpenRouter preset branch is gone with the settings page that sent a provider.
+    # `control_plane_provider_defaults` survives for the Harness Proxy upstream in settings.py.
     _sanitize_env_name_fields(config)
     config_path.write_text(_render_config(config), encoding="utf-8")
     return config

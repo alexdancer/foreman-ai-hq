@@ -14,7 +14,7 @@ import uvicorn
 from foreman_ai_hq import db
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
 from foreman_ai_hq.demo_seed import seed_demo_sandbox, seed_demo_tasks
-from foreman_ai_hq.llm import LLMClient
+from foreman_ai_hq.pi_adapter import resolve_orchestrator_model
 from foreman_ai_hq.operator_config import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_SECRETS_PATH,
@@ -87,15 +87,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.get("control_plane_provider"),
             aliases=("TOKEN_TRACKER_CONTROL_PLANE_PROVIDER",),
         )
+        # The legacy aliases went with the resolution chain; only this name is read.
         _set_env_if_missing(
             "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL",
             config.get("orchestrator_model") or config.get("control_plane_model"),
-            aliases=("TOKEN_TRACKER_ORCHESTRATOR_MODEL",),
-        )
-        _set_env_if_missing(
-            "FOREMAN_AI_HQ_CONTROL_MODEL",
-            config.get("control_plane_model") or config.get("orchestrator_model"),
-            aliases=("TOKEN_TRACKER_CONTROL_PLANE_MODEL", "TOKEN_TRACKER_ESTIMATOR_MODEL"),
         )
         _set_env_if_missing(
             "FOREMAN_AI_HQ_CONTROL_API_KEY_ENV",
@@ -275,33 +270,33 @@ def _check_operator_setup() -> int:
             if label == "control-plane API key":
                 print(
                     f"FAIL {label} env {env_name} missing; add it in /settings/control-plane, "
-                    ".foreman/secrets.env, or the shell environment. This does not configure native Worker CLI auth."
+                    ".foreman/secrets.env, or the shell environment. This does not configure native "
+                    "Worker CLI auth. Native Worker CLI auth is separate, and so is the Orchestrator, "
+                    "which authenticates through pi."
                 )
             else:
                 print(f"FAIL {label} env {env_name} missing")
             hard_fail = True
 
-    if os.getenv(settings.control_plane_api_key_env):
-        try:
-            # Exercise the configured model once so `foremanctl check` reports real reachability.
-            asyncio.run(
-                LLMClient(settings).acompletion(
-                    {
-                        "model": settings.orchestrator_model,
-                        "messages": [{"role": "user", "content": "Return exactly FOREMAN_AI_HQ_CONTROL_PLANE_OK."}],
-                    }
-                )
-            )
-            print(f"PASS orchestrator model {settings.orchestrator_model} reachable")
-        except Exception as exc:
-            print(f"FAIL orchestrator model {settings.orchestrator_model} unreachable: {type(exc).__name__}")
-            hard_fail = True
+    # Readiness is pi's inventory, not an API key: the Orchestrator runs on pi's own
+    # provider auth, so an exported control-plane key proves nothing about it.
+    resolved_orchestrator = resolve_orchestrator_model(
+        settings.database_path, settings.orchestrator_model
+    )
+    if resolved_orchestrator:
+        print(f"PASS orchestrator model {resolved_orchestrator} configured from pi inventory")
+    elif settings.orchestrator_model:
+        print(
+            f"FAIL orchestrator model {settings.orchestrator_model} is not in pi's discovered "
+            "inventory; refresh the inventory in /settings/control-plane and choose a model."
+        )
+        hard_fail = True
     else:
         print(
-            f"FAIL orchestrator model {settings.orchestrator_model} unchecked: missing "
-            f"{settings.control_plane_api_key_env}; configure it in /settings/control-plane, "
-            ".foreman/secrets.env, or the shell environment. Native Worker CLI auth is separate."
+            "FAIL orchestrator model not configured; run `pi /login`, then choose a model in "
+            "/settings/control-plane."
         )
+        hard_fail = True
 
     print(("PASS" if settings.local_runner_enabled else "WARN") + " local runner " + ("enabled" if settings.local_runner_enabled else "disabled"))
     _print_worker_readiness(settings.database_path)

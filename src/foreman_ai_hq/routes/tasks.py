@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +13,7 @@ from pydantic import ValidationError
 
 from foreman_ai_hq import db
 from foreman_ai_hq.auth import require_portal_auth
+from foreman_ai_hq.orchestrator_gate import require_configured_orchestrator
 from foreman_ai_hq.estimation import EstimatorError, estimate_task
 from foreman_ai_hq.task_kind import (
     DEFAULT_TASK_KIND,
@@ -22,14 +22,23 @@ from foreman_ai_hq.task_kind import (
     validate_task_kind,
     with_task_kind,
 )
-from foreman_ai_hq.evidence_reporting import completion_content as _completion_content
 from foreman_ai_hq.evidence_reporting import safe_evidence as _safe_review_value
 from foreman_ai_hq.evidence_reporting import token_totals
-from foreman_ai_hq.llm import LLMClientError, extract_usage, resolve_cost, response_to_dict
 from foreman_ai_hq.model_routing import route_worker_model
+from foreman_ai_hq.pi_adapter import (
+    PiStructuredJobError,
+    PiStructuredOutputError,
+    run_pi_structured_job,
+)
 from foreman_ai_hq.project_context import project_task_metadata, task_matches_project, task_project_board_path
 from foreman_ai_hq.repo_context import build_repo_context_brief
-from foreman_ai_hq.task_launch import DEFAULT_PROXY_URL, TaskLaunchBlocked, launch_task, refresh_task_from_session
+from foreman_ai_hq.task_launch import (
+    DEFAULT_PROXY_URL,
+    TaskLaunchBlocked,
+    _git_diff_summary,
+    launch_task,
+    refresh_task_from_session,
+)
 from foreman_ai_hq.task_breakdown import (
     TaskBreakdownError,
     breakdown_task_source,
@@ -145,7 +154,7 @@ def update_task(task_id: str, payload: TaskUpdateRequest, request: Request) -> d
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/tasks/{task_id}/launch", dependencies=[Depends(require_portal_auth)])
+@router.post("/tasks/{task_id}/launch", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def launch_task_endpoint(task_id: str, request: Request):
     try:
         payload, wants_html = await _launch_payload_from_request(request)
@@ -402,7 +411,7 @@ async def dismiss_reestimate_decision(project_id: str, task_id: str, request: Re
     return result
 
 
-@router.post("/estimate", dependencies=[Depends(require_portal_auth)])
+@router.post("/estimate", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def estimate(payload: EstimateRequest, request: Request) -> dict[str, Any]:
     return await _estimate_and_create_task(
         request,
@@ -524,7 +533,7 @@ def _selected_worker_adapter(database_path: Path | str, adapter_id: str | None) 
     return next((item for item in adapters if item.get("is_default")), adapters[0] if adapters else None)
 
 
-@router.post("/tasks/estimate-form", dependencies=[Depends(require_portal_auth)])
+@router.post("/tasks/estimate-form", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def estimate_form(
     request: Request,
     description: str = Form(""),
@@ -535,7 +544,7 @@ async def estimate_form(
     return await _estimate_form_for_project(request, description=description, task_kind=task_kind, markdown_file=markdown_file)
 
 
-@router.post("/projects/{project_id}/tasks/estimate-form", dependencies=[Depends(require_portal_auth)])
+@router.post("/projects/{project_id}/tasks/estimate-form", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def project_estimate_form(
     project_id: str,
     request: Request,
@@ -639,7 +648,7 @@ def task_breakdown_review(breakdown_id: str, request: Request):
     return react_shell_or_missing_build()
 
 
-@router.post("/task-breakdowns/{breakdown_id}/accept", dependencies=[Depends(require_portal_auth)])
+@router.post("/task-breakdowns/{breakdown_id}/accept", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def accept_task_breakdown(breakdown_id: str, request: Request):
     database_path = request.app.state.settings.database_path
     wants_json = _wants_react_json(request)
@@ -828,7 +837,7 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
     return RedirectResponse(_breakdown_board_path(breakdown), status_code=303)
 
 
-@router.post("/task-breakdowns/{breakdown_id}/retry", dependencies=[Depends(require_portal_auth)])
+@router.post("/task-breakdowns/{breakdown_id}/retry", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def retry_task_breakdown(breakdown_id: str, request: Request):
     database_path = request.app.state.settings.database_path
     wants_json = _wants_react_json(request)
@@ -1664,83 +1673,64 @@ def _block_review_task(database_path: Path | str, task: dict[str, Any], reason: 
     return db.update_task(database_path, task["id"], {"status": "Review", "metadata": metadata})
 
 
+AGENT_REVIEW_TIMEOUT_SECONDS = 120
+
+
 async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str | None) -> dict[str, Any]:
     database_path = request.app.state.settings.database_path
     settings = request.app.state.settings
+    # Gated here rather than on the route: Review Disposition also carries Mark Done
+    # and Block, which spend nothing and must stay available when pi is unconfigured.
+    require_configured_orchestrator(request)
     metadata = {**task.get("metadata", {})}
     review_prompt = (prompt or metadata.get("review_prompt") or "").strip()
     if review_prompt:
         metadata["review_prompt"] = review_prompt
         metadata["review_prompt_updated_at"] = _now_iso()
 
-    review_session = db.create_session(
-        database_path,
-        task_description=f"Agent review for task {task['id']}: {task['description']}",
-        model=settings.orchestrator_model,
-        session_key_hash=_agent_review_session_key_hash(task["id"], _now_iso()),
-        guardrail_overrides={"spend_category": "agent_review", "task_id": task["id"]},
-        status="completed",
-    )
-    llm_request = {
-        "model": settings.orchestrator_model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are the Foreman AI HQ control-plane reviewer. Review completed Worker Run evidence. "
-                    "Return compact JSON with keys summary, recommendation, findings. "
-                    "recommendation must be approve, needs_changes, or block. findings is an array of objects "
-                    "with severity and message, optionally path and line. Use plain human-readable text in every "
-                    "string field: no Markdown, bullets, headings, tables, or fenced code blocks. Do not include secrets."
-                ),
-            },
-            {"role": "user", "content": _agent_review_prompt(task, review_prompt, database_path)},
-        ],
-        "temperature": 0,
-        "max_tokens": 700,
-    }
+    model = settings.orchestrator_model
+    task_description = f"Agent review for task {task['id']}: {task['description']}"
+    review: dict[str, Any]
     try:
-        response = await request.app.state.llm_client.acompletion(llm_request)
-        response_body = response_to_dict(response)
-        usage = extract_usage(response_body)
-        db.record_token_turn(
+        result = await request.app.state.orchestrator_job_runner(
             database_path,
-            session_id=review_session["id"],
+            instructions="",
+            input_payload=_agent_review_input(task, review_prompt, database_path),
+            model=model,
+            persona_filename="agent_review.md",
+            extension_filename="submit-review.ts",
+            submit_tool="submit_review",
             usage_kind="reporting",
-            model=settings.orchestrator_model,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
-            cost=resolve_cost(settings.orchestrator_model, response_body),
-            raw_usage={
-                **usage,
-                "spend_category": "reporting_summary",
-                "usage_source": "control_plane",
-                "reporting_kind": "agent_review",
-                "response": _safe_review_value(response_body),
-            },
+            task_description=task_description,
+            timeout=AGENT_REVIEW_TIMEOUT_SECONDS,
+            result_validator=_validate_agent_review_result,
         )
-        review = _parse_agent_review(_completion_content(response_body))
-        review.update(
-            {
-                "status": "completed",
-                "reviewed_at": _now_iso(),
-                "review_session_id": review_session["id"],
-                "model": settings.orchestrator_model,
-                "token_totals": _agent_review_token_totals(database_path, review_session["id"]),
-            }
-        )
-    except (LLMClientError, RuntimeError, TypeError, ValueError) as exc:
-        db.update_session_status(database_path, review_session["id"], "failed")
+        review = {
+            "status": "completed",
+            "summary": result.validated["summary"],
+            "recommendation": result.validated["recommendation"],
+            "findings": result.validated["findings"],
+            "reviewed_at": _now_iso(),
+            "review_session_id": result.session["id"],
+            "model": model,
+            "token_totals": token_totals(db.build_session_artifact(database_path, result.session["id"])),
+        }
+    except (PiStructuredJobError, PiStructuredOutputError, RuntimeError, TypeError, ValueError) as exc:
+        review_session_id = getattr(exc, "session_id", None)
         review = {
             "status": "failed",
             "summary": "Agent Review failed; operator can still mark done or block manually.",
             "findings": [],
             "recommendation": "needs_changes",
             "reviewed_at": _now_iso(),
-            "review_session_id": review_session["id"],
-            "model": settings.orchestrator_model,
-            "token_totals": _agent_review_token_totals(database_path, review_session["id"]),
-            "error_type": type(exc).__name__,
+            "review_session_id": review_session_id,
+            "model": model,
+            "token_totals": (
+                token_totals(db.build_session_artifact(database_path, review_session_id))
+                if review_session_id
+                else {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            ),
+            "error_type": type(getattr(exc, "__cause__", None) or exc).__name__,
             "error": _safe_review_value(str(exc)),
         }
 
@@ -1748,7 +1738,7 @@ async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str 
     return db.update_task(database_path, task["id"], {"metadata": metadata})
 
 
-def _agent_review_prompt(task: dict[str, Any], review_prompt: str, database_path: Path | str) -> str:
+def _agent_review_input(task: dict[str, Any], review_prompt: str, database_path: Path | str) -> dict[str, Any]:
     artifact: dict[str, Any] = {}
     worker_runs: list[dict[str, Any]] = []
     if task.get("session_id"):
@@ -1776,119 +1766,51 @@ def _agent_review_prompt(task: dict[str, Any], review_prompt: str, database_path
         "token_log": artifact.get("token_log", [])[-5:],
         "checkpoint_results": artifact.get("checkpoint_results", [])[-5:],
         "worker_runs": worker_runs[-3:],
+        "task_branch_diff": _agent_review_diff_summary(database_path, task),
     }
-    return json.dumps(_safe_review_value(evidence), sort_keys=True)[:6000]
+    return _safe_review_value(evidence)
 
 
-def _parse_agent_review(content: str) -> dict[str, Any]:
-    parsed: Any = _extract_agent_review_json(content)
-    if not isinstance(parsed, dict):
-        parsed = _parse_markdownish_agent_review(content)
-    findings = _clean_review_findings(parsed.get("findings"))
-    recommendation = _normalize_review_recommendation(parsed.get("recommendation"))
-    return {
-        "summary": _clean_review_text(parsed.get("summary") or "Agent Review completed."),
-        "findings": findings,
-        "recommendation": recommendation,
-    }
-
-
-def _normalize_review_recommendation(value: Any) -> str:
-    normalized = _clean_review_text(value or "needs_changes").lower().replace(" ", "_").replace("-", "_")
-    if normalized in {"approve", "approved"}:
-        return "approve"
-    if normalized in {"block", "blocked"}:
-        return "block"
-    if normalized in {"needs_changes", "needs_change", "changes_requested", "request_changes"}:
-        return "needs_changes"
-    return "needs_changes"
-
-
-def _clean_review_findings(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    cleaned: list[dict[str, Any]] = []
-    for item in value:
-        if isinstance(item, dict):
-            message = _clean_review_text(item.get("message") or item.get("summary") or "")
-            if not message:
-                continue
-            severity = _normalize_review_severity(item.get("severity"))
-            finding: dict[str, Any] = {"severity": severity, "message": message}
-            path = _clean_review_text(item.get("path") or "")
-            if path:
-                finding["path"] = path
-            line = item.get("line")
-            if line not in (None, ""):
-                finding["line"] = line
-            cleaned.append(finding)
-        elif isinstance(item, str):
-            parsed_finding = _finding_from_text(item)
-            if parsed_finding:
-                cleaned.append(parsed_finding)
-    return cleaned
-
-
-def _normalize_review_severity(value: Any) -> str:
-    severity = _clean_review_text(value or "info").lower()
-    return severity if severity in {"critical", "high", "medium", "low", "info"} else "info"
-
-
-def _parse_markdownish_agent_review(content: str) -> dict[str, Any]:
-    lines = [line.strip() for line in _strip_code_fences(content).splitlines()]
-    summary_lines: list[str] = []
-    finding_lines: list[str] = []
-    recommendation: str | None = None
-    section = "summary"
-    for line in lines:
-        if not line:
-            continue
-        clean_heading = _clean_review_text(line).rstrip(":").lower()
-        if clean_heading in {"summary", "review summary", "agent review"}:
-            section = "summary"
-            continue
-        if clean_heading in {"findings", "issues", "review findings"}:
-            section = "findings"
-            continue
-        if clean_heading in {"recommendation", "decision"}:
-            section = "recommendation"
-            continue
-        recommendation_match = re.match(r"^\s*(?:[-*]\s*)?(?:\*\*)?recommendation(?:\*\*)?\s*[:\-]\s*(.+)$", line, re.IGNORECASE)
-        if recommendation_match:
-            recommendation = recommendation_match.group(1)
-            continue
-        if section == "recommendation" and recommendation is None:
-            recommendation = line
-            continue
-        if section == "findings":
-            finding_lines.append(line)
-        else:
-            summary_lines.append(line)
-    findings = [finding for line in finding_lines if (finding := _finding_from_text(line))]
-    summary = _clean_review_text(" ".join(summary_lines) or content)
-    return {"summary": summary, "recommendation": recommendation or "needs_changes", "findings": findings}
-
-
-def _finding_from_text(value: str) -> dict[str, str] | None:
-    text = _clean_review_text(value)
-    if not text:
+def _agent_review_root_path(database_path: Path | str, task: dict[str, Any]) -> str | None:
+    """Resolve the project root for a task, preferring the bound project metadata."""
+    metadata = task.get("metadata") or {}
+    root_path = metadata.get("project_root_path")
+    if root_path:
+        return str(root_path)
+    project_id = metadata.get("connected_project_id")
+    if not project_id:
         return None
-    match = re.match(r"^(critical|high|medium|low|info)\s*[:\-]\s*(.+)$", text, re.IGNORECASE)
-    if match:
-        return {"severity": _normalize_review_severity(match.group(1)), "message": match.group(2).strip()}
-    return {"severity": "info", "message": text}
+    try:
+        project = db.get_connected_project(database_path, str(project_id))
+    except KeyError:
+        return None
+    return str(project.get("root_path") or "")
 
 
-def _strip_code_fences(value: Any) -> str:
+def _agent_review_diff_summary(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
+    """Bounded git diff evidence for the review payload."""
+    root_path = _agent_review_root_path(database_path, task)
+    if not root_path:
+        return {"has_changes": False, "files_changed": [], "stat": ""}
+    summary = _git_diff_summary(root_path)
+    files = summary.get("files_changed") or []
+    stat = summary.get("stat") or ""
+    porcelain = summary.get("porcelain") or ""
+    return {
+        "has_changes": summary.get("has_changes", False),
+        "files_changed": files[:50],
+        "stat": stat[:2000],
+        "porcelain": porcelain[:2000],
+    }
+
+
+def _strip_review_markdown(value: Any) -> str:
+    """Collapse accidental markdown so a review stays readable in plain text."""
     text = str(value or "")
     text = re.sub(r"```(?:\w+)?", "", text)
-    return text.replace("```", "")
-
-
-def _clean_review_text(value: Any) -> str:
-    text = _strip_code_fences(value)
+    text = text.replace("```", "")
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
-    cleaned_lines: list[str] = []
+    lines: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         line = re.sub(r"^#{1,6}\s+", "", line)
@@ -1897,47 +1819,48 @@ def _clean_review_text(value: Any) -> str:
         line = line.replace("**", "").replace("__", "").replace("`", "")
         line = re.sub(r"\s+", " ", line).strip()
         if line:
-            cleaned_lines.append(line)
-    return " ".join(cleaned_lines).strip()
+            lines.append(line)
+    return " ".join(lines).strip()
 
 
-def _extract_agent_review_json(content: str) -> Any:
-    stripped = content.strip()
-    for candidate in _agent_review_json_candidates(stripped):
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
-
-
-def _agent_review_json_candidates(content: str) -> list[str]:
-    candidates = [content]
-    candidates.extend(match.group(1).strip() for match in re.finditer(r"```(?:json)?\s*(.*?)```", content, re.DOTALL | re.IGNORECASE))
-    first_brace = content.find("{")
-    if first_brace != -1:
-        try:
-            parsed, end = json.JSONDecoder().raw_decode(content[first_brace:])
-        except json.JSONDecodeError:
-            parsed = None
-            end = 0
-        if isinstance(parsed, dict):
-            candidates.append(content[first_brace : first_brace + end])
-    return candidates
-
-
-def _agent_review_session_key_hash(task_id: str, timestamp: str) -> str:
-    return hashlib.sha256(f"agent-review:v1:{task_id}:{timestamp}".encode("utf-8")).hexdigest()
-
-
-def _agent_review_token_totals(database_path: Path | str, session_id: str) -> dict[str, int]:
-    try:
-        artifact = db.build_session_artifact(database_path, session_id)
-    except KeyError:
-        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    return token_totals(artifact)
+def _validate_agent_review_result(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize the ``submit_review`` tool output before it reaches task metadata."""
+    if not isinstance(arguments, dict):
+        raise ValueError("Agent Review result must be an object.")
+    summary = _strip_review_markdown(arguments.get("summary")).strip()
+    if not summary:
+        raise ValueError("Agent Review summary is required.")
+    recommendation = (
+        _strip_review_markdown(arguments.get("recommendation")).lower().replace(" ", "_").replace("-", "_")
+    )
+    if recommendation in {"approve", "approved"}:
+        recommendation = "approve"
+    elif recommendation in {"block", "blocked"}:
+        recommendation = "block"
+    else:
+        recommendation = "needs_changes"
+    findings: list[dict[str, Any]] = []
+    raw_findings = arguments.get("findings")
+    if isinstance(raw_findings, list):
+        for raw in raw_findings:
+            if not isinstance(raw, dict):
+                continue
+            message = _strip_review_markdown(raw.get("message")).strip()
+            if not message:
+                continue
+            message = re.sub(r"^(critical|high|medium|low|info)\s*[:\-]\s+", "", message, flags=re.IGNORECASE)
+            severity = _strip_review_markdown(raw.get("severity")).lower().strip() or "info"
+            if severity not in {"critical", "high", "medium", "low", "info"}:
+                severity = "info"
+            finding: dict[str, Any] = {"severity": severity, "message": message}
+            path = _strip_review_markdown(raw.get("path")).strip()
+            if path:
+                finding["path"] = path
+            line = raw.get("line")
+            if isinstance(line, int) and line > 0:
+                finding["line"] = line
+            findings.append(finding)
+    return {"summary": summary, "recommendation": recommendation, "findings": findings}
 
 
 def _now_iso() -> str:

@@ -83,6 +83,27 @@ def _pi_rpc_processes() -> list[str]:
     return [line for line in result.stdout.splitlines() if "pgrep" not in line]
 
 
+# Provider-qualified because the harness no longer infers a provider for a bare id:
+# these tests drive a real pi launch, so the id must name a row in pi's own inventory.
+PI_MODEL = "openai-codex/gpt-5.4"
+
+
+def _seed_orchestrator_inventory(database_path) -> None:
+    """Satisfy the readiness gate, which reads persisted discovery evidence only."""
+    from foreman_ai_hq.pi_adapter import (
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        ORCHESTRATOR_STATUS_RECORD_NAME,
+    )
+
+    db.upsert_execution_backend_status(
+        database_path,
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        name=ORCHESTRATOR_STATUS_RECORD_NAME,
+        online=True,
+        details={"model_discovery": {"state": "ready", "models": [PI_MODEL]}},
+    )
+
+
 def _skip_without_pi_env() -> None:
     if not shutil.which("pi"):
         pytest.skip("pi CLI not installed")
@@ -106,7 +127,8 @@ def project_and_server(tmp_path):
         capability={},
     )
 
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model="gpt-5.4")
+    _seed_orchestrator_inventory(database_path)
+    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model=PI_MODEL)
     app = create_app(settings)
     server, thread, port = _start_server(app)
     try:
@@ -130,7 +152,8 @@ def test_start_requires_portal_auth(tmp_path):
         capability={},
     )
 
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model="gpt-5.4")
+    _seed_orchestrator_inventory(database_path)
+    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model=PI_MODEL)
     app = create_app(settings)
     server, thread, port = _start_server(app)
     try:
@@ -148,7 +171,7 @@ def test_start_is_idempotent_and_returns_session(project_and_server):
         first = client.post(f"/api/projects/{project['id']}/planning/start")
         second = client.post(f"/api/projects/{project['id']}/planning/start")
 
-    assert first.status_code == 200
+    assert first.status_code == 200, first.text
     assert second.status_code == 200
     assert first.json()["planning_session_id"] == second.json()["planning_session_id"]
     assert first.json()["planning_session_id"].startswith("sess_")
@@ -262,7 +285,8 @@ def test_registry_bounds_and_reaps_lru_idle(tmp_path):
 
     from foreman_ai_hq.routes.planning_conversation import PlanningConversationRegistry
 
-    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model="gpt-5.4")
+    _seed_orchestrator_inventory(database_path)
+    settings = Settings(database_path=database_path, guardrails_path=_guardrails_path(), orchestrator_model=PI_MODEL)
     app = create_app(settings)
     server, thread, port = _start_server(app)
     try:

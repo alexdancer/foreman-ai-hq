@@ -14,12 +14,14 @@ class Settings:
     guardrails_path: Path = Path("guardrails.yaml")
     timezone: str = "local"
     control_plane_provider: str = "openai"
-    orchestrator_model: str = "gpt-5.4"
+    # There is no code default for the Orchestrator Model: pi's inventory is the
+    # sole authority, so absent configuration is *not configured*, not a fallback id.
+    orchestrator_model: str | None = None
     control_plane_api_key_env: str = "FOREMAN_AI_HQ_CONTROL_API_KEY"
     control_plane_base_url: str = ""
     provider_api_key_env: str = "PROVIDER_API_KEY"
-    estimator_model: str = "gpt-5.4"
-    task_breakdown_model: str = "gpt-5.4"
+    estimator_model: str | None = None
+    task_breakdown_model: str | None = None
     task_breakdown_timeout_seconds: int = 120
     portal_token_env: str = "TOKEN_TRACKER_PORTAL_TOKEN"
     portal_auth_required: bool = True
@@ -27,7 +29,7 @@ class Settings:
     local_runner_enabled: bool = False
 
     @property
-    def control_plane_model(self) -> str:
+    def control_plane_model(self) -> str | None:
         # Back-compat alias: the orchestrator model used to be exposed as the
         # control-plane model. Every canonical caller should read orchestrator_model.
         return self.orchestrator_model
@@ -101,23 +103,20 @@ class Settings:
             or "FOREMAN_AI_HQ_CONTROL_API_KEY"
         )
         # The orchestrator model is the canonical model for planning, estimation,
-        # and task breakdown. It falls back to the legacy control_plane_model config/env
-        # and then to the estimator model for a smooth upgrade path.
+        # task breakdown, and Agent Review. There is no code default: a value absent
+        # from every source resolves to not configured, and pi's persisted inventory
+        # decides whether a present value is usable.
         resolved_orchestrator_model = (
             # Explicit constructor arguments win over ambient environment so a leaked
             # FOREMAN_AI_HQ_ORCHESTRATOR_MODEL cannot override an explicit model.
             orchestrator_model
             or control_plane_model
             or os.getenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL")
-            or os.getenv("TOKEN_TRACKER_ORCHESTRATOR_MODEL")
-            or os.getenv("FOREMAN_AI_HQ_CONTROL_MODEL")
-            or os.getenv("TOKEN_TRACKER_CONTROL_PLANE_MODEL")
-            or estimator_model
-            or os.getenv("FOREMAN_AI_HQ_ESTIMATOR_MODEL")
-            or os.getenv("TOKEN_TRACKER_ESTIMATOR_MODEL")
             or config.get("orchestrator_model")
+            # Read as a candidate so an existing configuration is validated against
+            # the inventory rather than silently ignored.
             or config.get("control_plane_model")
-            or "gpt-5.4"
+            or None
         )
         object.__setattr__(
             self,
@@ -150,20 +149,12 @@ class Settings:
         object.__setattr__(
             self,
             "estimator_model",
-            estimator_model
-            or os.getenv("FOREMAN_AI_HQ_ESTIMATOR_MODEL")
-            or os.getenv("TOKEN_TRACKER_ESTIMATOR_MODEL")
-            or config.get("estimator_model")
-            or resolved_orchestrator_model,
+            estimator_model or config.get("estimator_model") or resolved_orchestrator_model,
         )
         object.__setattr__(
             self,
             "task_breakdown_model",
-            task_breakdown_model
-            or os.getenv("FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL")
-            or os.getenv("TOKEN_TRACKER_TASK_BREAKDOWN_MODEL")
-            or config.get("task_breakdown_model")
-            or resolved_orchestrator_model,
+            task_breakdown_model or config.get("task_breakdown_model") or resolved_orchestrator_model,
         )
         object.__setattr__(
             self,

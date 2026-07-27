@@ -141,7 +141,7 @@ def test_init_writes_non_secret_operator_config(monkeypatch, tmp_path, capsys):
     secrets = tmp_path / ".foreman" / "secrets.env"
     content = config.read_text()
     secret_content = secrets.read_text()
-    assert "control_plane_model = \"gpt-5.4\"" in content
+    assert "control_plane_model" not in content
     assert "local_runner_enabled = true" in content
     assert "env var NAMES, not secret values" in content
     assert "your-control-plane-api-key" not in content
@@ -278,7 +278,7 @@ def test_init_preserves_existing_config_and_prints_configured_secret_env_names(m
         'control_plane_api_key_env = "FOREMAN_AI_HQ_CONTROL_API_KEY"',
         'control_plane_api_key_env = "CUSTOM_CONTROL_API_KEY"',
     )
-    content = content.replace('control_plane_model = "gpt-5.4"', 'control_plane_model = "custom-model"')
+    content += '\ncontrol_plane_model = "custom-model"\n'
     config.write_text(content)
 
     exit_code = main(["init"])
@@ -344,7 +344,7 @@ def test_serve_reads_operator_config_when_flags_missing(monkeypatch, tmp_path):
     assert calls[0][1]["host"] == "127.0.0.1"
     assert calls[0][1]["port"] == 8000
     assert __import__("os").environ["TOKEN_TRACKER_DATABASE_PATH"] == str(tmp_path / ".foreman" / "harness.db")
-    assert __import__("os").environ["FOREMAN_AI_HQ_CONTROL_MODEL"] == "gpt-5.4"
+    assert "FOREMAN_AI_HQ_CONTROL_MODEL" not in __import__("os").environ
     assert __import__("os").environ["TOKEN_TRACKER_PORTAL_TOKEN"].startswith("foremanctl-")
     assert __import__("os").environ["FOREMAN_AI_HQ_CONTROL_API_KEY"] == "fake-control-key"
     assert __import__("os").environ["TOKEN_TRACKER_LOCAL_RUNNER"] == "1"
@@ -374,7 +374,7 @@ def test_serve_preserves_legacy_env_alias_over_config(monkeypatch, tmp_path):
     monkeypatch.setattr("foreman_ai_hq.cli.uvicorn.run", lambda app_ref, **kwargs: calls.append((app_ref, kwargs)))
     assert main(["init"]) == 0
     config = tmp_path / ".foreman" / "config.toml"
-    config.write_text(config.read_text().replace('control_plane_model = "gpt-5.4"', 'control_plane_model = "config-model"'))
+    config.write_text(config.read_text() + '\ncontrol_plane_model = "config-model"\n')
 
     exit_code = main(["serve"])
 
@@ -446,23 +446,13 @@ def test_check_requires_portal_token_for_shared_host(monkeypatch, tmp_path, caps
 
 
 def test_check_reports_control_plane_and_observed_only_worker(monkeypatch, tmp_path, capsys):
-    class FakeLLMClient:
-        def __init__(self, settings):
-            self.settings = settings
-
-        async def acompletion(self, payload):
-            return {"usage": {"total_tokens": 1}}
-
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("TOKEN_TRACKER_DATABASE_PATH", raising=False)
-    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
-    monkeypatch.delenv("TOKEN_TRACKER_ORCHESTRATOR_MODEL", raising=False)
-    monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_MODEL", raising=False)
+    monkeypatch.setenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", "anthropic/claude-sonnet-5")
     monkeypatch.delenv("TOKEN_TRACKER_PORTAL_TOKEN_ENV", raising=False)
     monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_API_KEY_ENV", raising=False)
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", "portal-secret")
     monkeypatch.setenv("FOREMAN_AI_HQ_CONTROL_API_KEY", "control-secret")
-    monkeypatch.setattr("foreman_ai_hq.cli.LLMClient", FakeLLMClient)
     assert main(["init"]) == 0
     db_path = tmp_path / ".foreman" / "harness.db"
     db.init_db(db_path)
@@ -487,7 +477,7 @@ def test_check_reports_control_plane_and_observed_only_worker(monkeypatch, tmp_p
 
     assert exit_code == 0
     output = capsys.readouterr().out
-    assert "PASS orchestrator model gpt-5.4 reachable" in output
+    assert "PASS orchestrator model anthropic/claude-sonnet-5 configured from pi inventory" in output
     assert "WARN Worker adapter opencode (opencode) observed_only is diagnostic-only and not normal board-launchable" in output
 
 

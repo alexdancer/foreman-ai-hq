@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import secrets
 import shutil
 import subprocess
@@ -12,8 +11,13 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, TypedDict
 
 from foreman_ai_hq import db
+from foreman_ai_hq.model_identity import looks_like_model_id
 from foreman_ai_hq.native_usage import native_sentinel_matched, parse_native_usage_evidence
-from foreman_ai_hq.native_cli_diagnostics import native_cli_diagnostic, redact_native_cli_text
+from foreman_ai_hq.native_cli_diagnostics import (
+    native_cli_diagnostic,
+    redact_cli_value,
+    redact_native_cli_text,
+)
 from foreman_ai_hq.tracking_modes import NATIVE_USAGE, OBSERVED_ONLY, PROXY_GOVERNED
 from foreman_ai_hq.worker_model_allowlist import (
     allowed_worker_model_ids,
@@ -26,8 +30,6 @@ SENTINEL_PROMPT = (
     f"Reply exactly {SENTINEL_RESPONSE}"
 )
 SECRET_ENV_TERMS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTHORIZATION")
-SECRET_VALUE_PATTERN = re.compile("s" "k_" r"[A-Za-z0-9_\-.]+")
-MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$")
 SUBPROCESS_RUNNER_TIMEOUT_SECONDS = 60
 CODEX_AGENT_LAUNCH_TIMEOUT_SECONDS = 600
 OPENCODE_AGENT_LAUNCH_TIMEOUT_SECONDS = 600
@@ -683,8 +685,8 @@ def discover_worker_models(
         reasons.append("No Worker Harness models were discovered natively.")
     evidence = {
         "returncode": returncode,
-        "stdout": _redact_value(stdout.strip()),
-        "stderr": _redact_value(stderr.strip()),
+        "stdout": redact_cli_value(stdout.strip()),
+        "stderr": redact_cli_value(stderr.strip()),
         "models": models,
         "command_plan": redact_command_plan(plan),
         "tracking_mode": "native",
@@ -725,7 +727,7 @@ def discovered_worker_model_ids(adapter: dict[str, Any]) -> list[str]:
 
     discovery = (adapter.get("config") or {}).get("model_discovery") or {}
     models = [str(model) for model in discovery.get("models") or []]
-    models = [model for model in models if _looks_like_model_id(model)]
+    models = [model for model in models if looks_like_model_id(model)]
     if models:
         return models
     return []
@@ -787,20 +789,11 @@ def _parse_discovered_models(stdout: str) -> list[str]:
     models: list[str] = []
     for candidate in candidates:
         model = str(candidate).strip()
-        if not _looks_like_model_id(model) or model in seen:
+        if not looks_like_model_id(model) or model in seen:
             continue
         seen.add(model)
         models.append(model)
     return models
-
-
-def _looks_like_model_id(model: str) -> bool:
-    if not model or not MODEL_ID_PATTERN.fullmatch(model):
-        return False
-    lowered = model.lower()
-    if lowered.startswith("model"):
-        return False
-    return any(char.isdigit() or char in "/-_.:" for char in model)
 
 
 def _models_from_json(value: Any) -> list[str]:
@@ -836,7 +829,7 @@ def redact_command_plan(plan: CommandPlan) -> dict[str, Any]:
     return {
         "command": _redact_command(plan.command, prompt_indices=prompt_indices),
         "cwd": str(plan.cwd) if plan.cwd else None,
-        "env": {key: ("***REDACTED***" if _is_secret_name(key) else _redact_value(value)) for key, value in plan.env.items()},
+        "env": {key: ("***REDACTED***" if _is_secret_name(key) else redact_cli_value(value)) for key, value in plan.env.items()},
         "metadata": metadata,
     }
 
@@ -948,8 +941,8 @@ def verify_worker_adapter(
         "tracking_mode": resolved_tracking_mode,
         "tracking_authoritative": resolved_tracking_mode in {PROXY_GOVERNED, NATIVE_USAGE},
         "returncode": returncode,
-        "stdout": _redact_value(stdout.strip()),
-        "stderr": _redact_value(stderr),
+        "stdout": redact_cli_value(stdout.strip()),
+        "stderr": redact_cli_value(stderr),
         "sentinel_matched": sentinel_matched,
         "token_recorded": token_recorded,
         "command_plan": redact_command_plan(plan),
@@ -993,13 +986,13 @@ def subprocess_runner(plan: CommandPlan) -> subprocess.CompletedProcess[str]:
             stderr=f"{stderr}\n{timeout_message}" if stderr else timeout_message,
         )
     except OSError as exc:
-        command_name = _redact_value(str(plan.command[0])) if plan.command else "<empty>"
+        command_name = redact_cli_value(str(plan.command[0])) if plan.command else "<empty>"
         error_text = getattr(exc, "strerror", None) or str(exc)
         return subprocess.CompletedProcess(
             plan.command,
             127,
             stdout="",
-            stderr=f"Failed to launch command {command_name!r}: {type(exc).__name__}: {_redact_value(str(error_text))}",
+            stderr=f"Failed to launch command {command_name!r}: {type(exc).__name__}: {redact_cli_value(str(error_text))}",
         )
 
 
@@ -1024,8 +1017,8 @@ def _native_cli_failure_reason(stdout: str, stderr: str) -> str | None:
     for payload in _json_line_payloads(stdout):
         text = _cli_payload_text(payload)
         if text and (payload.get("is_error") or payload.get("type") == "error" or payload.get("error")):
-            return _redact_value(text)[:500]
-    return _redact_value(stderr.strip())[:500] if stderr.strip() else None
+            return redact_cli_value(text)[:500]
+    return redact_cli_value(stderr.strip())[:500] if stderr.strip() else None
 
 
 def _json_line_payloads(text: str) -> list[dict[str, Any]]:
@@ -1055,16 +1048,16 @@ def _message_stream_event(value: Any, *, title: str) -> CommonEvent | None:
     text = _cli_text(value)
     if not text:
         return None
-    return {"kind": "agent_message", "title": title, "detail": {"text": _redact_value(text)[:1000]}}
+    return {"kind": "agent_message", "title": title, "detail": {"text": redact_cli_value(text)[:1000]}}
 
 
 def _tool_stream_event(name: Any, arguments: Any) -> CommonEvent | None:
     if not name:
         return None
-    detail = _redact_value(json.dumps(arguments or {}, sort_keys=True, default=str))[:1000]
+    detail = redact_cli_value(json.dumps(arguments or {}, sort_keys=True, default=str))[:1000]
     return {
         "kind": "tool_call",
-        "title": f"Tool: {_redact_value(str(name))[:200]}",
+        "title": f"Tool: {redact_cli_value(str(name))[:200]}",
         "detail": {"arguments": detail},
     }
 
@@ -1086,8 +1079,8 @@ def _generic_stream_event(payload: dict[str, Any]) -> CommonEvent | None:
     if event_type in {"error", "failed", "status", "started"}:
         return {
             "kind": "status",
-            "title": _redact_value(str(event_type))[:200],
-            "detail": {"status": _redact_value(str(payload.get("status") or event_type))[:500]},
+            "title": redact_cli_value(str(event_type))[:200],
+            "detail": {"status": redact_cli_value(str(payload.get("status") or event_type))[:500]},
         }
     usage = payload.get("usage")
     if isinstance(usage, dict):
@@ -1104,8 +1097,8 @@ def _generic_stream_event(payload: dict[str, Any]) -> CommonEvent | None:
     if event_type:
         return {
             "kind": "status",
-            "title": _redact_value(str(event_type))[:200],
-            "detail": {"status": _redact_value(str(payload.get("status") or event_type))[:500]},
+            "title": redact_cli_value(str(event_type))[:200],
+            "detail": {"status": redact_cli_value(str(payload.get("status") or event_type))[:500]},
         }
     return None
 
@@ -1177,19 +1170,12 @@ def _redact_command(command: list[str], *, prompt_indices: set[int] | None = Non
             redacted.append(f"{flag}=***REDACTED***")
             continue
         if lowered_flag in SECRET_COMMAND_FLAGS:
-            redacted.append(_redact_value(part))
+            redacted.append(redact_cli_value(part))
             redact_next = True
             continue
         if part == "-H":
             redacted.append(part)
             previous_was_header_flag = True
             continue
-        redacted.append(_redact_value(part))
-    return redacted
-
-
-def _redact_value(value: str) -> str:
-    redacted = redact_native_cli_text(SECRET_VALUE_PATTERN.sub("***REDACTED***", value))
-    if "secret" in value.lower() and redacted == value:
-        return "***REDACTED***"
+        redacted.append(redact_cli_value(part))
     return redacted

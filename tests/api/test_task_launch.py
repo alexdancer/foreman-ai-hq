@@ -11,6 +11,7 @@ from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import portal as portal_routes
 from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_launch import _clear_recoverable_launch_failure_metadata, refresh_task_from_session
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -223,11 +224,11 @@ def _client_with_llm(tmp_path, llm):
     settings = Settings(
         database_path=tmp_path / "harness.db",
         guardrails_path=ROOT / "guardrails.yaml",
-        estimator_model="openai/gpt-4.1-mini",
     )
     app = create_app(settings)
     db.init_db(settings.database_path)
     app.state.llm_client = llm
+    app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
     project_root = tmp_path / "connected-project"
     project_root.mkdir(exist_ok=True)
     db.upsert_connected_project(
@@ -1895,6 +1896,7 @@ def test_project_run_queue_auto_agent_review_stores_advisory_evidence(tmp_path, 
 
     with _client(tmp_path) as client:
         client.app.state.llm_client = llm
+        client.app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
         client.app.state.task_launch_runner = fake_runner
         project = db.list_connected_projects(tmp_path / "harness.db")[0]
         task = db.create_task(
@@ -1949,6 +1951,7 @@ def test_project_run_queue_auto_agent_review_failure_leaves_review(tmp_path, mon
 
     with _client(tmp_path) as client:
         client.app.state.llm_client = FailingLLM()
+        client.app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(FailingLLM())
         client.app.state.task_launch_runner = fake_runner
         project = db.list_connected_projects(tmp_path / "harness.db")[0]
         task = db.create_task(

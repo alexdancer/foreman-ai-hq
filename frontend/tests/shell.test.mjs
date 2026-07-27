@@ -2183,7 +2183,7 @@ test("Settings views show a fixed message when their handoff fails", () => {
   const cases = [
     ["BudgetSettings", () => BudgetSettingsState, /Could not load budget settings\. Retry\./, /Budget settings require sign-in\./],
     ["WorkerSettings", () => WorkerSettingsState, /Could not load worker adapters\. Retry\./, /Worker adapters require sign-in\./],
-    ["ControlPlaneSettings", () => ControlPlaneSettingsState, /Could not load control-plane settings\. Retry\./, /Control-plane settings require sign-in\./],
+    ["ControlPlaneSettings", () => ControlPlaneSettingsState, /Could not load orchestrator settings\. Retry\./, /Orchestrator settings require sign-in\./],
     ["ProjectSettings", () => ProjectSettingsState, /Could not load project settings\. Retry\./, /Project settings require sign-in\./],
     ["Alarms", () => AlarmsState, /Could not load Alarms\. Retry\./, /Alarms require sign-in\./],
   ];
@@ -2207,32 +2207,29 @@ test("Settings views show a fixed message when their handoff fails", () => {
   }
 });
 
-// Curated models mirror CURATED_CONTROL_PLANE_MODELS in routes/portal.py so the
-// dropdown cannot drift between the two surfaces.
+// Mirrors the /api/settings/control-plane handoff in routes/react_shell.py: the
+// dropdown is pi's discovered inventory, never a harness-authored list.
 function controlPlaneData(overrides = {}) {
   return {
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    base_url: null,
-    api_key_env: "TEST_CONTROL_PLANE_KEY",
-    api_key_present: true,
-    estimator_model: "claude-sonnet-4-6",
-    task_breakdown_model: "claude-sonnet-4-6",
-    legacy_api_key_configured: false,
+    model: "anthropic/claude-sonnet-5",
+    configured: true,
+    inventory: {
+      models: ["anthropic/claude-sonnet-5", "openai-codex/gpt-5.4"],
+      discovered_at: "2099-01-01T00:00:00+00:00",
+      state: "ready",
+      needs_authentication: false,
+      reasons: [],
+    },
+    verification: {
+      passed: true,
+      verified_at: "2099-01-01T00:00:00+00:00",
+      model: "anthropic/claude-sonnet-5",
+      stale: false,
+      reasons: [],
+    },
+    diverging_jobs: {},
     shadowed_settings: {},
-    curated_models: [
-      { provider: "openai", model: "gpt-5.6-sol", label: "OpenAI · gpt-5.6-sol" },
-      { provider: "openai", model: "gpt-5.6-terra", label: "OpenAI · gpt-5.6-terra" },
-      { provider: "openai", model: "gpt-5.6-luna", label: "OpenAI · gpt-5.6-luna" },
-      { provider: "anthropic", model: "claude-fable-5", label: "Anthropic · Claude Fable 5" },
-      { provider: "anthropic", model: "claude-sonnet-5", label: "Anthropic · Claude Sonnet 5" },
-      { provider: "anthropic", model: "claude-opus-4-8", label: "Anthropic · Claude Opus 4.8" },
-      { provider: "anthropic", model: "claude-haiku-4-5", label: "Anthropic · Claude Haiku 4.5" },
-      { provider: "openrouter", model: "anthropic/claude-sonnet-5", label: "OpenRouter · Claude Sonnet 5 (recommended)" },
-      { provider: "openrouter", model: "openai/gpt-5.6-terra", label: "OpenRouter · GPT-5.6 Terra (recommended)" },
-      { provider: "openrouter", model: "google/gemini-3.5-flash", label: "OpenRouter · Gemini 3.5 Flash (recommended)" },
-    ],
-    connection_status: { state: "needs_test", checked_at: null, details: null },
+    connection_status: { state: "online", checked_at: null, details: null },
     ...overrides,
   };
 }
@@ -2241,7 +2238,9 @@ test("ControlPlaneSettings renders untested connections as attention statuses", 
   let renderer;
   await act(async () => {
     renderer = create(React.createElement(ControlPlaneSettingsState, {
-      data: controlPlaneData(),
+      data: controlPlaneData({
+        connection_status: { state: "needs_test", checked_at: null, details: null },
+      }),
       error: null,
       loading: false,
       onRefresh: () => {},
@@ -2256,81 +2255,7 @@ test("ControlPlaneSettings renders untested connections as attention statuses", 
   await act(async () => { renderer.unmount(); });
 });
 
-// This is the client-side replacement for the retired Jinja
-// <option selected>/hidden/disabled markup: dataToForm() in
-// ControlPlaneSettings.jsx now decides "is this model custom" itself, by
-// checking whether the stored (provider, model) pair is in curated_models.
-// Table-driven over curated cases plus stored model/provider pairs that must
-// remain reachable through Custom model.
-test("ControlPlaneSettings dataToForm resolves curated vs. custom models by provider+model pair", async () => {
-  const cases = [
-    {
-      name: "a curated model for its own provider renders selected, not custom",
-      provider: "anthropic",
-      model: "claude-sonnet-5",
-      expectCustom: false,
-    },
-    {
-      name: "an openai-compatible model is never curated for any provider",
-      provider: "openai-compatible",
-      model: "openai-compatible/custom-control-plane-999",
-      expectCustom: true,
-    },
-    {
-      name: "a curated model name reused under the wrong provider is custom",
-      provider: "openai",
-      model: "claude-sonnet-5",
-      expectCustom: true,
-    },
-    {
-      name: "a stale provider-prefixed model id is custom",
-      provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-20250514",
-      expectCustom: true,
-    },
-    {
-      name: "a curated OpenRouter model renders selected, not custom",
-      provider: "openrouter",
-      model: "anthropic/claude-sonnet-5",
-      expectCustom: false,
-    },
-    {
-      name: "an uncurated OpenRouter model remains available through Custom model",
-      provider: "openrouter",
-      model: "meta-llama/custom-demo-999",
-      expectCustom: true,
-    },
-  ];
-
-  for (const testCase of cases) {
-    const data = controlPlaneData({ provider: testCase.provider, model: testCase.model });
-    let renderer;
-    await act(async () => {
-      renderer = create(
-        React.createElement(ControlPlaneSettingsState, {
-          data, error: null, loading: false, onRefresh: () => {},
-        }),
-      );
-    });
-
-    const modelSelect = renderer.root.findByProps({ id: "control-plane-model" });
-    if (testCase.expectCustom) {
-      assert.equal(modelSelect.props.value, "__custom__", testCase.name);
-      const customInput = renderer.root.findByProps({ id: "control-plane-custom-model" });
-      assert.equal(customInput.props.value, testCase.model, testCase.name);
-    } else {
-      assert.equal(modelSelect.props.value, testCase.model, testCase.name);
-      assert.throws(
-        () => renderer.root.findByProps({ id: "control-plane-custom-model" }),
-        testCase.name,
-      );
-    }
-
-    await act(async () => { renderer.unmount(); });
-  }
-});
-
-test("ControlPlaneSettings saves an uncurated OpenRouter model ID unchanged", async (t) => {
+test("ControlPlaneSettings offers only inventory models and saves the qualified id", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   let posted = null;
@@ -2343,82 +2268,88 @@ test("ControlPlaneSettings saves an uncurated OpenRouter model ID unchanged", as
   await act(async () => {
     renderer = create(
       React.createElement(ControlPlaneSettingsState, {
-        data: controlPlaneData({
-          provider: "openrouter",
-          model: "meta-llama/custom-demo-999",
-          base_url: "https://openrouter.ai/api/v1",
-          api_key_env: "OPENROUTER_API_KEY",
-        }),
-        error: null,
-        loading: false,
-        onRefresh: () => {},
+        data: controlPlaneData(), error: null, loading: false, onRefresh: () => {},
       }),
     );
   });
 
+  const select = renderer.root.findByProps({ id: "orchestrator-model" });
+  const offered = select.props.children[1].map((option) => option.props.value);
+  assert.deepEqual(offered, ["anthropic/claude-sonnet-5", "openai-codex/gpt-5.4"]);
+  // No provider, base URL, or API key field survives on this surface.
+  assert.throws(() => renderer.root.findByProps({ id: "control-plane-provider" }));
+  assert.throws(() => renderer.root.findByProps({ id: "control-plane-base-url" }));
+  assert.throws(() => renderer.root.findByProps({ id: "control-plane-api-key-env" }));
+
   const form = renderer.root.findByProps({ className: "control-plane-form" });
   await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
-
   assert.equal(posted.url, "/settings/control-plane");
-  assert.equal(posted.body.control_plane_provider, "openrouter");
-  assert.equal(posted.body.control_plane_model, "meta-llama/custom-demo-999");
-  assert.equal(posted.body.control_plane_base_url, "https://openrouter.ai/api/v1");
-  assert.equal(posted.body.control_plane_api_key_env, "OPENROUTER_API_KEY");
+  assert.equal(posted.body.control_plane_model, "anthropic/claude-sonnet-5");
+  assert.deepEqual(Object.keys(posted.body), ["control_plane_model"]);
   await act(async () => { renderer.unmount(); });
 });
 
-test("ControlPlaneSettings renders reported cost and unavailable cost distinctly", async () => {
-  for (const [cost, expected] of [[0.0042, "$0.004200"], [null, "unavailable"]]) {
-    let renderer;
-    await act(async () => {
-      renderer = create(
-        React.createElement(ControlPlaneSettingsState, {
-          data: controlPlaneData({
-            connection_status: {
-              state: "online",
-              checked_at: "2099-01-01T00:00:00Z",
-              details: {
-                provider: "openrouter",
-                model: "anthropic/claude-sonnet-5",
-                usage: { total_tokens: 10 },
-                cost,
-              },
-            },
-          }),
-          error: null,
-          loading: false,
-          onRefresh: () => {},
-        }),
-      );
-    });
-    assert.match(JSON.stringify(renderer.toJSON()), new RegExp(expected.replace("$", "\\$")));
-    await act(async () => { renderer.unmount(); });
-  }
-});
-
-test("ControlPlaneSettings clears OpenRouter connection defaults when switching providers", async () => {
+test("ControlPlaneSettings shows the authenticate-with-pi state instead of an empty dropdown", async () => {
   let renderer;
   await act(async () => {
     renderer = create(
       React.createElement(ControlPlaneSettingsState, {
-        data: controlPlaneData({ provider: "openrouter", model: "anthropic/claude-sonnet-5" }),
-        error: null,
-        loading: false,
-        onRefresh: () => {},
+        data: controlPlaneData({
+          model: null,
+          configured: false,
+          inventory: { models: [], discovered_at: null, state: "needs_authentication", needs_authentication: true, reasons: [] },
+        }),
+        error: null, loading: false, onRefresh: () => {},
       }),
     );
   });
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /pi \/login/);
+  assert.throws(() => renderer.root.findByProps({ id: "orchestrator-model" }));
+  await act(async () => { renderer.unmount(); });
+});
 
+test("ControlPlaneSettings surfaces stale verification and diverging per-job models", async () => {
+  let renderer;
   await act(async () => {
-    renderer.root.findByProps({ id: "control-plane-provider" }).props.onChange({ target: { value: "openai" } });
+    renderer = create(
+      React.createElement(ControlPlaneSettingsState, {
+        data: controlPlaneData({
+          verification: {
+            passed: true,
+            verified_at: "2099-01-01T00:00:00+00:00",
+            model: "openai-codex/gpt-5.4",
+            stale: true,
+            reasons: [],
+          },
+          diverging_jobs: { estimator_model: "openai-codex/gpt-5.4" },
+        }),
+        error: null, loading: false, onRefresh: () => {},
+      }),
+    );
   });
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /Verify again/);
+  assert.match(markup, /estimator_model = openai-codex\/gpt-5\.4/);
+  await act(async () => { renderer.unmount(); });
+});
 
-  assert.equal(renderer.root.findByProps({ id: "control-plane-base-url" }).props.value, "");
-  assert.equal(
-    renderer.root.findByProps({ id: "control-plane-api-key-env" }).props.value,
-    "FOREMAN_AI_HQ_CONTROL_API_KEY",
-  );
-  assert.equal(renderer.root.findByProps({ id: "control-plane-model" }).props.value, "gpt-5.6-sol");
+test("ControlPlaneSettings blocks Verify until a model is configured", async () => {
+  let renderer;
+  await act(async () => {
+    renderer = create(
+      React.createElement(ControlPlaneSettingsState, {
+        data: controlPlaneData({ model: null, configured: false }),
+        error: null, loading: false, onRefresh: () => {},
+      }),
+    );
+  });
+  const verify = renderer.root
+    .findAllByType("button")
+    .find((b) => b.props.children === "Verify");
+  assert.equal(verify.props.disabled, true);
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /Orchestrator is not configured/);
   await act(async () => { renderer.unmount(); });
 });
 

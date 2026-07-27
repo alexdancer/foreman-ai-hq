@@ -39,6 +39,9 @@ def _client(tmp_path, *, portal_auth_required: bool = True, local_runner_enabled
         local_runner_enabled=local_runner_enabled,
         operator_config={},
     )
+    # Explicit so the conftest hook that seeds orchestrator discovery evidence runs;
+    # tests marked `unconfigured_orchestrator` get a bare database instead.
+    db.init_db(settings.database_path)
     return TestClient(create_app(settings))
 
 
