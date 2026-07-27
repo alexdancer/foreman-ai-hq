@@ -109,7 +109,7 @@ Representative local Portal screens using synthetic/public-safe data:
 ## How the workflow works
 
 1. **Create a task** in the project Pipeline. Short intake can create an implementation Task or a read-only Scout.
-2. **Estimate** with the control-plane model.
+2. **Estimate** with the Orchestrator Model.
 3. **Launch** through a verified Worker Adapter.
 4. **Run async** on the Execution Floor while the Portal stays responsive.
 5. **Review evidence** in the card's side drawer: command plan, Worker events, token usage, checkpoints, and Agent Review; the Session Report remains the full permalink.
@@ -170,11 +170,11 @@ There are two model layers:
 
 | Layer                   | Used for                                                      | Auth/config                                                     |
 | ----------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Orchestrator model** | estimates, planning, task breakdown, recommendations, reports | configured in `/settings/control-plane` or local config/secrets |
+| **Orchestrator model** | estimates, planning, task breakdown, recommendations, reports | selected from pi inventory; provider auth via `pi /login`       |
 | **Worker model**        | the actual coding task                                        | configured by the native Worker CLI                             |
 
 
-Pasting a control-plane API key does not configure OpenCode, Claude Code, Codex, or another Worker CLI.
+Optional direct-provider credentials do not configure pi or a native Worker CLI.
 
 ## Local files and configuration
 
@@ -185,7 +185,7 @@ Run it from the repository you want Foreman AI HQ to govern. If you run it from 
 | File                   | Purpose                                                        |
 | ---------------------- | -------------------------------------------------------------- |
 | `.foreman/config.toml`     | non-secret local config                                        |
-| `.foreman/secrets.env`     | ignored portal token and control-plane API key storage         |
+| `.foreman/secrets.env`     | ignored portal token and optional provider key storage         |
 | `.foreman/guardrails.yaml` | ignored default guardrail config                               |
 | `.foreman/harness.db`      | default SQLite database, created or migrated by `foremanctl init`     |
 
@@ -199,14 +199,12 @@ Common environment variables:
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `TOKEN_TRACKER_PORTAL_TOKEN`    | Portal login token for shared/non-loopback access                             |
 | `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model chosen from pi's inventory                                 |
-| `TOKEN_TRACKER_ORCHESTRATOR_MODEL` | *(alias)* Alternative env name for `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`         |
-| `TOKEN_TRACKER_CONTROL_PLANE_MODEL`| *(legacy alias)* Alternative env name for the orchestrator model              |
-| `FOREMAN_AI_HQ_CONTROL_PROVIDER`   | Optional provider for control-plane model traffic (`openai`, `anthropic`, `openai-compatible`) |
-| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Optional base URL for OpenAI-compatible control-plane providers                 |
-| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Optional provider API key for control-plane model traffic; not Worker CLI auth |
+| `FOREMAN_AI_HQ_CONTROL_PROVIDER`   | Optional direct-provider compatibility setting                               |
+| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Optional direct-provider compatibility base URL                              |
+| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Optional direct-provider API key; not pi or native Worker CLI auth            |
 
 
-The Portal writes submitted API keys only to ignored local secret storage and does not display raw key values again. The Orchestrator Model is selected from pi's discovered inventory, so `FOREMAN_AI_HQ_CONTROL_*` credentials are only needed if you route control-plane model traffic through the local proxy endpoint.
+Optional direct-provider keys belong in ignored local secret storage or the shell environment; the Orchestrator settings page does not collect them. The Orchestrator Model is selected from pi's discovered inventory, and its provider authentication belongs to pi.
 
 ## Current limits
 
