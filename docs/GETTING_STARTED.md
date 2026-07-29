@@ -18,9 +18,9 @@ This is the first-run guide for operators evaluating Foreman AI HQ in their own 
    `foremanctl init` keeps the installed CLI global but writes repo-local state under `.foreman/`. Inside a Git repo, it targets the Git root even if you run it from a subdirectory; outside Git, it uses the current directory. It creates `.foreman/config.toml`, `.foreman/secrets.env`, `.foreman/guardrails.yaml`, and `.foreman/harness.db`.
 3. Open `http://localhost:8000/`. The default loopback server does not require a portal login token.
 4. Open `/settings/control-plane`, run `pi /login` to authenticate with your provider, choose an Orchestrator Model from pi's inventory, then verify it.
-5. Connect a local repository from `/projects`.
+5. Connect a local repository from `/projects`. Foreman detects a suggested verification command and base branch; confirm or edit both before launching an `implementation` Task. The project must be a Git repository for write-capable launch; read-only investigation of a non-git directory is still supported.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify tracking.
-7. Estimate a tiny task in the project's Pipeline, follow it on the Execution Floor, and inspect its Evidence Drawer or full Session Report.
+7. Estimate a tiny `implementation` task in the project's Pipeline. Ensure your working tree is clean before launch — the Harness refuses a dirty tree and names the offending paths, but does not stash or commit them for you. Follow the run on the Execution Floor and inspect its Evidence Drawer or full Session Report.
 8. Run `foremanctl check` any time you need redacted setup status for support.
 
 ## Contributor checkout

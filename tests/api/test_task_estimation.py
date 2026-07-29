@@ -13,6 +13,7 @@ from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import tasks as task_routes
 from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_launch import refresh_task_from_session
+from tests.conftest import git_project_profile
 from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
@@ -44,13 +45,13 @@ def _client(tmp_path):
         settings.database_path,
         name=project_root.name,
         root_path=str(project_root.resolve()),
-        profile={"name": project_root.name, "root_path": str(project_root.resolve()), "test_command": "pytest"},
+        profile=git_project_profile(project_root, name=project_root.name),
         capability={"state": "launch_ready", "can_launch": True},
     )
     return TestClient(app)
 
 
-def test_short_intake_rejects_acceptance_verification_kind(tmp_path, monkeypatch):
+def test_short_intake_rejects_the_retired_scout_kind(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     with _client(tmp_path) as client:
         project = db.list_connected_projects(tmp_path / "harness.db")[0]
@@ -59,12 +60,12 @@ def test_short_intake_rejects_acceptance_verification_kind(tmp_path, monkeypatch
             headers={**_auth_headers(), "accept": "application/json"},
             data={
                 "description": "Verify the integrated artifact",
-                "task_kind": "acceptance_verification",
+                "task_kind": "scout",
             },
         )
 
     assert response.status_code == 422
-    assert response.json()["error"] == "short intake task_kind must be implementation or scout"
+    assert response.json()["error"] == "short intake task_kind must be implementation or acceptance_verification"
     assert db.list_tasks(tmp_path / "harness.db") == []
 
 
@@ -251,7 +252,7 @@ def _client_with_llm(
             settings.database_path,
             name=project_root.name,
             root_path=str(project_root.resolve()),
-            profile={"name": project_root.name, "root_path": str(project_root.resolve()), "test_command": "pytest"},
+            profile=git_project_profile(project_root, name=project_root.name),
             capability={"state": "launch_ready", "can_launch": True},
         )
     return TestClient(app)
@@ -287,7 +288,7 @@ def test_project_estimate_form_stamps_connected_project_metadata(
         database_path,
         name="Project",
         root_path=str(project_root.resolve()),
-        profile={"name": "Project", "root_path": str(project_root.resolve()), "test_command": "pytest"},
+        profile=git_project_profile(project_root, name="Project"),
         capability={"state": "launch_ready", "can_launch": True},
     )
 
@@ -330,14 +331,16 @@ def test_project_estimate_includes_repo_context_and_relevant_calibration_summary
         (project_root / "AGENTS.md").write_text("Use pytest for DEMO_TASK_2099.", encoding="utf-8")
         catalog_dir = project_root / ".foreman"
         catalog_dir.mkdir()
+        # The catalog matches on shared profile keys, so it must name this project's
+        # confirmed verification command rather than a hardcoded one.
         (catalog_dir / "estimation_calibration.yaml").write_text(
-            """
+            f"""
 cases:
   - id: DEMO-CAL-2099-999-101
     task_description: Add project-scoped DEMO_PORTAL_2099 archive filter tests.
     project_profile:
-      name: connected-project
-      test_command: pytest
+      name: {project["profile"]["name"]}
+      test_command: {project["profile"]["test_command"]}
     task_kind: implementation
     complexity: modest
     recommended_model: claude-sonnet-4-6

@@ -68,7 +68,9 @@ computed capability renders an action.**
   time because that Task had just committed. Every pull request would contain all prior work.
   The base branch becomes operator-confirmed project configuration and is passed as the
   branch start point, which is stateless: a crash, an interrupted run, or an operator
-  checkout cannot poison the next launch.
+  checkout cannot poison the next launch. `-B` rather than `-b` also resets any leftover Task
+  branch from a failed relaunch to the confirmed base; a Task that already committed is in
+  Review and cannot launch, so nothing committed is ever discarded.
 - **The base branch advances on acceptance, fast-forward only.** Branching every Task from a
   fixed base makes queued slices independent, removing the accidental sequencing the shared
   working tree used to provide. Accepting a Task fast-forwards the base to include its commit
@@ -123,9 +125,15 @@ computed capability renders an action.**
   authorized on its own merits, and publishing it is a separate step that may be retried.
 - **Non-git projects** are refused at write-capable launch, not at connect. Refusing at connect
   would also bar read-only Chat investigation of a non-git repository, which is a supported use.
-- **HEAD after a run** is restored to the operator's original branch. Stateless branching means
-  nothing depends on HEAD, and leaving the repository on the last Task's branch surprises the
-  operator's own terminal. The Task branch remains available for inspection by name.
+- **HEAD is restored to the operator's original branch once the Harness-owned commit exists** —
+  on passing verification, or on Approve commit. Stateless branching means nothing depends on
+  HEAD, and leaving the repository on the last Task's branch surprises the operator's own
+  terminal. The Task branch remains available for inspection by name. While changes are still
+  awaiting authorization, HEAD stays on the Task branch: checking out the base branch with
+  uncommitted work carries that work onto the base, which is the outcome the Task branch exists
+  to prevent. The tree is therefore dirty until the operator authorizes the commit, and the next
+  write-capable launch is refused by the cleanliness guardrail — the same backpressure the queue's
+  awaiting-disposition stop condition applies.
 - **Double integration** is surfaced, not enforced. The Portal shows which integration path a
   project is using; git absorbs the duplicate, and blocking one path would require the Harness
   to track remote merge state it does not observe.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -30,12 +31,17 @@ from foreman_ai_hq.pi_adapter import (
     PiStructuredOutputError,
     run_pi_structured_job,
 )
-from foreman_ai_hq.project_context import project_task_metadata, task_matches_project, task_project_board_path
+from foreman_ai_hq.project_context import project_task_metadata, resolve_task_project, task_matches_project, task_project_board_path
 from foreman_ai_hq.repo_context import build_repo_context_brief
 from foreman_ai_hq.task_launch import (
     DEFAULT_PROXY_URL,
     TaskLaunchBlocked,
+    _create_harness_commit,
+    _fast_forward_base,
     _git_diff_summary,
+    _restore_operator_branch,
+    _review_disposition_state_after_commit,
+    detect_pr_capability,
     launch_task,
     refresh_task_from_session,
 )
@@ -100,10 +106,11 @@ class TaskLaunchRequest(BaseModel):
 
 
 class TaskReviewActionRequest(BaseModel):
-    action: str = Field(pattern="^(save_prompt|agent_review|mark_done|block)$")
+    action: str = Field(pattern="^(save_prompt|agent_review|mark_done|block|approve_commit|open_pr)$")
     project_id: str | None = None
     review_prompt: str | None = None
     blocked_reason: str | None = None
+    approve_commit_reason: str | None = None
 
 
 class ManualEstimateRequest(BaseModel):
@@ -280,6 +287,10 @@ async def review_task_endpoint(task_id: str, request: Request):
             updated = _block_review_task(database_path, task, payload.blocked_reason)
         elif payload.action == "agent_review":
             updated = await _run_agent_review(request, task, payload.review_prompt)
+        elif payload.action == "approve_commit":
+            updated = _approve_harness_commit(database_path, task, payload.approve_commit_reason)
+        elif payload.action == "open_pr":
+            updated = _open_pull_request(database_path, task)
         else:  # pragma: no cover - pydantic validation prevents this
             raise HTTPException(status_code=422, detail="unsupported review action")
     except KeyError as exc:
@@ -595,8 +606,8 @@ async def _estimate_form_for_project(
         project_metadata = project_task_metadata(project)
     try:
         task_kind = validate_task_kind(task_kind)
-        if task_kind not in {"implementation", "scout"}:
-            raise ValueError("short intake task_kind must be implementation or scout")
+        if task_kind not in {"implementation", "acceptance_verification"}:
+            raise ValueError("short intake task_kind must be implementation or acceptance_verification")
     except ValueError as exc:
         error = str(exc)
         if wants_json:
@@ -1640,7 +1651,27 @@ def _save_review_prompt(database_path: Path | str, task: dict[str, Any], prompt:
 
 
 def _mark_review_done(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
+    project, _ = resolve_task_project(database_path, task)
+    project_root = str(project["root_path"]) if project else None
     metadata = dict(task.get("metadata", {}))
+    harness_commit = metadata.get("harness_commit")
+    if harness_commit and isinstance(harness_commit, dict) and project_root:
+        profile = project.get("profile") or {}
+        base_branch = profile.get("base_branch")
+        if base_branch:
+            success, reason = _fast_forward_base(Path(project_root), base_branch, harness_commit["sha"])
+            if not success:
+                # Refuse acceptance, leave the commit and task branch intact, surface the divergence.
+                metadata["base_divergence"] = {
+                    "base_branch": base_branch,
+                    "commit_sha": harness_commit["sha"],
+                    "reason": reason,
+                    "at": _now_iso(),
+                }
+                metadata["blocked_condition"] = _blocked_condition(reason, "base_divergence")
+                db.update_task(database_path, task["id"], {"metadata": metadata})
+                raise ValueError(f"Cannot accept task: {reason}")
+        _restore_operator_branch(project_root, metadata.get("operator_branch"))
     for key in (
         "blocked_condition",
         "blocked_reason",
@@ -1648,6 +1679,7 @@ def _mark_review_done(database_path: Path | str, task: dict[str, Any]) -> dict[s
         "launch_guardrail_reasons",
         "budget_override_available",
         "budget_override_reason",
+        "base_divergence",
     ):
         metadata.pop(key, None)
     metadata.update({
@@ -1671,6 +1703,146 @@ def _block_review_task(database_path: Path | str, task: dict[str, Any], reason: 
         "reviewed_at": _now_iso(),
     }
     return db.update_task(database_path, task["id"], {"status": "Review", "metadata": metadata})
+
+
+def _approve_harness_commit(database_path: Path | str, task: dict[str, Any], reason: str | None) -> dict[str, Any]:
+    if not task.get("session_id"):
+        raise ValueError("Approve commit requires a Worker Session.")
+    session = db.get_session(database_path, task["session_id"])
+    project, _ = resolve_task_project(database_path, task)
+    project_root = str(project["root_path"]) if project else None
+    if not project_root:
+        raise ValueError("Approve commit requires a connected project.")
+    metadata = dict(task.get("metadata", {}))
+    diff_summary = _git_diff_summary(project_root)
+    if not diff_summary["has_changes"]:
+        raise ValueError("Approve commit requires uncommitted Worker changes.")
+    verification = metadata.get("post_run_verification") or {}
+    authorization = {
+        "authorized_by": "operator",
+        "authorized_at": _now_iso(),
+        "reason": (reason or "").strip() or None,
+        "verification_did_not_clear": (verification.get("passed") is False) or bool(verification.get("reason")),
+    }
+    commit = _create_harness_commit(
+        project_root,
+        task,
+        session,
+        verification_result=verification if isinstance(verification, dict) else None,
+        authorization=authorization,
+    )
+    if commit is None:
+        raise ValueError("No uncommitted changes found; the commit may already exist.")
+    _restore_operator_branch(project_root, metadata.get("operator_branch"))
+    pr_capability = detect_pr_capability(project_root)
+    review_state = _review_disposition_state_after_commit(commit, pr_capability)
+    for key in ("launch_blocked_reason", "launch_guardrail_reasons", "blocked_condition"):
+        metadata.pop(key, None)
+    metadata.update({
+        "harness_commit": commit,
+        "harness_commit_authorization": authorization,
+        "review_disposition_state": review_state,
+    })
+    return db.update_task(database_path, task["id"], {"metadata": metadata})
+
+
+def _open_pull_request(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
+    project, _ = resolve_task_project(database_path, task)
+    project_root = str(project["root_path"]) if project else None
+    if not project_root:
+        raise ValueError("Open PR requires a connected project.")
+    metadata = dict(task.get("metadata", {}))
+    harness_commit = metadata.get("harness_commit")
+    if not isinstance(harness_commit, dict) or not harness_commit.get("sha"):
+        raise ValueError("Open PR requires a Harness-owned commit.")
+    pr_capability = metadata.get("pr_capability") or detect_pr_capability(project_root)
+    if not pr_capability.get("available"):
+        reason = pr_capability.get("reason") or "Pull request capability is not available."
+        metadata["pr_unavailable_reason"] = reason
+        db.update_task(database_path, task["id"], {"metadata": metadata})
+        raise ValueError(reason)
+    base_branch = (project.get("profile") or {}).get("base_branch") or metadata.get("operator_branch")
+    task_branch = metadata.get("task_branch")
+    if not task_branch:
+        raise ValueError("Open PR requires a Task branch.")
+    session_id = task.get("session_id")
+    artifact = db.build_session_artifact(database_path, session_id) if session_id else {}
+    token_totals = _token_evidence_summary(artifact)
+    verification = metadata.get("post_run_verification") or {}
+    body = _pr_body(task, harness_commit, token_totals, verification)
+    title = f"[{task['id']}] {task['description'][:80]}"
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--title",
+                title,
+                "--body",
+                body,
+                "--base",
+                base_branch,
+                "--head",
+                task_branch,
+            ],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except FileNotFoundError:
+        result = None
+    if result is None or result.returncode != 0:
+        raw = result.stderr if result else "gh CLI is not installed or not on PATH"
+        safe_reason = _safe_pr_reason(raw)
+        metadata["pr_failure"] = {
+            "reason": safe_reason,
+            "attempted_at": _now_iso(),
+        }
+        db.update_task(database_path, task["id"], {"metadata": metadata})
+        raise ValueError(f"Pull request creation failed: {safe_reason}")
+    pr_url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
+    metadata["pull_request"] = {
+        "url": pr_url,
+        "base_branch": base_branch,
+        "head_branch": task_branch,
+        "created_at": _now_iso(),
+    }
+    db.update_task(database_path, task["id"], {"metadata": metadata})
+    return db.get_task(database_path, task["id"])
+
+
+def _token_evidence_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    token_log = artifact.get("token_log") or []
+    total = sum(int(turn.get("total_tokens") or 0) for turn in token_log)
+    return {
+        "total_tokens": total,
+        "session_id": (artifact.get("session") or {}).get("id"),
+    }
+
+
+def _pr_body(task: dict[str, Any], commit: dict[str, Any], token_totals: dict[str, Any], verification: dict[str, Any]) -> str:
+    lines = [
+        f"Task: {task['id']}",
+        f"Session: {token_totals.get('session_id') or task.get('session_id')}",
+        f"Harness commit: {commit.get('sha')}",
+        f"Tokens: {token_totals.get('total_tokens')}",
+        "Verification:",
+        f"  passed: {verification.get('passed') if isinstance(verification, dict) else None}",
+    ]
+    if verification.get("command"):
+        lines.append(f"  command: {verification['command']}")
+    if verification.get("reason"):
+        lines.append(f"  reason: {verification['reason']}")
+    return "\n".join(lines)
+
+
+def _safe_pr_reason(text: str) -> str:
+    # Keep the reason human-readable and bounded; do not leak token or credential text.
+    safe = _safe_review_value(str(text)) if text else "unknown error"
+    return str(safe)[:500]
 
 
 AGENT_REVIEW_TIMEOUT_SECONDS = 120
@@ -1787,11 +1959,42 @@ def _agent_review_root_path(database_path: Path | str, task: dict[str, Any]) -> 
     return str(project.get("root_path") or "")
 
 
+def _harness_commit_diff_summary(root_path: str, sha: str) -> dict[str, Any]:
+    """Diff evidence for a commit the Harness already created."""
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(root_path),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    files = [line for line in _git("show", "--pretty=", "--name-only", sha).splitlines() if line]
+    return {
+        "has_changes": bool(files),
+        "files_changed": files[:50],
+        "stat": _git("show", "--pretty=", "--stat", sha)[:2000],
+        "porcelain": "\n".join(f"C  {name}" for name in files)[:2000],
+        "commit_sha": sha,
+    }
+
+
 def _agent_review_diff_summary(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
     """Bounded git diff evidence for the review payload."""
     root_path = _agent_review_root_path(database_path, task)
     if not root_path:
         return {"has_changes": False, "files_changed": [], "stat": ""}
+    # Once the Harness owns a commit the working tree is clean and HEAD is back on the
+    # operator's branch, so the reviewed change only exists in that commit.
+    harness_commit = (task.get("metadata") or {}).get("harness_commit")
+    if isinstance(harness_commit, dict) and harness_commit.get("sha"):
+        committed = _harness_commit_diff_summary(root_path, str(harness_commit["sha"]))
+        if committed["has_changes"]:
+            return committed
     summary = _git_diff_summary(root_path)
     files = summary.get("files_changed") or []
     stat = summary.get("stat") or ""

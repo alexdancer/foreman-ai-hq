@@ -1108,7 +1108,8 @@ def test_react_workspace_state_uses_exact_contract_and_route_ownership(tmp_path,
     assert set(payload["project"]["capability"]) == {"state", "label", "reasons"}
     assert set(payload["project"]["profile"]) == {
         "git_branch", "language_hints", "framework_hints", "package_manager_hints",
-        "test_command", "run_command", "relevant_docs",
+        "test_command", "test_command_suggested", "test_command_confirmed",
+        "run_command", "relevant_docs",
     }
     assert set(payload["summary"]) == {
         "counts", "total_tasks", "launch_ready", "capability_state", "attention_actions",
@@ -1267,6 +1268,8 @@ def test_react_workspace_projection_uses_typed_defaults_for_malformed_values():
             "framework_hints": [],
             "package_manager_hints": [],
             "test_command": None,
+            "test_command_suggested": None,
+            "test_command_confirmed": False,
             "run_command": None,
             "relevant_docs": [],
         },
@@ -1319,6 +1322,8 @@ def test_react_workspace_endpoint_tolerates_malformed_stored_profile(tmp_path, m
         "framework_hints": [],
         "package_manager_hints": [],
         "test_command": None,
+        "test_command_suggested": None,
+        "test_command_confirmed": False,
         "run_command": None,
         "relevant_docs": [],
     }
@@ -1757,12 +1762,14 @@ def test_react_board_projection_uses_exact_nested_allowlists_and_safe_evidence()
     }
     assert set(card) == {
         "id", "status", "summary", "task_kind", "estimate_tokens", "actual_tokens",
-        "recommended_model", "launch_model", "session_href", "blocked_condition",
-        "launch_failure", "review_prompt", "timeline", "controls",
+        "recommended_model", "launch_model", "session_href", "task_branch",
+        "harness_commit", "pull_request", "blocked_condition", "launch_failure",
+        "review_prompt", "timeline", "controls",
     }
     assert set(card["controls"]) == {
         "can_launch", "can_refresh", "can_save_review_prompt", "can_agent_review",
-        "can_mark_done", "can_block", "can_archive", "can_dismiss",
+        "can_mark_done", "can_block", "can_approve_commit", "can_open_pr",
+        "pr_unavailable_reason", "can_archive", "can_dismiss",
         "requires_manual_estimate",
         "budget_override_available", "native_usage_override_ack_required",
         "native_usage_override_ack_text", "setup_href",
@@ -1824,6 +1831,9 @@ def test_react_task_projection_has_stable_null_and_empty_defaults():
     assert card["recommended_model"] is None
     assert card["launch_model"] is None
     assert card["session_href"] is None
+    assert card["task_branch"] is None
+    assert card["harness_commit"] is None
+    assert card["pull_request"] is None
     assert card["blocked_condition"] is None
     assert card["review_prompt"] == {"text": "", "truncated": False}
     assert card["timeline"] == []

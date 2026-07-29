@@ -385,6 +385,7 @@ class RecordedDemo:
         import foreman_ai_hq.db as db
         import foreman_ai_hq.execution_backend as execution_backend
         from foreman_ai_hq.project_context import project_task_metadata
+        from foreman_ai_hq.task_kind import with_task_kind
 
         db.init_db(self.database_path)
         # After init_db, so the demo's own Orchestrator Model is the one that survives.
@@ -444,10 +445,14 @@ class RecordedDemo:
             status="Estimated",
             estimate_tokens=1_500,
             recommended_model=DEMO_MODEL,
-            metadata={
-                "read_only": True,
-                "synthetic_fixture": True,
-                **project_task_metadata(project),
-            },
+            # Launch mode follows the canonical Task kind; the old `read_only` metadata
+            # flag is ignored, so the demo declares an acceptance-verification Task.
+            metadata=with_task_kind(
+                {
+                    "synthetic_fixture": True,
+                    **project_task_metadata(project),
+                },
+                "acceptance_verification",
+            ),
         )
         self.task_id = task["id"]

@@ -78,7 +78,7 @@ class LocalExecutionBackend:
             estimate_tokens=1500,
             recommended_model=supported_models[0],
             metadata={
-                "read_only": True,
+                "task_kind": "acceptance_verification",
                 "read_only_proof": True,
                 "connected_project_id": project["id"],
                 "project_root_path": project["root_path"],
@@ -106,6 +106,8 @@ def detect_project_profile(root_path: Path | str) -> dict[str, Any]:
     top_level_folders = sorted(child.name for child in root.iterdir() if child.is_dir() and not child.name.startswith("."))
     docs = _relevant_docs(root)
     files = {child.name for child in root.iterdir() if child.is_file()}
+    suggested_test_command = _suggest_test_command(files)
+    suggested_base_branch = _suggest_base_branch(root)
 
     return {
         "name": root.name,
@@ -114,7 +116,13 @@ def detect_project_profile(root_path: Path | str) -> dict[str, Any]:
         "language_hints": _language_hints(root, files),
         "framework_hints": _framework_hints(root, files),
         "package_manager_hints": _package_manager_hints(files),
-        "test_command": _detect_test_command(files),
+        # Detection is a suggestion; the operator must confirm before it runs.
+        "test_command_suggested": suggested_test_command,
+        "test_command_confirmed": False,
+        "test_command": None,
+        "base_branch_suggested": suggested_base_branch,
+        "base_branch_confirmed": False,
+        "base_branch": suggested_base_branch if suggested_base_branch else None,
         "run_command": _detect_run_command(files),
         "top_level_folders": top_level_folders,
         "top_level_entries": top_level_entries[:50],
@@ -222,7 +230,7 @@ def _package_manager_hints(files: set[str]) -> list[str]:
     return hints
 
 
-def _detect_test_command(files: set[str]) -> str | None:
+def _suggest_test_command(files: set[str]) -> str | None:
     if "pyproject.toml" in files or "pytest.ini" in files:
         return "pytest"
     if "package.json" in files:
@@ -232,6 +240,27 @@ def _detect_test_command(files: set[str]) -> str | None:
     if "go.mod" in files:
         return "go test ./..."
     return None
+
+
+def _suggest_base_branch(root: Path) -> str | None:
+    if not (root / ".git").exists():
+        return None
+    # Prefer the default branch reported by the first configured remote.
+    result = subprocess.run(
+        ["git", "remote", "show", "origin"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    for line in result.stdout.splitlines():
+        if "HEAD branch" in line:
+            branch = line.split(":", 1)[-1].strip()
+            if branch:
+                return branch
+    # Fall back to the current checked-out branch.
+    return _git_branch(root)
 
 
 def _detect_run_command(files: set[str]) -> str | None:

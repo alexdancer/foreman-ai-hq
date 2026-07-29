@@ -60,10 +60,11 @@ def test_context_md_does_not_use_active_spike_terminology() -> None:
     assert "Spike" not in text and "spike" not in text
 
 
-def test_synthetic_scout_demo_fixtures_are_labeled() -> None:
+def test_synthetic_read_only_demo_fixtures_are_labeled() -> None:
     demo_module = ROOT / "tests" / "e2e" / "recorded_demo.py"
     text = demo_module.read_text()
-    assert '"read_only": True' in text
+    # Read-only launch now comes from the canonical kind, not a metadata flag.
+    assert '"acceptance_verification"' in text
     assert '"synthetic_fixture": True' in text
 
 
