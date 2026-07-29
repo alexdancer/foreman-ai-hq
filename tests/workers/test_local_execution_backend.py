@@ -6,7 +6,9 @@ import time
 from foreman_ai_hq import db
 from foreman_ai_hq.execution_backend import LocalExecutionBackend, detect_project_profile, validate_local_project_path
 from foreman_ai_hq.project_context import project_task_metadata
+from foreman_ai_hq.task_kind import with_task_kind
 from foreman_ai_hq.task_launch import TaskLaunchBlocked, launch_task
+from tests.conftest import git_project_profile
 
 
 def _wait_for_worker_run(db_path: Path, task_id: str, status: str | None = None):
@@ -28,12 +30,19 @@ def _project_root(tmp_path: Path) -> Path:
     return root
 
 
-def _connect_project(db_path: Path, root: Path) -> dict:
+def _connect_project(db_path: Path, root: Path, *, git: bool = True) -> dict:
+    # `git=False` keeps a bare directory for the native workdir-evidence tests, whose
+    # subject is an *empty* configured workdir; a git fixture would populate it.
+    profile = (
+        git_project_profile(root)
+        if git
+        else {"name": root.name, "root_path": str(root.resolve()), "test_command": "pytest"}
+    )
     return db.upsert_connected_project(
         db_path,
         name=root.name,
         root_path=str(root.resolve()),
-        profile={"name": root.name, "root_path": str(root.resolve()), "test_command": "pytest"},
+        profile=profile,
         capability={"state": "launch_ready", "can_launch": True},
     )
 
@@ -56,7 +65,9 @@ def test_profile_detection_records_lightweight_project_context(tmp_path):
     assert profile["language_hints"] == ["python"]
     assert "fastapi" in profile["framework_hints"]
     assert "pip" in profile["package_manager_hints"]
-    assert profile["test_command"] == "pytest"
+    assert profile["test_command_suggested"] == "pytest"
+    assert profile["test_command"] is None
+    assert profile["test_command_confirmed"] is False
     assert "src" in profile["top_level_folders"]
     assert "README.md" in profile["relevant_docs"]
 
@@ -72,7 +83,8 @@ def test_local_execution_backend_persists_project_profile_and_analysis_capabilit
     assert result.project is not None
     project = db.list_connected_projects(db_path)[0]
     assert project["root_path"] == str(root.resolve())
-    assert project["profile"]["test_command"] == "pytest"
+    assert project["profile"]["test_command_suggested"] == "pytest"
+    assert project["profile"]["test_command"] is None
     assert project["capability"]["state"] == "analysis_ready"
     assert "No verified launchable Worker Adapter is available." in project["capability"]["reasons"]
     backend_status = db.get_execution_backend_status(db_path, "local_runner")
@@ -332,7 +344,13 @@ def _claude_permission_denied_without_usage_stdout() -> str:
     )
 
 
-def _estimated_task(db_path: Path) -> dict:
+def _worker_change_then(root: Path, stdout: str) -> dict:
+    """A write-capable Worker that changes nothing fails, so leave a change behind."""
+    (root / "worker_change.txt").write_text("changed\n")
+    return {"returncode": 0, "stdout": stdout, "stderr": ""}
+
+
+def _estimated_task(db_path: Path, *, task_kind: str = "implementation") -> dict:
     project = db.list_connected_projects(db_path)[0]
     return db.create_task(
         db_path,
@@ -340,7 +358,7 @@ def _estimated_task(db_path: Path) -> dict:
         status="Estimated",
         estimate_tokens=1_000,
         recommended_model="openai/gpt-5.5",
-        metadata=project_task_metadata(project),
+        metadata=with_task_kind(project_task_metadata(project), task_kind),
     )
 
 
@@ -352,10 +370,10 @@ def test_native_worker_run_fails_when_output_points_outside_empty_configured_wor
     outside_file = tmp_path / "incident-ledger" / "src" / "incident_ledger" / "cli.py"
     outside_file.parent.mkdir(parents=True)
     outside_file.write_text("print('DEMO_2099')\n")
-    _connect_project(db_path, harness_target)
+    _connect_project(db_path, harness_target, git=False)
     db.update_worker_adapter(db_path, "opencode", workdir=str(harness_target), supported_models=["openai/gpt-5.5"])
     db.mark_worker_adapter_verification(db_path, "opencode", verified=True, evidence={"tracking_mode": "native_usage"})
-    task = _estimated_task(db_path)
+    task = _estimated_task(db_path, task_kind="acceptance_verification")
 
     launch_task(
         db_path,
@@ -383,10 +401,10 @@ def test_native_worker_workdir_evidence_ignores_json_escaped_newline_after_confi
     db.init_db(db_path)
     harness_target = tmp_path / "harness-target"
     harness_target.mkdir()
-    _connect_project(db_path, harness_target)
+    _connect_project(db_path, harness_target, git=False)
     db.update_worker_adapter(db_path, "opencode", workdir=str(harness_target), supported_models=["openai/gpt-5.5"])
     db.mark_worker_adapter_verification(db_path, "opencode", verified=True, evidence={"tracking_mode": "native_usage"})
-    task = _estimated_task(db_path)
+    task = _estimated_task(db_path, task_kind="acceptance_verification")
 
     launch_task(
         db_path,
@@ -416,10 +434,10 @@ def test_native_worker_workdir_evidence_keeps_outside_path_after_json_escaped_ne
     outside_file = tmp_path / "outside-root" / "demo.py"
     outside_file.parent.mkdir()
     outside_file.write_text("print('DEMO_2099')\n")
-    _connect_project(db_path, harness_target)
+    _connect_project(db_path, harness_target, git=False)
     db.update_worker_adapter(db_path, "opencode", workdir=str(harness_target), supported_models=["openai/gpt-5.5"])
     db.mark_worker_adapter_verification(db_path, "opencode", verified=True, evidence={"tracking_mode": "native_usage"})
-    task = _estimated_task(db_path)
+    task = _estimated_task(db_path, task_kind="acceptance_verification")
 
     launch_task(
         db_path,
@@ -444,7 +462,8 @@ def test_native_worker_workdir_evidence_keeps_outside_path_after_json_escaped_ne
     assert run["metadata"]["workdir_evidence"] == evidence
 
 
-def test_native_worker_run_blocks_when_no_workdir_changes_are_produced(tmp_path):
+def test_write_capable_run_without_code_changes_is_blocked_by_the_diff_check(tmp_path):
+    """The adapter-agnostic diff check replaced the codex-only `no_workdir_changes` rule."""
     db_path = tmp_path / "harness.db"
     db.init_db(db_path)
     harness_target = tmp_path / "harness-target"
@@ -463,57 +482,18 @@ def test_native_worker_run_blocks_when_no_workdir_changes_are_produced(tmp_path)
         proxy_url="http://127.0.0.1:8000/v1",
         runner=lambda plan: {"returncode": 0, "stdout": _native_usage_stdout("gpt-5.6-terra"), "stderr": ""},
     )
-    run = _wait_for_worker_run(db_path, task["id"], "failed")
+    _wait_for_worker_run(db_path, task["id"], "failed")
     blocked = db.get_task(db_path, task["id"])
 
-    assert blocked["status"] == "Estimated"
-    assert blocked["metadata"]["launch_failure_type"] == "no_workdir_changes"
-    assert blocked["metadata"]["launch_error"] == "Worker completed but produced no filesystem changes in the connected project."
-    evidence = blocked["metadata"]["workdir_evidence"]
-    assert evidence["configured_workdir"] == str(harness_target.resolve())
-    assert evidence["top_level_entries"] == ["README.md"]
-    assert evidence["outside_paths"] == []
-    assert run["metadata"]["workdir_evidence"] == evidence
+    assert blocked["status"] == "Review"
+    assert blocked["metadata"]["blocked_reason"] == "Worker completed but produced no code changes."
+    assert blocked["metadata"]["blocked_condition"]["origin"] == "write_completion"
+    assert blocked["metadata"]["diff_summary"]["has_changes"] is False
 
 
-def test_native_worker_dirty_git_edit_is_not_misclassified_as_no_workdir_changes(tmp_path):
-    db_path = tmp_path / "harness.db"
-    db.init_db(db_path)
-    harness_target = tmp_path / "harness-target"
-    harness_target.mkdir()
-    readme = harness_target / "README.md"
-    readme.write_text("# DEMO_2099\n")
-    subprocess.run(["git", "init"], cwd=harness_target, check=True, capture_output=True)
-    subprocess.run(["git", "add", "README.md"], cwd=harness_target, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-c", "user.email=demo@example.invalid", "-c", "user.name=DEMO", "commit", "-m", "init"],
-        cwd=harness_target,
-        check=True,
-        capture_output=True,
-    )
-    readme.write_text("# DEMO_2099 dirty before\n")
-    _connect_project(db_path, harness_target)
-    db.update_worker_adapter(db_path, "codex", workdir=str(harness_target), supported_models=["gpt-5.6-terra"])
-    db.mark_worker_adapter_verification(db_path, "codex", verified=True, evidence={"tracking_mode": "native_usage"})
-    task = _estimated_task(db_path)
-
-    def runner(plan):
-        readme.write_text("# DEMO_2099 dirty after\n")
-        return {"returncode": 0, "stdout": _native_usage_stdout("gpt-5.6-terra"), "stderr": ""}
-
-    launch_task(
-        db_path,
-        task["id"],
-        adapter_id="codex",
-        model="gpt-5.6-terra",
-        proxy_url="http://127.0.0.1:8000/v1",
-        runner=runner,
-    )
-    run = _wait_for_worker_run(db_path, task["id"], "completed")
-    reviewed = db.get_task(db_path, task["id"])
-
-    assert reviewed["status"] == "Review"
-    assert run["status"] == "completed"
+# A pre-existing dirty edit is now refused by the Repository Cleanliness Guardrail before
+# launch, which `tests/workers/test_write_capable_launch.py` covers, so the old
+# misclassification guard has no surviving code path to protect.
 
 
 def test_claude_code_native_worker_run_records_cache_inclusive_usage(tmp_path):
@@ -533,7 +513,7 @@ def test_claude_code_native_worker_run_records_cache_inclusive_usage(tmp_path):
         adapter_id="claude_code",
         model="sonnet",
         proxy_url="http://127.0.0.1:8000/v1",
-        runner=lambda plan: {"returncode": 0, "stdout": _claude_native_usage_stdout(), "stderr": ""},
+        runner=lambda plan: _worker_change_then(harness_target, _claude_native_usage_stdout()),
     )
     _wait_for_worker_run(db_path, task["id"], "completed")
     reviewed = db.get_task(db_path, task["id"])

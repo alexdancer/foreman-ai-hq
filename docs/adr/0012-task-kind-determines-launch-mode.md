@@ -1,7 +1,7 @@
 # ADR-0012: Task kind determines launch mode, and the unmodeled "standard" mode is deleted
 
 **Date**: 2026-07-25
-**Status**: proposed
+**Status**: accepted
 
 ## Context
 
@@ -75,7 +75,7 @@ unimplemented. This is implemented, tested, and unreachable.
    request contains all prior work, and where the clean-tree guardrail passes every time
    because the previous Task committed. The base branch becomes operator-confirmed project
    configuration alongside the verification command, detected and editable, and is passed as
-   the start point: `git checkout -b <branch> <base>`. This is deliberately stateless — a
+   the start point: `git checkout -B <branch> <base>`. This is deliberately stateless — a
    crash, a non-terminal run, or an operator checkout cannot poison the next launch, which a
    "return to base afterwards" cleanup step could not guarantee.
 

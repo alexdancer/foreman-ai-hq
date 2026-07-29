@@ -106,8 +106,12 @@ stateful — it depends on that checkout having happened, and on nothing having 
 since. Passing the base as the branch start point is stateless:
 
 ```python
-["git", "checkout", "-b", branch, base_ref]
+["git", "checkout", "-B", branch, base_ref]
 ```
+
+`-B` instead of `-b` so relaunching a Task whose earlier run failed resets any leftover
+Task branch to the confirmed base. A Task that already committed is in Review and cannot
+launch, so nothing committed is ever discarded.
 
 The distinction matters because of how the failure arrives. A "return to base after the
 commit" cleanup step is correct only when cleanup always runs; a crash, a killed process,

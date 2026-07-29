@@ -551,17 +551,33 @@ def _react_project_settings_list(
     return result
 
 
+def _safe_optional_text(value: Any, max_length: int) -> str | None:
+    """Return bounded text or None, without turning None into the string 'None'."""
+    if value is None:
+        return None
+    return str(safe_evidence(value, max_length=max_length))[:max_length]
+
+
 def _react_project_settings_project(
     project: dict[str, Any], backend
 ) -> dict[str, Any]:
     """Bounded project entry for the Project Settings React handoff."""
 
     capability = _react_project_settings_capability(project, backend)
+    profile = project.get("profile") or {}
     return {
         "id": str(safe_evidence(project.get("id", ""), max_length=128))[:128],
         "name": str(safe_evidence(project.get("name", ""), max_length=200))[:200],
         "root_path": str(safe_evidence(project.get("root_path", ""), max_length=4096))[:4096],
         "capability": capability,
+        "profile": {
+            "test_command_suggested": _safe_optional_text(profile.get("test_command_suggested"), 256),
+            "test_command": _safe_optional_text(profile.get("test_command"), 256),
+            "test_command_confirmed": bool(profile.get("test_command_confirmed")),
+            "base_branch_suggested": _safe_optional_text(profile.get("base_branch_suggested"), 128),
+            "base_branch": _safe_optional_text(profile.get("base_branch"), 128),
+            "base_branch_confirmed": bool(profile.get("base_branch_confirmed")),
+        },
     }
 
 
@@ -777,6 +793,10 @@ def _react_workspace_projection(project: dict, summary: dict) -> dict:
                     profile.get("package_manager_hints"), 20, 200
                 ),
                 "test_command": _workspace_optional_string(profile.get("test_command"), 4000),
+                # A detected command stays visible before confirmation so the overview
+                # shows why a write-capable launch is still blocked.
+                "test_command_suggested": _workspace_optional_string(profile.get("test_command_suggested"), 4000),
+                "test_command_confirmed": _workspace_bool(profile.get("test_command_confirmed")),
                 "run_command": _workspace_optional_string(profile.get("run_command"), 4000),
                 "relevant_docs": _workspace_string_list(profile.get("relevant_docs"), 50, 1000),
             },
@@ -1276,6 +1296,9 @@ def _react_task(task: dict) -> dict:
             }
             for event in events[-6:]
         ],
+        "task_branch": _optional_scalar(metadata.get("task_branch"), 256),
+        "harness_commit": _react_harness_commit(metadata.get("harness_commit")),
+        "pull_request": _react_pull_request(metadata.get("pull_request")),
         "blocked_condition": {
             "reason": _bounded_scalar(blocked_condition.get("reason"), 1000),
             "origin": _bounded_scalar(blocked_condition.get("origin"), 100),
@@ -1295,26 +1318,62 @@ def _react_task(task: dict) -> dict:
             "next_action": _bounded_text(launch_diagnostic.get("next_action"), 400),
             "setup_href": _safe_local_href(launch_diagnostic.get("setup_href")),
         } if has_launch_failure else None,
-        "controls": {
-            "can_launch": task.get("status") == "Estimated",
-            "requires_manual_estimate": bool(metadata.get("requires_manual_estimate")),
-            "can_refresh": task.get("status") == "Running",
-            "can_save_review_prompt": bool(metadata.get("review_actions_available")),
-            "can_agent_review": bool(metadata.get("review_actions_available")),
-            "can_mark_done": bool(metadata.get("review_actions_available")),
-            "can_block": bool(metadata.get("review_actions_available")),
-            "can_archive": task.get("status") == "Done",
-            "can_dismiss": task.get("status") == "Estimated"
-            or (task.get("status") == "Review" and bool(blocked_condition)),
-            "budget_override_available": bool(metadata.get("budget_override_available")),
-            "native_usage_override_ack_required": bool(metadata.get("native_usage_override_ack_required")),
-            "native_usage_override_ack_text": _optional_scalar(
-                metadata.get("native_usage_override_ack_text"), 1000
-            ),
-            "setup_href": _safe_local_href(_mapping(metadata.get("launch_diagnostic")).get("setup_href"))
-            or "/settings/workers",
-        },
+        "controls": _task_controls(task, metadata, blocked_condition),
     }
+
+
+def _react_harness_commit(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or not value.get("sha"):
+        return None
+    return {
+        "sha": _optional_scalar(value.get("sha"), 64),
+        "message": _bounded_text(value.get("message"), 240),
+    }
+
+
+def _react_pull_request(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or not value.get("url"):
+        return None
+    return {
+        "url": _optional_scalar(value.get("url"), 512),
+        "base_branch": _optional_scalar(value.get("base_branch"), 128),
+        "head_branch": _optional_scalar(value.get("head_branch"), 256),
+    }
+
+
+def _task_controls(task: dict[str, Any], metadata: dict[str, Any], blocked_condition: dict[str, Any] | None) -> dict[str, Any]:
+    """Compute operator-visible controls for a task card and evidence drawer."""
+    review_state = _mapping(metadata.get("review_disposition_state"))
+    available = set(review_state.get("available_actions") or [])
+    in_review = task.get("status") == "Review"
+    review_actions_available = bool(metadata.get("review_actions_available"))
+    return {
+        "can_launch": task.get("status") == "Estimated",
+        "requires_manual_estimate": bool(metadata.get("requires_manual_estimate")),
+        "can_refresh": task.get("status") == "Running",
+        "can_save_review_prompt": review_actions_available,
+        "can_agent_review": review_actions_available,
+        "can_mark_done": review_actions_available,
+        "can_block": review_actions_available,
+        "can_approve_commit": in_review and "approve_commit" in available,
+        "can_open_pr": in_review and "open_pr" in available,
+        # A determined PR capability must render an action or a stated reason, never nothing.
+        "pr_unavailable_reason": _optional_scalar(review_state.get("pr_unavailable_reason"), 300)
+        if in_review and metadata.get("harness_commit")
+        else None,
+        "can_archive": task.get("status") == "Done",
+        "can_dismiss": task.get("status") == "Estimated"
+        or (in_review and bool(blocked_condition)),
+        "budget_override_available": bool(metadata.get("budget_override_available")),
+        "native_usage_override_ack_required": bool(metadata.get("native_usage_override_ack_required")),
+        "native_usage_override_ack_text": _optional_scalar(
+            metadata.get("native_usage_override_ack_text"), 1000
+        ),
+        "setup_href": _safe_local_href(_mapping(metadata.get("launch_diagnostic")).get("setup_href"))
+        or "/settings/workers",
+    }
+
+
 def _ensure_project(database_path, project_id: str) -> dict:
     try:
         return db.get_connected_project(database_path, project_id)

@@ -15,6 +15,12 @@ The goal is not to prove magic token compression. The goal is to create enough r
 
 Create or update a small local Python project in the working directory. If the directory is empty, create the project. If a minimal scaffold already exists, preserve useful files and implement the missing behavior.
 
+## Foreman AI HQ Launch Notes
+
+- The connected project must be a Git repository for a write-capable `implementation` launch.
+- The operator must confirm the project base branch and any verification command in `/settings/project` before the first launch; the Harness detects candidates but does not execute or branch from unconfirmed values.
+- Commit or stash uncommitted operator changes before launch; the Harness refuses a dirty working tree and names the offending paths, but it does not stash or commit them for you.
+
 Expected package name:
 
 ```text

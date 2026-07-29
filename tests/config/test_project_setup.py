@@ -95,7 +95,8 @@ def test_project_setup_api_connects_valid_path_and_returns_detected_profile(tmp_
     assert response.status_code == 200
     project = response.json()["project"]
     assert project["root_path"] == str(root.resolve())
-    assert project["profile"]["test_command"] == "pytest"
+    assert project["profile"]["test_command_suggested"] == "pytest"
+    assert project["profile"]["test_command"] is None
     assert project["profile"]["language_hints"] == ["python"]
     assert project["capability"]["state"] == "analysis_ready"
 
@@ -134,7 +135,8 @@ def test_project_settings_page_displays_profile_and_capability_state(tmp_path, m
     assert project["name"] == "portal-project"
     assert project["root_path"] == str(root.resolve())
     assert project["capability"]["label"] == "Analysis-ready"
-    assert project["profile"]["test_command"] == "pytest"
+    assert project["profile"]["test_command_suggested"] == "pytest"
+    assert project["profile"]["test_command"] is None
     assert "fastapi" in project["profile"]["framework_hints"]
     assert "README.md" in project["profile"]["relevant_docs"]
     # The literal "Projects" page title is static React copy
@@ -198,7 +200,8 @@ def test_project_workspace_displays_profile_capability_and_workflow_links(tmp_pa
     assert "Worker setup" in action_labels
     assert "Running work" in action_labels
     assert "Review needed" in action_labels
-    assert payload["project"]["profile"]["test_command"] == "pytest"
+    assert payload["project"]["profile"]["test_command_suggested"] == "pytest"
+    assert payload["project"]["profile"]["test_command"] is None
     assert "fastapi" in payload["project"]["profile"]["framework_hints"]
     assert "README.md" in payload["project"]["profile"]["relevant_docs"]
     for href in [f"/projects/{project['id']}", f"/projects/{project['id']}/floor", "/sessions", "/settings/workers", "/settings/project"]:

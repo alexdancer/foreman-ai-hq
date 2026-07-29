@@ -151,7 +151,11 @@ Before a task can move from **Estimated** to **Running**, the harness checks:
 - budget override acknowledgement is recorded when the estimate exceeds remaining budget.
 - for a Scout, the selected adapter has a verified adapter-enforced read-only profile.
 
-Write-capable sessions also require a clean git working tree before launch. The harness creates the task branch, lets the Worker edit there, and owns the final commit only after configured verification passes. Read-only inspection sessions may run against a dirty repo.
+Launch mode is determined by canonical Task kind: `implementation` launches write-capable, `acceptance_verification` and `scout` launch read-only. There is no third mode and no operator override.
+
+Write-capable sessions require a detected git repository, a clean working tree before launch, an operator-confirmed base branch, and an operator-confirmed test command when one is used. A dirty working tree is refused and the offending paths are named; the Harness does not stash or commit operator changes unasked. The harness creates the task branch from the confirmed base branch, lets the Worker edit there, and owns the final commit only after configured verification passes. When no test command is configured or verification fails, the Task stays in Review and the operator must explicitly Approve commit.
+
+Read-only inspection sessions may run against a dirty repo and do not create a branch or commit.
 
 Canonical Task kind forces every Scout into read-only launch mode server-side, regardless of client input or stale metadata. Scouts never receive a Task branch or Harness-owned commit. Before/after repository checks remain audit and defense evidence, but they do not replace pre-execution adapter enforcement; any detected Scout mutation records a hard safety Blocked Condition with preserved run evidence.
 

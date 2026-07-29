@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Launch mode is derived from canonical Task kind
-Governed launch SHALL derive launch mode from canonical Task kind alone. A Task with kind `implementation` SHALL launch write-capable. A Task with kind `acceptance_verification` SHALL launch read-only, so that a verification run cannot modify the code it was asked to check. There SHALL NOT be a third launch mode, and launch mode SHALL NOT be settable from task metadata, client input, or an operator control. A Task whose metadata carries a launch mode inconsistent with its kind SHALL launch in the mode its kind requires.
+Governed launch SHALL derive launch mode from canonical Task kind alone. A Task with kind `implementation` SHALL launch write-capable. A Task with kind `acceptance_verification` SHALL launch read-only, so that a verification run cannot modify the code it was asked to check. A Task with kind `scout` SHALL launch read-only for as long as the `scout-tasks` capability remains active. There SHALL NOT be a third launch mode, and launch mode SHALL NOT be settable from task metadata, client input, or an operator control. A Task whose metadata carries a launch mode inconsistent with its kind SHALL launch in the mode its kind requires.
 
 #### Scenario: Implementation tasks launch write-capable
 - **WHEN** a Task with kind `implementation` passes Launch Guardrails
@@ -127,5 +127,5 @@ The system SHALL offer pull request creation as an operator action after a Harne
 ## REMOVED Requirements
 
 ### Requirement: Scout launch forces read-only mode
-**Reason**: The Scout Task kind is retired (ADR-0011). Launch mode is now derived from canonical Task kind for every kind, so a Scout-specific derivation rule has no subject.
-**Migration**: Read-only launch is required for `acceptance_verification` Tasks under the launch-mode derivation requirement. Existing Tasks recorded as `scout` remain readable as history and are not launchable.
+**Reason**: Launch mode is now derived uniformly from canonical Task kind, so a Scout-specific derivation rule is redundant with the general rule rather than a separate requirement.
+**Migration**: Scout launch behaviour is unchanged — a `scout` Task still launches read-only, now under the launch-mode derivation requirement rather than its own rule, and the read-only adapter profile requirement it carries is untouched. The `scout-tasks` capability remains active; ADR-0011, which retires the Scout Task kind, is still proposed and its retirement is a separate change.

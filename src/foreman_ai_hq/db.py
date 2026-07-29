@@ -1751,6 +1751,31 @@ def get_connected_project_by_path(path: Path | str, root_path: str) -> dict[str,
     return _connected_project_from_row(row)
 
 
+def update_connected_project_profile(
+    path: Path | str,
+    project_id: str,
+    *,
+    profile: dict[str, Any] | None = None,
+    updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    now = _now_iso()
+    with connect(path) as conn:
+        conn.execute("begin immediate")
+        row = conn.execute("select profile_json from connected_projects where id = ?", (project_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"connected project not found: {project_id}")
+        current = _from_json(row["profile_json"]) if row["profile_json"] is not None else {}
+        if updater is not None:
+            updated = updater(current)
+        else:
+            updated = {**current, **(profile or {})}
+        conn.execute(
+            "update connected_projects set profile_json = ?, updated_at = ? where id = ?",
+            (_to_json(updated), now, project_id),
+        )
+    return get_connected_project(path, project_id)
+
+
 def upsert_execution_backend_status(
     path: Path | str,
     backend_id: str,

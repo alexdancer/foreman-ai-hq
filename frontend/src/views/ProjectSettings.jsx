@@ -50,6 +50,8 @@ export default function ProjectSettings() {
 
 export function ProjectSettingsState({ data, error, loading, onRefresh }) {
   const [rootPath, setRootPath] = useState("");
+  const [testCommand, setTestCommand] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
   const [status, setStatus] = useState(null);
   const [inlineError, setInlineError] = useState(null);
   const [proofResult, setProofResult] = useState(null);
@@ -76,10 +78,15 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
     clearMessages();
     setActiveAction({ projectId: null, kind: "connect" });
     try {
-      const outcome = await postJSON("/settings/project/connect", { root_path: rootPath.trim() });
+      const body = { root_path: rootPath.trim() };
+      if (testCommand.trim()) body.test_command = testCommand.trim();
+      if (baseBranch.trim()) body.base_branch = baseBranch.trim();
+      const outcome = await postJSON("/settings/project/connect", body);
       if (outcome?.project) {
         setStatus("Project connected.");
         setRootPath("");
+        setTestCommand("");
+        setBaseBranch("");
         onRefresh();
       } else {
         setInlineError("Could not connect project.");
@@ -231,6 +238,26 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                 disabled={busy}
               />
             </div>
+            <div className="project-settings-field">
+              <label htmlFor="test-command">Verification command (optional)</label>
+              <input
+                id="test-command"
+                value={testCommand}
+                onChange={(e) => setTestCommand(e.target.value)}
+                placeholder="e.g. pytest"
+                disabled={busy}
+              />
+            </div>
+            <div className="project-settings-field">
+              <label htmlFor="base-branch">Base branch (optional)</label>
+              <input
+                id="base-branch"
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                placeholder="e.g. main"
+                disabled={busy}
+              />
+            </div>
             <button type="submit" className="project-settings-primary" disabled={busy}>
               {isBusy(null, "connect") ? "Connecting…" : "Open project"}
             </button>
@@ -256,6 +283,14 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                 <dl className="project-profile-details">
                   <ProfileRow label="Root" value={project.root_path} />
                 </dl>
+                <ProjectProfileEditor
+                  project={project}
+                  activeAction={activeAction}
+                  setActiveAction={setActiveAction}
+                  onRefresh={onRefresh}
+                  setStatus={setStatus}
+                  setInlineError={setInlineError}
+                />
                 {project.capability?.reasons?.length > 0 && (
                   <div className="project-capability-gap">
                     <h3>
@@ -333,6 +368,115 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
         </div>
       </section>
     </>
+  );
+}
+
+function ProjectProfileEditor({
+  project,
+  activeAction,
+  setActiveAction,
+  onRefresh,
+  setStatus,
+  setInlineError,
+}) {
+  const profile = project.profile || {};
+  const [testCommand, setTestCommand] = useState(
+    profile.test_command || profile.test_command_suggested || ""
+  );
+  const [testCommandConfirmed, setTestCommandConfirmed] = useState(
+    !!profile.test_command_confirmed
+  );
+  const [baseBranch, setBaseBranch] = useState(
+    profile.base_branch || profile.base_branch_suggested || ""
+  );
+  const [baseBranchConfirmed, setBaseBranchConfirmed] = useState(
+    !!profile.base_branch_confirmed
+  );
+  const saving =
+    activeAction?.projectId === project.id && activeAction?.kind === "saveProfile";
+  const disabled = activeAction !== null;
+
+  const save = async (event) => {
+    event.preventDefault();
+    setInlineError(null);
+    setStatus(null);
+    if (testCommandConfirmed && !testCommand.trim()) {
+      setInlineError("Verification command cannot be empty when confirmed.");
+      return;
+    }
+    if (baseBranchConfirmed && !baseBranch.trim()) {
+      setInlineError("Base branch cannot be empty when confirmed.");
+      return;
+    }
+    setActiveAction({ projectId: project.id, kind: "saveProfile" });
+    try {
+      const outcome = await postJSON(`/api/projects/${project.id}/settings`, {
+        test_command: testCommand.trim(),
+        test_command_confirmed: testCommandConfirmed,
+        base_branch: baseBranch.trim(),
+        base_branch_confirmed: baseBranchConfirmed,
+      });
+      if (outcome?.project) {
+        setStatus("Project settings saved.");
+        onRefresh();
+      } else {
+        setInlineError("Could not save project settings.");
+      }
+    } catch (err) {
+      setInlineError(boundedError(err.message, "Could not save project settings."));
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  return (
+    <form className="project-connect-form" onSubmit={save}>
+      <div className="project-settings-field">
+        <label htmlFor={`test-command-${project.id}`}>Verification command</label>
+        <input
+          id={`test-command-${project.id}`}
+          value={testCommand}
+          onChange={(event) => setTestCommand(event.target.value)}
+          placeholder={profile.test_command_suggested || "e.g. pytest"}
+          disabled={disabled}
+        />
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={testCommandConfirmed}
+            onChange={(event) => setTestCommandConfirmed(event.target.checked)}
+            disabled={disabled}
+          />
+          Confirm this verification command
+        </label>
+      </div>
+      <div className="project-settings-field">
+        <label htmlFor={`base-branch-${project.id}`}>Base branch</label>
+        <input
+          id={`base-branch-${project.id}`}
+          value={baseBranch}
+          onChange={(event) => setBaseBranch(event.target.value)}
+          placeholder={profile.base_branch_suggested || "e.g. main"}
+          disabled={disabled}
+        />
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={baseBranchConfirmed}
+            onChange={(event) => setBaseBranchConfirmed(event.target.checked)}
+            disabled={disabled}
+          />
+          Confirm this base branch
+        </label>
+      </div>
+      <button
+        type="submit"
+        className="project-settings-primary"
+        disabled={disabled}
+      >
+        {saving ? "Saving…" : "Save project settings"}
+      </button>
+    </form>
   );
 }
 

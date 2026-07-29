@@ -598,7 +598,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
     {task.blocked_condition && <div className="blocked-condition" role="status"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
     {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
     {task.status === "Running" && <LatestEventLine timeline={task.timeline} />}
-    <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}</div>
+    <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}</div>
     {controls.can_launch && <div className="card-controls">
       <label>Worker Adapter<select className="board-input" aria-describedby={selectedAdapter?.tracking?.label ? `adapter-tracking-${task.id}` : undefined} value={adapterId} onChange={(event) => {
         const nextId = event.target.value;
@@ -622,7 +622,11 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
         </div>
       </details>}
       <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)}>Launch</Button>
-      {!selectedAdapter?.launchable && controls.setup_href && <a href={controls.setup_href}>Open Worker Setup</a>}
+      {controls.setup_href && (!selectedAdapter?.launchable || !controls.setup_href.startsWith("/settings/workers")) && (
+        <a href={controls.setup_href}>
+          {controls.setup_href.startsWith("/settings/workers") ? "Open Worker Setup" : "Open project settings"}
+        </a>
+      )}
     </div>}
     {(controls.can_refresh || controls.can_archive || controls.can_dismiss || task.session_href) && <div className="task-actions">
       {controls.can_refresh && <Button size="small" type="button" onClick={() => action(`/tasks/${task.id}/refresh`, reviewForm(projectId))}>Refresh</Button>}
@@ -716,6 +720,7 @@ export function EvidenceDrawer({ task, projectId, action, onClose, getJSONImpl =
 export function EvidenceDrawerState({ task, projectId, action = () => {}, onClose = () => {}, data, error, loading }) {
   const [reviewPrompt, setReviewPrompt] = useState(task.review_prompt?.text || "");
   const [blockedReason, setBlockedReason] = useState("");
+  const [approveReason, setApproveReason] = useState("");
   const controls = task.controls || {};
   const review = (actionName, extra = {}) => action(
     `/tasks/${task.id}/review`,
@@ -763,7 +768,7 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
     <aside ref={drawerRef} tabIndex={-1} className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`Evidence for ${taskDisplayName(task)}`}>
       <header className="evidence-drawer-header"><div><span className="section-label">Task evidence</span><h2>{taskDisplayName(task)}</h2></div><Button size="small" variant="secondary" type="button" onClick={onClose}>Close</Button></header>
       <div className="evidence-drawer-body">
-        <div className="task-meta"><span>Estimate {task.estimate_tokens ?? "unavailable"}</span><span>Actual {task.actual_tokens ?? "unavailable"}</span></div>
+        <div className="task-meta"><span>Estimate {task.estimate_tokens ?? "unavailable"}</span><span>Actual {task.actual_tokens ?? "unavailable"}</span>{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}</div>
         {task.blocked_condition && <div className="blocked-condition"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
         {loading && <Loading>Loading session evidence…</Loading>}
         {error && <Notice variant="danger" role="alert">{error}</Notice>}
@@ -781,13 +786,17 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
       </div>
       <footer className="evidence-drawer-footer">
         {task.session_href && <Button size="small" variant="secondary" as="a" href={task.session_href}>Full Session Report</Button>}
-        {(controls.can_save_review_prompt || controls.can_agent_review || controls.can_mark_done || controls.can_block) && <div className="drawer-review-actions">
+        {(controls.can_save_review_prompt || controls.can_agent_review || controls.can_mark_done || controls.can_block || controls.can_approve_commit || controls.can_open_pr) && <div className="drawer-review-actions">
           <label>Review prompt<textarea className="board-input" rows="2" value={reviewPrompt} onChange={(event) => setReviewPrompt(event.target.value)} /></label>
           <div className="toolbar">
             {controls.can_save_review_prompt && <Button size="small" variant="secondary" type="button" onClick={() => review("save_prompt", { review_prompt: reviewPrompt })}>Save review prompt</Button>}
             {controls.can_agent_review && <Button size="small" variant="secondary" type="button" onClick={() => review("agent_review", { review_prompt: reviewPrompt })}>Agent Review</Button>}
+            {controls.can_approve_commit && <Button size="small" variant="secondary" type="button" onClick={() => review("approve_commit", { approve_commit_reason: approveReason })}>Approve commit</Button>}
+            {controls.can_open_pr && <Button size="small" variant="secondary" type="button" onClick={() => review("open_pr")}>Open PR</Button>}
             {controls.can_mark_done && <Button size="small" type="button" onClick={() => review("mark_done")}>Mark Done</Button>}
           </div>
+          {controls.can_approve_commit && <div className="toolbar"><input className="board-input" value={approveReason} onChange={(event) => setApproveReason(event.target.value)} placeholder="Reason to approve commit (optional)" /></div>}
+          {!controls.can_open_pr && controls.pr_unavailable_reason && <p className="drawer-note">Open PR unavailable: {controls.pr_unavailable_reason}</p>}
           {controls.can_block && <div className="toolbar"><input className="board-input" value={blockedReason} onChange={(event) => setBlockedReason(event.target.value)} placeholder="Reason required to block" /><Button size="small" variant="danger" type="button" onClick={() => review("block", { blocked_reason: blockedReason })}>Block</Button></div>}
         </div>}
       </footer>

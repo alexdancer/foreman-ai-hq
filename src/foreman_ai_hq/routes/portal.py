@@ -206,6 +206,15 @@ class WorkerVerifyRequest(BaseModel):
 
 class ProjectConnectRequest(BaseModel):
     root_path: str = Field(min_length=1)
+    test_command: str | None = None
+    base_branch: str | None = None
+
+
+class ProjectProfileUpdateRequest(BaseModel):
+    test_command: str | None = None
+    test_command_confirmed: bool | None = None
+    base_branch: str | None = None
+    base_branch_confirmed: bool | None = None
 
 
 class WorkerConfigureRequest(BaseModel):
@@ -1028,6 +1037,17 @@ async def _advance_project_queue(request: Request, project_id: str) -> None:
             return
         if active_task and active_task.get("status") == "Review":
             active_task = await _maybe_run_auto_agent_review(request, project_id, active_task)
+        if active_task and active_task.get("status") == "Review" and _task_awaits_disposition(active_task):
+            # A launched Task is awaiting an operator disposition such as Approve commit.
+            stop_run_automation(
+                database_path,
+                project_id=project_id,
+                reason="awaiting_disposition",
+                detail={"task_id": active_task["id"], "pending_actions": _pending_review_actions(active_task)},
+                task_id=active_task["id"],
+                worker_run_id=str(active_run_id) if active_run_id else None,
+            )
+            return
 
     if get_run_automation_state(database_path, project_id).get("status") != "running":
         return
@@ -1122,6 +1142,18 @@ async def _maybe_run_auto_agent_review(request: Request, project_id: str, task: 
         detail={"review_status": reviewed.get("metadata", {}).get("agent_review", {}).get("status")},
     )
     return reviewed
+
+
+def _task_awaits_disposition(task: dict[str, Any]) -> bool:
+    review_state = (task.get("metadata") or {}).get("review_disposition_state") or {}
+    if review_state.get("pending_decision"):
+        return True
+    return False
+
+
+def _pending_review_actions(task: dict[str, Any]) -> list[str]:
+    review_state = (task.get("metadata") or {}).get("review_disposition_state") or {}
+    return list(review_state.get("available_actions") or [])
 
 
 def _automation_stop_reason(task: dict[str, Any], reasons: list[str]) -> str:
@@ -1393,11 +1425,51 @@ async def connect_project_route(request: Request):
             return _project_settings_with_error(request, result.error)
         return JSONResponse(status_code=422, content={"detail": result.error})
 
-    if wants_html and request.query_params.get("redirect") == "workspace" and result.project:
-        return RedirectResponse(f"/projects/{result.project['id']}", status_code=status.HTTP_303_SEE_OTHER)
+    project = result.project
+    if project and (payload.test_command is not None or payload.base_branch is not None):
+        updates: dict[str, Any] = {}
+        if payload.test_command is not None:
+            updates["test_command"] = payload.test_command
+            updates["test_command_confirmed"] = True
+        if payload.base_branch is not None:
+            updates["base_branch"] = payload.base_branch
+            updates["base_branch_confirmed"] = True
+        db.update_connected_project_profile(
+            request.app.state.settings.database_path,
+            project["id"],
+            updater=lambda profile: {**profile, **updates},
+        )
+        project = db.get_connected_project(request.app.state.settings.database_path, project["id"])
+
+    if wants_html and request.query_params.get("redirect") == "workspace" and project:
+        return RedirectResponse(f"/projects/{project['id']}", status_code=status.HTTP_303_SEE_OTHER)
     if wants_html:
         return RedirectResponse("/settings/project", status_code=status.HTTP_303_SEE_OTHER)
-    return JSONResponse(status_code=200, content={"project": result.project})
+    return JSONResponse(status_code=200, content={"project": project})
+
+
+@router.post("/api/projects/{project_id}/settings", dependencies=[Depends(require_portal_auth)])
+async def update_project_settings_route(project_id: str, request: Request):
+    database_path = request.app.state.settings.database_path
+    project = db.get_connected_project(database_path, project_id)
+    body = await request.json() if "application/json" in request.headers.get("content-type", "") else {}
+    payload = ProjectProfileUpdateRequest.model_validate(body or {})
+    profile = project.get("profile") or {}
+    updates: dict[str, Any] = {}
+    if payload.test_command is not None:
+        updates["test_command"] = payload.test_command
+        updates["test_command_confirmed"] = payload.test_command_confirmed if payload.test_command_confirmed is not None else True
+    if payload.base_branch is not None:
+        updates["base_branch"] = payload.base_branch
+        updates["base_branch_confirmed"] = payload.base_branch_confirmed if payload.base_branch_confirmed is not None else True
+    if not updates:
+        return {"project": project}
+    db.update_connected_project_profile(
+        database_path,
+        project_id,
+        updater=lambda p: {**p, **updates},
+    )
+    return {"project": db.get_connected_project(database_path, project_id)}
 
 
 @router.post("/settings/project/{project_id}/read-only-proof", dependencies=[Depends(require_portal_auth)])

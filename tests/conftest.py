@@ -1,4 +1,8 @@
 import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -33,6 +37,43 @@ def seed_orchestrator_inventory(database_path, model: str = TEST_ORCHESTRATOR_MO
             }
         },
     )
+
+
+# `implementation` is the default Task kind and launches write-capable, which requires a
+# git repository with a clean tree, a confirmed verification command, and a confirmed base
+# branch. Any fixture that launches a Task needs that state, so it is built in one place.
+PASSING_TEST_COMMAND = f"{shlex.quote(sys.executable)} -c pass"
+
+
+def init_git_project(root: Path, *, base_branch: str = "main") -> Path:
+    """Make `root` a committed git repository whose test artifacts stay ignored."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    if (root / ".git").exists():
+        return root
+    # Databases, caches and worker output live inside tmp roots; ignoring them keeps the
+    # working tree clean so the launch guardrail sees the state a real project has.
+    (root / ".gitignore").write_text("*.db\n*.db-*\n*.sqlite*\n__pycache__/\n.pytest_cache/\n")
+    git = ["git", "-c", "user.email=test@example.invalid", "-c", "user.name=Foreman Test"]
+    subprocess.run(["git", "init", "-b", base_branch], cwd=root, check=True, capture_output=True)
+    subprocess.run([*git, "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-m", "test fixture"], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def git_project_profile(root: Path, *, base_branch: str = "main", **overrides) -> dict:
+    """Profile for a launch-ready connected project, with git state to match."""
+    init_git_project(root, base_branch=base_branch)
+    profile = {
+        "name": Path(root).name,
+        "root_path": str(Path(root).resolve()),
+        "test_command": PASSING_TEST_COMMAND,
+        "test_command_confirmed": True,
+        "base_branch": base_branch,
+        "base_branch_confirmed": True,
+    }
+    profile.update(overrides)
+    return profile
 
 
 def pytest_configure(config):
