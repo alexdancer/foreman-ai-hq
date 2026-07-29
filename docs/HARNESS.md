@@ -176,6 +176,8 @@ Budget governance is soft by design. Over-budget launches require explicit opera
 
 Common alarm classes include budget zone changes, daily cap exceeded, session timeout, repeated-loop detection, tool-category bias, and checkpoint failure. Alarms are structured records with context and recommended action; the operator decides whether to continue, abort, raise budget, or adjust guardrails.
 
+The `session_timeout` guardrail action `notify_and_checkpoint` currently records a `SESSION_TIMEOUT` alarm only; it does not trigger an independent checkpoint save. Checkpoints are evaluated automatically once a Worker Run completes and its Session Artifact is available, so a timeout that ends the run is still reflected in the checkpoint results for that completed Session.
+
 ## Session artifacts and review evidence
 
 Each Worker Run preserves enough evidence to review and audit the run later:

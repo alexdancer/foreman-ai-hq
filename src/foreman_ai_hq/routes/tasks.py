@@ -191,6 +191,7 @@ async def launch_task_endpoint(task_id: str, request: Request):
                 timezone=request.app.state.settings.timezone,
             ),
             runner=runner,
+            guardrail_config=request.app.state.guardrails,
         )
     except KeyError as exc:
         if _wants_react_json(request):

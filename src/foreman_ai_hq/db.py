@@ -684,6 +684,31 @@ def record_checkpoint_result(
         )
 
 
+def replace_checkpoint_results(
+    path: Path | str,
+    *,
+    session_id: str,
+    checkpoints: list[dict[str, Any]],
+) -> None:
+    """Replace all checkpoint results for a session in one transaction."""
+    with connect(path) as conn:
+        conn.execute("delete from checkpoint_results where session_id = ?", (session_id,))
+        for checkpoint in checkpoints:
+            conn.execute(
+                """
+                insert into checkpoint_results (session_id, name, passed, details_json, created_at)
+                values (?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    checkpoint["name"],
+                    1 if checkpoint["passed"] else 0,
+                    _to_json(checkpoint.get("details", {})),
+                    _now_iso(),
+                ),
+            )
+
+
 def create_task(
     path: Path | str,
     *,

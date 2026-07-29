@@ -969,6 +969,7 @@ def _launch_project_automation_task(
         project_id=project_id,
         budget_since=db.effective_daily_budget_window_start(database_path, timezone=request.app.state.settings.timezone),
         runner=runner,
+        guardrail_config=request.app.state.guardrails,
     )
     worker_run_id = result.worker_run["id"] if result.worker_run else None
     record_automation_event(
@@ -1496,6 +1497,7 @@ async def launch_read_only_proof_route(project_id: str, request: Request):
             budget_since=db.effective_daily_budget_window_start(database_path, timezone=request.app.state.settings.timezone),
             runner=getattr(request.app.state, "local_runner_proof_runner", None)
             or getattr(request.app.state, "task_launch_runner", None),
+            guardrail_config=request.app.state.guardrails,
         )
     except TaskLaunchBlocked as exc:
         return JSONResponse(

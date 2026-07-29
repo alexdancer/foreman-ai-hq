@@ -15,11 +15,14 @@ from typing import Any, Callable
 
 from foreman_ai_hq import db
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
+from foreman_ai_hq.checkpoints import evaluate_and_record_checkpoints
+from foreman_ai_hq.guardrails import GuardrailConfig, load_guardrails
 from foreman_ai_hq.launch_guardrails import evaluate_launch_guardrails
 from foreman_ai_hq.native_cli_diagnostics import native_cli_diagnostic, redact_native_cli_text
 from foreman_ai_hq.native_usage import NativeUsageEvidence, parse_native_usage_evidence
 from foreman_ai_hq.project_context import project_task_metadata, resolve_task_project
 from foreman_ai_hq.repo_context import build_repo_context_brief, repo_context_prompt
+from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_kind import read_task_kind
 from foreman_ai_hq.stream_events import streaming_runner
 from foreman_ai_hq.tracking_modes import NATIVE_USAGE, PROXY_GOVERNED
@@ -101,6 +104,7 @@ def launch_task(
     native_budget_acknowledged: bool = False,
     budget_since: str | None = None,
     runner: Runner | None = None,
+    guardrail_config: GuardrailConfig | None = None,
 ) -> TaskLaunchResult:
     # Claiming a task and creating its Worker Run must be single-threaded inside this process.
     with _LAUNCH_START_LOCK:
@@ -116,6 +120,7 @@ def launch_task(
             native_budget_acknowledged=native_budget_acknowledged,
             budget_since=budget_since,
             runner=runner,
+            guardrail_config=guardrail_config,
         )
 
 
@@ -132,9 +137,15 @@ def _launch_task_unlocked(
     native_budget_acknowledged: bool = False,
     budget_since: str | None = None,
     runner: Runner | None = None,
+    guardrail_config: GuardrailConfig | None = None,
 ) -> TaskLaunchResult:
     db.mark_stale_worker_runs_interrupted(database_path)
     task = db.get_task(database_path, task_id)
+    if guardrail_config is None:
+        # Every request path passes the app's guardrails explicitly, and the background run
+        # thread carries them through. This fallback is for direct callers (tests, scripts),
+        # which have no app state to read them from.
+        guardrail_config = load_guardrails(Settings().guardrails_path)
     manual_estimate_requested = estimate_tokens is not None and bool(model)
 
     if project_id:
@@ -418,6 +429,7 @@ def _launch_task_unlocked(
         read_only=read_only,
         write_capable=write_capable,
         runner=runner,
+        guardrail_config=guardrail_config,
     )
     return TaskLaunchResult(
         task=claimed,
@@ -466,6 +478,7 @@ def _start_background_worker_run(
     read_only: bool,
     write_capable: bool,
     runner: Runner | None,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     thread = threading.Thread(
         target=_execute_worker_run_safe,
@@ -485,6 +498,7 @@ def _start_background_worker_run(
             "read_only": read_only,
             "write_capable": write_capable,
             "runner": runner,
+            "guardrail_config": guardrail_config,
         },
         daemon=True,
         name=f"worker-run-{worker_run_id}",
@@ -509,6 +523,7 @@ def _execute_worker_run_safe(
     read_only: bool,
     write_capable: bool,
     runner: Runner | None,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     try:
         _execute_worker_run(
@@ -527,6 +542,7 @@ def _execute_worker_run_safe(
             read_only=read_only,
             write_capable=write_capable,
             runner=runner,
+            guardrail_config=guardrail_config,
         )
     except Exception as exc:
         reason = f"Worker Run failed unexpectedly: {type(exc).__name__}"
@@ -571,6 +587,7 @@ def _execute_worker_run(
     read_only: bool,
     write_capable: bool,
     runner: Runner | None,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     worker_run = db.mark_worker_run_running(database_path, worker_run_id)
     _record_worker_event(
@@ -626,6 +643,7 @@ def _execute_worker_run(
         write_capable=write_capable,
         result=result,
         outcome=outcome,
+        guardrail_config=guardrail_config,
     )
 
 
@@ -839,6 +857,32 @@ def _classify_worker_run_result(
     return WorkerRunOutcome(kind="completed", native_evidence=native_evidence, workdir_evidence=workdir_evidence)
 
 
+def _evaluate_and_record_worker_checkpoints(
+    database_path: Path | str,
+    *,
+    session_id: str,
+    task_id: str,
+    worker_run_id: str,
+    guardrail_config: GuardrailConfig,
+) -> None:
+    """Evaluate checkpoints once a Worker Run completes and record failures without failing the run."""
+    try:
+        evaluate_and_record_checkpoints(database_path, session_id, guardrail_config)
+    except Exception as exc:
+        # Checkpoints are advisory; a failure to evaluate them must not discard run evidence.
+        # `record_worker_run_event` sanitizes `detail` on the way in, so it is passed raw here.
+        db.record_worker_run_event(
+            database_path,
+            worker_run_id=worker_run_id,
+            session_id=session_id,
+            task_id=task_id,
+            kind="checkpoint",
+            title="Checkpoint evaluation failed",
+            level="error",
+            detail={"error": str(exc), "error_type": type(exc).__name__},
+        )
+
+
 def _apply_worker_run_outcome(
     *,
     database_path: Path | str,
@@ -855,6 +899,7 @@ def _apply_worker_run_outcome(
     write_capable: bool,
     result: WorkerProcessResult,
     outcome: WorkerRunOutcome,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     if outcome.native_evidence is not None:
         db.record_token_turn(
@@ -962,6 +1007,13 @@ def _apply_worker_run_outcome(
             stderr=result.stderr,
             metadata={"task_status": write_result["status"], "workdir_evidence": outcome.workdir_evidence},
         )
+        _evaluate_and_record_worker_checkpoints(
+            database_path,
+            session_id=session["id"],
+            task_id=task["id"],
+            worker_run_id=worker_run_id,
+            guardrail_config=guardrail_config,
+        )
         return
 
     if outcome.kind == "read_only_mutation":
@@ -1028,6 +1080,13 @@ def _apply_worker_run_outcome(
         stdout=result.stdout,
         stderr=result.stderr,
         metadata={"task_status": launched["status"], "workdir_evidence": outcome.workdir_evidence},
+    )
+    _evaluate_and_record_worker_checkpoints(
+        database_path,
+        session_id=session["id"],
+        task_id=task["id"],
+        worker_run_id=worker_run_id,
+        guardrail_config=guardrail_config,
     )
 
 
