@@ -168,8 +168,7 @@ def _client_with_llm(tmp_path, llm):
     settings = Settings(
         database_path=tmp_path / "harness.db",
         guardrails_path=ROOT / "guardrails.yaml",
-        estimator_model="openai/gpt-4.1-mini",
-        task_breakdown_model="openai/gpt-4.1-mini",
+        orchestrator_model="openai/gpt-4.1-mini",
         operator_config={},
     )
     app = create_app(settings)
@@ -645,28 +644,6 @@ def test_task_breakdown_rejects_invalid_candidate_kind():
                 "source": "llm",
             }
         )
-
-
-def test_task_breakdown_rejects_scout_without_bounded_investigation_fields():
-    content = _breakdown_content("Investigate DEMO_TASK_2099 routing")
-    content["candidates"][0].update({"kind": "scout", "constraints": []})
-
-    with pytest.raises(TaskBreakdownValidationError, match="bounded question, inspection boundary"):
-        validate_breakdown_result(content)
-
-
-def test_task_breakdown_preserves_bounded_scout_target_task_id():
-    content = _breakdown_content("Investigate DEMO_TASK_2099 routing")
-    content["candidates"][0].update({
-        "kind": "scout",
-        "target_task_id": "task-DEMO-2099",
-        "constraints": ["Inspect src/foreman_ai_hq routing only."],
-    })
-
-    result = validate_breakdown_result(content)
-
-    assert result.candidates[0].target_task_id == "task-DEMO-2099"
-    assert result.candidates[0].as_dict()["target_task_id"] == "task-DEMO-2099"
 
 
 def test_estimate_form_failed_breakdown_records_validation_reason(tmp_path, monkeypatch):

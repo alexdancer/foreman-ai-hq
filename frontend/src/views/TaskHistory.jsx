@@ -164,7 +164,7 @@ function TaskRow({ task, onUnarchive }) {
     <tr id={task.id}>
       <td>
         <strong className="wrap-anywhere">{task.description}</strong>
-        {task.task_kind === "scout" && <span className="pill scout" title="Kind: scout">scout</span>}
+        {task.task_kind === "acceptance_verification" && <span className="pill" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
         <div className="mono muted">{task.id}</div>
       </td>
       <td>

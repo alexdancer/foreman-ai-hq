@@ -8,7 +8,7 @@ operator mint a `scout` directly. The Planning Chat is a fifth path.
 
 Two facts have changed underneath that design.
 
-**The Orchestrator can read the repository.** `planning_conversation.py:154` launches pi
+**The Orchestrator can read the repository.** `planning_conversation.py:151` launches pi
 with `cwd=project["root_path"]` and the allowlist `("read", "grep", "find", "ls")`. When
 ADR-0005 established the Scout on 2026-07-20, the orchestrator was two one-shot
 `llm_client` calls with no tool access — "investigation must be a Worker Task launched
@@ -16,9 +16,9 @@ through an adapter" was not a preference but the only mechanism, because nothing
 the harness could open a file. ADR-0009 changed that four days later; ADR-0005 was never
 revisited.
 
-**The Scout cannot launch on the documented happy path.** `task_launch.py:228` sets
+**The Scout cannot launch on the documented happy path.** `task_launch.py:242` sets
 `read_only_profile_required = (task_kind == "scout")`, and `_read_only_launchable()`
-(`adapter_readiness.py:125`) is a literal `kind == "codex"` string test, while
+(`adapter_readiness.py:116-136`) is a literal `kind == "codex"` string test, while
 `docs/HARNESS.md:135` names OpenCode as the first and only verified adapter. An operator
 can select `scout`, spend Orchestration Tokens estimating it, receive an Estimated card,
 and learn only at launch that their adapter can never run it.
@@ -72,22 +72,47 @@ a chat capability rather than a Task kind.**
 - `markdown-task-intake`: Markdown paste and `.md` attachment arrive through the chat
   composer instead of a board form, preserving review-first behaviour, file precedence,
   and validation.
-- `scout-tasks`: retired. Investigation is a Planning Chat capability, not a Task kind.
+- `scout-tasks`: retired. Investigation is a Planning Chat capability, not a Task kind. Its one
+  surviving requirement — low-confidence advisory Needs You work — moves to `needs-you-queue`
+  rather than dying with the file.
+- `needs-you-queue`: gains the moved low-confidence requirement; the projection drops
+  `scout_task_id` and the six Scout decision states, and the action set becomes acknowledge,
+  manual estimate, and investigate-in-chat; the `/scout*` estimate-decision routes are removed.
+- `react-board-workflow`: Scout kind selection is removed; card `task_kind` narrows to
+  `implementation` and `acceptance_verification`; the low-confidence action becomes
+  investigate-in-chat.
+- `governed-worker-launch`: no Task kind requires an adapter-enforced read-only profile, and the
+  launch-mode derivation rule drops its `scout` clause. The separate "Scout launch forces read-only
+  mode" requirement was already removed by `governed-implementation-flow`, archived first, which
+  folded that rule into the general derivation requirement; historical `scout` rows still launch
+  read-only.
+- `task-breakdown-review`: the `scout` candidate kind and both Scout candidate requirements are
+  removed; candidate kind narrows to two values.
+- `project-task-history`: `task_kind` narrows for new Tasks; historical `scout` rows keep their
+  recorded kind.
+- `estimation-accuracy-tracking`: the Scout exclusion rule is unnecessary because investigation
+  produces no Task actuals.
+- `orchestrator-structured-jobs`: the investigation-recommended signal escalates to the planning
+  conversation instead of becoming a dispatched Scout Task.
 
 ## Impact
 
 - **Backend.** `routes/tasks.py` (`_requires_task_breakdown_review`, the short-intake
   endpoint, `task_kind` validation), `task_kind.py`, `task_launch.py`
   (`read_only_profile_required`), `adapter_readiness.py` (`_read_only_launchable` and the
-  Codex gate), `needs_you.py` (53 Scout references), `estimate_decision.py` (~850 lines,
-  76 Scout references — the claim/retry/apply/dismiss machinery), `task_slicing_policy.py`,
+  Codex gate), `needs_you.py` (55 Scout-matching lines), `estimate_decision.py` (853 lines,
+  93 Scout-matching lines — the claim/retry/apply/dismiss machinery), `task_slicing_policy.py`,
   `task_breakdown.py`, `estimation.py`, `routes/planning_conversation.py`.
 - **Orchestrator profile.** The orchestrator persona gains the intake-decision contract;
   a submit tool carries `single_task` versus `needs_breakdown` with its reason.
 - **Frontend.** `Board.jsx` (intake panel removed, chat pane added, collapse state,
   post-turn refresh), `PlanningChat.jsx` (composer with file attachment, embedded pane
   layout), board CSS for the split.
-- **Specs.** `openspec/specs/scout-tasks/spec.md` (13.3 KB) is removed on archive.
+- **Specs.** `openspec/specs/scout-tasks/spec.md` (13.3 KB) is removed on archive, after its
+  low-confidence requirement moves to `needs-you-queue`. Scout and Task-kind language also lives
+  in `needs-you-queue`, `react-board-workflow`, `governed-worker-launch`,
+  `task-breakdown-review`, `project-task-history`, `estimation-accuracy-tracking`, and
+  `orchestrator-structured-jobs`; each carries a delta in this change.
 - **Docs.** `CONTEXT.md` (Scout Task retired, Chat Investigation added, nine terms
   amended), `docs/HARNESS.md` Scout paragraphs, `docs/TODO.md`.
 

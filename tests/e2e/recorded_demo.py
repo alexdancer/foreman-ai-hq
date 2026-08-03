@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import types
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -241,6 +242,7 @@ class RecordedDemo:
     _original_streaming_runner: Any = field(default=None, repr=False)
     _original_apply_outcome: Any = field(default=None, repr=False)
     _original_react_build_dir: Callable[[], Path] | None = field(default=None, repr=False)
+    _original_planning_start: Any = field(default=None, repr=False)
     _project_root: Path = field(init=False)
 
     def __enter__(self) -> "RecordedDemo":
@@ -373,6 +375,11 @@ class RecordedDemo:
 
             _react_shell.react_build_dir = self._original_react_build_dir
 
+        if self._original_planning_start is not None:
+            import foreman_ai_hq.routes.planning_conversation as planning_conversation
+
+            planning_conversation.PlanningConversationRegistry.start = self._original_planning_start
+
         os.environ.pop(DEMO_PORTAL_TOKEN_ENV, None)
 
         if self._temp_dir is not None:
@@ -380,6 +387,84 @@ class RecordedDemo:
 
     def _seed_llm_client(self, app) -> None:
         """Subclasses may inject a fake LLM client before the server starts."""
+        import foreman_ai_hq.db as db
+        import foreman_ai_hq.pi_adapter as pi_adapter
+        import foreman_ai_hq.routes.planning_conversation as planning_conversation
+        import time
+
+        app.state.orchestrator_job_runner = self._fake_orchestrator
+
+        # Replace the planning-conversation start so the demo never needs a real
+        # pi CLI; only the session id and a no-op conversation handle are used.
+        # The lifespan will create a new PlanningConversationRegistry instance, so
+        # we patch the class method rather than a single instance.
+        self._original_planning_start = planning_conversation.PlanningConversationRegistry.start
+
+        def _fake_start(self, project_id, database_path, model, cwd=None, timeout=60):
+            session, _ = db.create_planning_session(
+                database_path,
+                task_description="Demo planning conversation",
+                model=model,
+                tracking_mode="native_usage",
+            )
+            fake_proc = types.SimpleNamespace(poll=lambda: None)
+            fake_conv = types.SimpleNamespace(
+                session=session,
+                proc=fake_proc,
+                prompt=lambda text: ("ok", "end_turn"),
+                cancel=lambda: None,
+                close=lambda: None,
+            )
+            with self._lock:
+                self._live[project_id] = planning_conversation.LiveConversation(
+                    conv=fake_conv,
+                    planning_session_id=session["id"],
+                    last_used_at=time.monotonic(),
+                )
+            return session["id"]
+
+        planning_conversation.PlanningConversationRegistry.start = _fake_start
+
+    async def _fake_orchestrator(self, database_path, *, instructions, input_payload, model, persona_filename, extension_filename, submit_tool, usage_kind, task_description, result_validator=None, session_id=None, timeout=None, **kwargs):
+        """Deterministic orchestrator/estimator that lets the chat pane create a Task."""
+        import foreman_ai_hq.db as db
+        import foreman_ai_hq.pi_adapter as pi_adapter
+
+        session = db.create_session(
+            database_path,
+            task_description=task_description,
+            model=model,
+            session_key_hash="x" * 64,
+            guardrail_overrides={},
+            status="running",
+        )
+        session = db.update_session_status(database_path, session["id"], "completed")
+
+        if persona_filename == "intake.md":
+            raw = {"decision": "single_task", "reason": "Demo fixture judged as a single small task."}
+        elif persona_filename == "estimator.md":
+            raw = {
+                "drivers": {"files_to_read": 1, "files_to_modify": 0, "expected_turns": 1, "needs_test_run": False},
+                "shadow_token_estimate": 1500,
+                "complexity": "simple",
+                "confidence": 0.9,
+                "investigation_recommended": False,
+                "rationale": "Demo fixture estimate.",
+                "assumptions": [],
+                "risk_flags": [],
+                "budget_note": "demo",
+                "source": "llm",
+            }
+        else:
+            raw = {}
+
+        validated = result_validator(raw) if result_validator else raw
+        return pi_adapter.PiStructuredJobResult(
+            arguments=raw,
+            validated=validated,
+            session=session,
+            args=[],
+        )
 
     def _seed_data(self) -> None:
         import foreman_ai_hq.db as db
@@ -456,3 +541,15 @@ class RecordedDemo:
             ),
         )
         self.task_id = task["id"]
+
+    def set_task_kind_acceptance_verification(self, task_id: str) -> None:
+        """Test helper to flip a chat-created task to the read-only kind expected by the demo run."""
+        import foreman_ai_hq.db as db
+        from foreman_ai_hq.task_kind import with_task_kind
+
+        current = db.get_task(self.database_path, task_id)
+        db.update_task(
+            self.database_path,
+            task_id,
+            {"metadata": with_task_kind(current.get("metadata", {}), "acceptance_verification")},
+        )

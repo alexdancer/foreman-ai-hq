@@ -20,8 +20,9 @@ class Settings:
     control_plane_api_key_env: str = "FOREMAN_AI_HQ_CONTROL_API_KEY"
     control_plane_base_url: str = ""
     provider_api_key_env: str = "PROVIDER_API_KEY"
-    estimator_model: str | None = None
-    task_breakdown_model: str | None = None
+    # Legacy persisted per-job values are migration evidence only. Runtime callers
+    # must always select ``orchestrator_model``.
+    legacy_orchestration_model_overrides: dict[str, str] | None = None
     task_breakdown_timeout_seconds: int = 120
     portal_token_env: str = "TOKEN_TRACKER_PORTAL_TOKEN"
     portal_auth_required: bool = True
@@ -45,8 +46,6 @@ class Settings:
         control_plane_api_key_env: str | None = None,
         control_plane_base_url: str | None = None,
         provider_api_key_env: str | None = None,
-        estimator_model: str | None = None,
-        task_breakdown_model: str | None = None,
         task_breakdown_timeout_seconds: int | None = None,
         portal_token_env: str | None = None,
         portal_auth_required: bool | None = None,
@@ -146,16 +145,14 @@ class Settings:
             "provider_api_key_env",
             legacy_provider_env,
         )
-        object.__setattr__(
-            self,
-            "estimator_model",
-            estimator_model or config.get("estimator_model") or resolved_orchestrator_model,
-        )
-        object.__setattr__(
-            self,
-            "task_breakdown_model",
-            task_breakdown_model or config.get("task_breakdown_model") or resolved_orchestrator_model,
-        )
+        legacy_overrides = {
+            key: value
+            for key in ("estimator_model", "task_breakdown_model")
+            if isinstance((value := config.get(key)), str)
+            and value.strip()
+            and value != resolved_orchestrator_model
+        }
+        object.__setattr__(self, "legacy_orchestration_model_overrides", legacy_overrides)
         object.__setattr__(
             self,
             "task_breakdown_timeout_seconds",

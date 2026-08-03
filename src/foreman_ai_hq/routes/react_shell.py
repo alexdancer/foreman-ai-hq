@@ -1299,6 +1299,8 @@ def _react_task(task: dict) -> dict:
         "task_branch": _optional_scalar(metadata.get("task_branch"), 256),
         "harness_commit": _react_harness_commit(metadata.get("harness_commit")),
         "pull_request": _react_pull_request(metadata.get("pull_request")),
+        "intake_decision": _optional_scalar(metadata.get("intake_decision"), 32),
+        "intake_decision_reason": _bounded_text(metadata.get("intake_decision_reason"), 240),
         "blocked_condition": {
             "reason": _bounded_scalar(blocked_condition.get("reason"), 1000),
             "origin": _bounded_scalar(blocked_condition.get("origin"), 100),

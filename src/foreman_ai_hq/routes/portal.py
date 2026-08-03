@@ -1282,15 +1282,16 @@ async def save_control_plane_settings(request: Request):
             return _react_control_plane_outcome(ok=False, error=detail, status_code=422)
         return JSONResponse(status_code=422, content={"detail": detail})
 
-    # One Orchestrator Model drives every orchestration job; there is no per-job opt-in.
+    # One Orchestrator Model drives every job. Retiring old keys on save gives
+    # hand-edited configurations a bounded, one-save migration path.
     updates: dict[str, Any] = {
         "control_plane_model": payload.orchestrator_model,
         "orchestrator_model": payload.orchestrator_model,
-        "estimator_model": payload.orchestrator_model,
-        "task_breakdown_model": payload.orchestrator_model,
     }
     try:
-        config = update_operator_config(**updates)
+        config = update_operator_config(
+            remove_keys=("estimator_model", "task_breakdown_model"), **updates
+        )
         _sync_control_plane_env(payload)
     except OSError as exc:
         safe_message = "Could not save control-plane config."
@@ -1339,11 +1340,7 @@ async def save_control_plane_settings(request: Request):
         details=existing_details,
     )
     status_with_state = {**status_record, "state": _control_plane_connection_state(status_record)}
-    settings_json = {
-        "orchestrator_model": new_settings.orchestrator_model,
-        "estimator_model": new_settings.estimator_model,
-        "task_breakdown_model": new_settings.task_breakdown_model,
-    }
+    settings_json = {"orchestrator_model": new_settings.orchestrator_model}
     if wants_html:
         return RedirectResponse("/settings/control-plane", status_code=status.HTTP_303_SEE_OTHER)
     if _wants_react_json(request):
@@ -1471,40 +1468,6 @@ async def update_project_settings_route(project_id: str, request: Request):
         updater=lambda p: {**p, **updates},
     )
     return {"project": db.get_connected_project(database_path, project_id)}
-
-
-@router.post("/settings/project/{project_id}/read-only-proof", dependencies=[Depends(require_portal_auth)])
-async def launch_read_only_proof_route(project_id: str, request: Request):
-    backend = _local_backend(request)
-    if backend is None:
-        return JSONResponse(status_code=409, content={"detail": "Local Runner backend is disabled."})
-    database_path = request.app.state.settings.database_path
-    project = next((item for item in db.list_connected_projects(database_path) if item["id"] == project_id), None)
-    if project is None:
-        raise HTTPException(status_code=404, detail="connected project not found")
-    capability = backend.project_capability(project)
-    if capability.get("state") != "launch_ready":
-        return JSONResponse(status_code=409, content={"detail": "Project is not Launch-ready via Local Runner.", "capability": capability})
-
-    task = backend.create_read_only_proof_task({**project, "capability": capability})
-    try:
-        result = launch_task(
-            database_path,
-            task["id"],
-            adapter_id="opencode",
-            model=task.get("recommended_model"),
-            proxy_url=DEFAULT_PROXY_URL,
-            budget_since=db.effective_daily_budget_window_start(database_path, timezone=request.app.state.settings.timezone),
-            runner=getattr(request.app.state, "local_runner_proof_runner", None)
-            or getattr(request.app.state, "task_launch_runner", None),
-            guardrail_config=request.app.state.guardrails,
-        )
-    except TaskLaunchBlocked as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"task": exc.task, "launch_guardrails": {"passed": False, "reasons": exc.reasons}},
-        )
-    return JSONResponse(status_code=200, content=result.as_response())
 
 
 @router.post("/settings/workers/{adapter_id}/verify", dependencies=[Depends(require_portal_auth)])
@@ -1682,17 +1645,8 @@ def _control_plane_connection_state(control_status: dict[str, Any] | None) -> st
 
 
 def _orchestrator_job_divergence(settings: Settings) -> dict[str, str]:
-    """Per-job model keys that disagree with the Orchestrator Model.
-
-    Save writes all of them together, so divergence only arises from a hand-edited
-    config. It surfaces as a warning with a reset rather than as a normal row.
-    """
-    diverging: dict[str, str] = {}
-    for field in ("estimator_model", "task_breakdown_model"):
-        value = getattr(settings, field, None)
-        if value and value != settings.orchestrator_model:
-            diverging[field] = str(value)
-    return diverging
+    """Expose legacy persisted values as migration evidence, never runtime choices."""
+    return dict(settings.legacy_orchestration_model_overrides or {})
 
 
 def _control_plane_connection_details(control_status: dict[str, Any] | None) -> dict[str, Any] | None:

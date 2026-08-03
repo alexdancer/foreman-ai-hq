@@ -64,11 +64,18 @@ def write_default_guardrails_file(config: dict[str, Any], base_dir: Path | str |
     return guardrails_path
 
 
-def update_operator_config(path: Path | str = DEFAULT_CONFIG_PATH, **updates: Any) -> dict[str, Any]:
+def update_operator_config(
+    path: Path | str = DEFAULT_CONFIG_PATH,
+    *,
+    remove_keys: tuple[str, ...] = (),
+    **updates: Any,
+) -> dict[str, Any]:
     config_path = Path(path)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config = dict(DEFAULT_LOCAL_CONFIG)
     config.update(load_operator_config(config_path))
+    for key in remove_keys:
+        config.pop(key, None)
     config.update({key: value for key, value in updates.items() if value is not None})
     # The OpenRouter preset branch is gone with the settings page that sent a provider.
     # `control_plane_provider_defaults` survives for the Harness Proxy upstream in settings.py.

@@ -1,8 +1,7 @@
 # orchestrator-structured-jobs Specification
 
 ## Purpose
-Run Task Estimation and Task Breakdown as Orchestrator agent turns on the Orchestrator's own model provider, with per-job personas, curated-input-only tool allowlists, structured results enforced at a submit-tool boundary, Scout escalation instead of inline repository crawling, and native-usage accounting that preserves each job's existing spend category.
-
+Run Task Estimation and Task Breakdown as Orchestrator agent turns on the Orchestrator's own model provider, with per-job personas, curated-input-only tool allowlists, structured results enforced at a submit-tool boundary, Planning Chat escalation instead of inline repository crawling, and native-usage accounting that preserves each job's existing spend category.
 ## Requirements
 ### Requirement: Estimation and task breakdown run as Orchestrator agent turns
 The system SHALL conduct Task Estimation and Task Breakdown as Orchestrator agent turns on the Orchestrator's own configured model provider, rather than as single-shot direct model calls. Each job SHALL run with its own persona and its own read-only tool allowlist; neither SHALL be able to write code, run a shell, or launch Workers. The spend of each job SHALL be accounted from the runtime's native usage evidence as Orchestration Tokens whose usage kind is `estimation` or `task_breakdown`, held separate from Worker execution spend. Each job's existing spend category SHALL be preserved (`control_plane` for estimation, `task_breakdown` for task breakdown), so orchestration rollups are unchanged by the move onto the Orchestrator runtime.
@@ -36,16 +35,17 @@ Each job SHALL terminate by calling a dedicated submit tool (`submit_estimate` f
 - **AND** it SHALL NOT fabricate a result or fall back to a heuristic estimate or deterministic split
 
 ### Requirement: Jobs run on curated context and escalate deep reading to a Scout
-The system SHALL run estimation and task breakdown on curated lightweight project context and SHALL NOT let a job crawl arbitrary repository source inline. When a job cannot produce a confident result from that context, it SHALL surface an explicit investigation-recommended signal that becomes a governed, read-only Scout Task, rather than reading the repository inline as hidden orchestration spend.
+The system SHALL run estimation and task breakdown on curated lightweight project context and SHALL NOT let a job crawl arbitrary repository source inline. When a job cannot produce a confident result from that context, it SHALL surface an explicit investigation-recommended signal that routes to the planning conversation, where the Orchestrator reads the repository under its read-only allowlist, rather than reading the repository inline as hidden orchestration spend or dispatching an investigation Task.
 
 #### Scenario: A confident job produces a result without crawling the repository
 - **WHEN** a job can produce a confident result from curated context
 - **THEN** it SHALL return the structured result without reading arbitrary repository source inline
 
-#### Scenario: A low-confidence job escalates to a Scout rather than crawling inline
+#### Scenario: A low-confidence job escalates to the conversation rather than crawling inline
 - **WHEN** a job cannot produce a confident result from curated context
-- **THEN** it SHALL surface an investigation-recommended signal that becomes a governed read-only Scout Task
+- **THEN** it SHALL surface an investigation-recommended signal that becomes an offer to investigate in the Planning Chat
 - **AND** it SHALL NOT read arbitrary repository source inline as hidden orchestration spend
+- **AND** it SHALL NOT create a dispatched investigation Task
 
 ### Requirement: Driver-based estimation and the breakdown review contract are preserved
 Migrating estimation and task breakdown onto the Orchestrator runtime SHALL NOT change their downstream contracts. The `submit_estimate` schema SHALL carry the Estimation Drivers (not a raw token magnitude), so the token estimate is still computed arithmetically from per-adapter coefficients. The `submit_breakdown` schema SHALL carry the Proposed Task Breakdown contract (candidates with kind, constraints, verification, global summary, and rejected/non-task items) so Task Breakdown Review consumes it unchanged.

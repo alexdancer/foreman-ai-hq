@@ -200,8 +200,7 @@ def _launch_task_unlocked(
     metadata = task.get("metadata") or {}
     task_kind = read_task_kind(metadata)
     # Launch mode is derived from canonical task kind; stale metadata and client values are ignored.
-    # `scout` launches read-only under the still-active scout-tasks capability; ADR-0011 retires
-    # the kind in a separate change.
+    # Legacy `scout` rows continue to launch read-only so historical Tasks stay safe.
     write_capable = task_kind == "implementation"
     read_only = task_kind in {"acceptance_verification", "scout"}
     selected_model = model or task.get("recommended_model")
@@ -239,7 +238,6 @@ def _launch_task_unlocked(
         session_api_key=session_api_key,
         proxy_url=selected_proxy_url,
         read_only=read_only,
-        read_only_profile_required=task_kind == "scout",
     )
     if not guardrails.passed or guardrails.adapter is None:
         blocked = _mark_launch_blocked(database_path, task, guardrails.reasons)

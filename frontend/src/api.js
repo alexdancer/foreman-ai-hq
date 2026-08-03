@@ -42,3 +42,25 @@ export async function postJSON(url, body) {
   }
   return outcome;
 }
+
+export async function postForm(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+    body,
+  });
+  let outcome = null;
+  try {
+    outcome = await res.json();
+  } catch {
+    outcome = null;
+  }
+  if (!res.ok) {
+    const detail = outcome?.detail || outcome?.error || await res.text() || `Request failed (${res.status})`;
+    const error = new Error(detail);
+    error.status = res.status;
+    throw error;
+  }
+  return outcome;
+}

@@ -15,7 +15,6 @@ Task Slicing Policy:
 - Every candidate must include an objective, proof/verification path, why it exists, why it is not smaller, why it is not larger, dependencies by candidate title when needed, likely repo entry points when known, and execution_mode AFK or HITL.
 - Mark execution_mode AFK only when a Worker can complete and verify the Task without waiting for operator choices, credentials, external approval, or manual product judgment. Mark HITL with a concrete hitl_reason when human input is required.
 - Keep source_text contract-authoritative. Use repo_context only as bounded hints for entry points, tests, docs, and constraints; do not merge it into or replace source_text.
-- Scout candidates are read-only investigations: they must ask a concrete bounded question, declare an inspection boundary, list expected findings, and never request code edits, destructive commands, migrations, or commits. Reject any candidate that is open-ended research or lacks a verifiable proof.
 """.strip()
 
 TASK_BREAKDOWN_OUTPUT_SCHEMA = """
@@ -32,19 +31,19 @@ Call submit_breakdown exactly once with exactly these top-level fields:
 - rationale: string
 
 Each candidate object must include:
-- kind: implementation, acceptance_verification, or scout
+- kind: implementation or acceptance_verification
 - title: concise board-card title
-- objective: what this slice accomplishes (for scout, the concrete bounded investigation question)
-- prompt: Worker-facing implementation, verification, or scout instructions
-- acceptance_criteria: behavior-level criteria (for scout, what closes the investigation)
-- constraints: array of task-specific constraints (for scout, include the read-only inspection boundary)
+- objective: what this slice accomplishes
+- prompt: Worker-facing implementation or verification instructions
+- acceptance_criteria: behavior-level criteria
+- constraints: array of task-specific constraints
 - proof: smallest executable or inspectable verification path for this candidate
 - why_this_task_exists: why this deserves a board card
 - why_not_smaller: why smaller substeps would be over-splitting or lose independent proof
 - why_not_larger: why merging with adjacent work would make the Task too broad
 - dependencies: array of candidate titles that should run first, empty when none
 - likely_entry_points: array of likely files/modules/routes/tests/docs from repo_context, empty when unknown
-- target_task_id: existing Harness Task id when a scout de-risks that Task, otherwise null
+- target_task_id: null (retained for compatibility; breakdowns no longer create de-risk links)
 - execution_mode: AFK or HITL
 - hitl_reason: required when execution_mode is HITL, empty only when AFK
 - human_in_loop: boolean retained for compatibility; true when execution_mode is HITL

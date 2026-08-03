@@ -1436,7 +1436,6 @@ def test_react_restore_html_caller_gets_303_to_workspace(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("path", "data"),
     [
-        ("/projects/missing-DEMO-999/tasks/estimate-form", {"description": "DEMO task 999"}),
         ("/tasks/missing-DEMO-999/launch", {}),
         ("/tasks/missing-DEMO-999/refresh", {}),
         ("/tasks/missing-DEMO-999/review", {"action": "save_prompt"}),
@@ -1543,7 +1542,6 @@ def test_react_board_state_and_frontend_use_estimate_token_field(tmp_path, monke
     assert "Accept: \"application/json\"" in board_source
     assert "status.reload_required" in board_source
     for action_path in (
-        "/tasks/estimate-form",
         "/run-next",
         "/queue/start",
         "/queue/stop",
@@ -1554,6 +1552,11 @@ def test_react_board_state_and_frontend_use_estimate_token_field(tmp_path, monke
         "/tasks/${task.id}/review",
     ):
         assert action_path in board_source
+    for chat_path in (
+        "PlanningChat",
+        "onTurnComplete",
+    ):
+        assert chat_path in board_source
     for form_field in (
         'form.set("project_id"',
         'form.set("adapter_id"',
@@ -1765,6 +1768,7 @@ def test_react_board_projection_uses_exact_nested_allowlists_and_safe_evidence()
         "recommended_model", "launch_model", "session_href", "task_branch",
         "harness_commit", "pull_request", "blocked_condition", "launch_failure",
         "review_prompt", "timeline", "controls",
+        "intake_decision", "intake_decision_reason",
     }
     assert set(card["controls"]) == {
         "can_launch", "can_refresh", "can_save_review_prompt", "can_agent_review",
@@ -3328,7 +3332,7 @@ def test_react_project_settings_archive_html_redirects_preserved(tmp_path, monke
     assert blocked.headers["location"].startswith("/settings/project?error=")
 
 
-def test_react_project_settings_connect_restore_proof_json_shapes_unchanged(tmp_path, monkeypatch):
+def test_react_project_settings_connect_restore_json_shapes_unchanged(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     database_path = tmp_path / "harness.db"
     headers = {**_portal_headers(), "Accept": "application/json", "Content-Type": "application/json"}
@@ -3355,14 +3359,11 @@ def test_react_project_settings_connect_restore_proof_json_shapes_unchanged(tmp_
         assert restored_payload["ok"] is True
         assert restored_payload["project"] == {"id": project["id"], "archived": False}
 
-        proof = client.post(
+        retired_proof = client.post(
             f"/settings/project/{project['id']}/read-only-proof",
             headers=headers,
         )
-        assert proof.status_code == 409
-        proof_payload = proof.json()
-        assert "detail" in proof_payload
-        assert "capability" in proof_payload
+        assert retired_proof.status_code == 404
 
 
 def test_react_project_settings_is_build_aware(tmp_path, monkeypatch):
@@ -3408,7 +3409,7 @@ def test_react_project_settings_source_contract():
     assert 'postJSON("/settings/project/connect"' in source
     assert 'postJSON(`/projects/${' in source
     assert 'postJSON(`/projects/${' in source
-    assert 'read-only-proof' in source
+    assert 'read-only-proof' not in source
     for field in (
         "local_runner_enabled",
         "backend_status",
@@ -3608,3 +3609,43 @@ def test_react_setup_source_contract():
     assert "active_adapter" in source
     assert "setup" in app_source
     assert 'Accept: "application/json"' in api_source
+
+
+def test_chat_front_door_has_no_legacy_intake_form_and_pane_state_matches_surface():
+    """9.6: The board no longer exposes a short-task intake form. The Planning
+    Chat pane is expanded by default on the Pipeline and collapsed by default
+    on the Execution Floor."""
+    board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
+    assert "board-intake" not in board_source
+    assert "estimate-form" not in board_source
+    assert '"/tasks/estimate-form"' not in board_source
+    assert "PlanningChat" in board_source
+    # PipelineSurface renders the pane unconditionally; FloorSurface controls it.
+    assert "function PipelineSurface(" in board_source
+    assert "function FloorSurface(" in board_source
+    assert "const [chatExpanded, setChatExpanded] = useState(false)" in board_source
+    assert "{chatExpanded ? \"Collapse\" : \"Expand\"}" in board_source
+
+
+def test_floor_evidence_drawer_retains_fixed_width_beside_collapsed_pane():
+    """4.5: The Evidence Drawer is a fixed overlay so its width is unaffected by
+    the Floor planning rail. Its width is expressed in viewport units, not a
+    percentage of the board layout."""
+    css_source = Path("frontend/src/tokens.css").read_text(encoding="utf-8")
+    assert ".evidence-drawer {" in css_source
+    assert "position: fixed" in css_source
+    assert "width: min(760px, 92vw)" in css_source
+    board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
+    # EvidenceDrawer is a top-level sibling, not nested inside the floor layout.
+    assert "<EvidenceDrawer" in board_source
+    assert "<EvidenceDrawer" in board_source.split("function FloorSurface")[0]
+
+
+def test_completed_turn_reloads_board_without_starting_background_polling():
+    """9.7: A planning turn completion calls the same load() used on mount, and
+    the live-refresh effect returns early when the backend reports it disabled."""
+    board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
+    assert "onTurnComplete={load}" in board_source
+    assert "onTurnComplete={onTurnComplete}" in board_source
+    assert "if (!state.data?.automation?.live_refresh_enabled) return undefined;" in board_source
+    assert "window.setInterval" in board_source

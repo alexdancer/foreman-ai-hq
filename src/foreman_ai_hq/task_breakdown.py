@@ -13,7 +13,7 @@ from foreman_ai_hq.task_slicing_policy import (
     TASK_SLICING_POLICY,
 )
 
-TASK_BREAKDOWN_CANDIDATE_KINDS = {"implementation", "scout", "acceptance_verification"}
+TASK_BREAKDOWN_CANDIDATE_KINDS = {"implementation", "acceptance_verification"}
 TASK_BREAKDOWN_MAX_TOKENS = 16_384
 TASK_BREAKDOWN_TIMEOUT_SECONDS = 120
 SECRET_TEXT_PATTERN = re.compile(
@@ -171,10 +171,7 @@ def _system_prompt() -> str:
             TASK_SLICING_POLICY,
             TASK_BREAKDOWN_OUTPUT_SCHEMA,
             (
-                "Classify every candidate kind as 'implementation', 'scout', or 'acceptance_verification'. "
-                "Use 'scout' only for a concrete, bounded read-only investigation: the candidate must ask a clear question, "
-                "declare a read-only inspection boundary, list expected findings, and never request code edits, destructive commands, "
-                "migrations, or commits. Reject generic open-ended research. "
+                "Classify every candidate kind as 'implementation' or 'acceptance_verification'. "
                 "For multi-slice breakdowns that produce one integrated artifact (CLI, app, API, demo, report, or similar), "
                 "include one acceptance_verification candidate recommended last. That candidate must verify the combined artifact "
                 "against the original source contract using the smallest executable proof available; it must not ask the Worker to "
@@ -304,7 +301,7 @@ def _validate_candidates(value: Any, *, allow_legacy_candidate_defaults: bool) -
         kind = item.get("kind", "implementation")
         if kind not in TASK_BREAKDOWN_CANDIDATE_KINDS:
             raise TaskBreakdownValidationError(
-                "candidate kind must be implementation, scout, or acceptance_verification"
+                "candidate kind must be implementation or acceptance_verification"
             )
         if not isinstance(title, str) or not title.strip():
             raise TaskBreakdownValidationError("candidate title must be a non-empty string")
@@ -346,14 +343,8 @@ def _validate_candidates(value: Any, *, allow_legacy_candidate_defaults: bool) -
             allow_legacy_default=allow_legacy_candidate_defaults,
         )
         target_task_id = _optional_target_task_id(item.get("target_task_id"))
-        if kind != "scout" and target_task_id is not None:
-            raise TaskBreakdownValidationError("candidate target_task_id is allowed only for scout candidates")
-        if kind == "scout" and (
-            not objective or not constraints or not acceptance_criteria or not proof
-        ):
-            raise TaskBreakdownValidationError(
-                "scout candidate requires a bounded question, inspection boundary, expected findings, and proof"
-            )
+        if target_task_id is not None:
+            raise TaskBreakdownValidationError("candidate target_task_id is no longer supported")
         candidates.append(
             BreakdownCandidate(
                 kind=kind,

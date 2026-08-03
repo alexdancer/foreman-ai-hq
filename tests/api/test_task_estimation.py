@@ -51,26 +51,6 @@ def _client(tmp_path):
     return TestClient(app)
 
 
-def test_short_intake_rejects_the_retired_scout_kind(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    with _client(tmp_path) as client:
-        project = db.list_connected_projects(tmp_path / "harness.db")[0]
-        response = client.post(
-            f"/projects/{project['id']}/tasks/estimate-form",
-            headers={**_auth_headers(), "accept": "application/json"},
-            data={
-                "description": "Verify the integrated artifact",
-                "task_kind": "scout",
-            },
-        )
-
-    assert response.status_code == 422
-    assert response.json()["error"] == "short intake task_kind must be implementation or acceptance_verification"
-    assert db.list_tasks(tmp_path / "harness.db") == []
-
-
-
-
 class FakeSequentialLLM:
     def __init__(self, contents):
         self.contents = list(contents)
@@ -239,7 +219,7 @@ def _client_with_llm(
     settings = Settings(
         database_path=tmp_path / "harness.db",
         guardrails_path=ROOT / "guardrails.yaml",
-        estimator_model=estimator_model,
+        orchestrator_model=estimator_model,
     )
     app = create_app(settings)
     db.init_db(settings.database_path)
@@ -689,18 +669,17 @@ def test_estimate_without_allowed_worker_models_blocks_launch_with_setup_reason(
     assert body["task"]["metadata"]["launch_blocked_reason"] == "Approve at least one allowed Worker model before launch."
 
 
-def test_estimate_uses_configured_estimator_model_when_distinct_from_control_plane(tmp_path, monkeypatch):
+def test_estimate_ignores_legacy_estimator_model_when_distinct_from_orchestrator(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     llm = FakeEstimatorLLM()
     settings = Settings(
         database_path=tmp_path / "harness.db",
         guardrails_path=ROOT / "guardrails.yaml",
         control_plane_model="openai/gpt-4.1-control",
-        estimator_model="openai/gpt-4.1-estimator",
+        operator_config={"estimator_model": "openai/gpt-4.1-estimator"},
     )
     db.init_db(settings.database_path)
-    # A divergent per-job model still takes effect; it surfaces as a warning on the
-    # settings surface rather than being silently overridden here.
+    # The legacy setting is migration evidence only; it cannot select this job.
     seed_orchestrator_inventory(settings.database_path, model="openai/gpt-4.1-control")
     app = create_app(settings)
     app.state.llm_client = llm
@@ -717,9 +696,9 @@ def test_estimate_uses_configured_estimator_model_when_distinct_from_control_pla
             estimation_session = conn.execute("select * from sessions").fetchone()
 
     assert response.status_code == 200
-    assert llm.requests[0]["model"] == "openai/gpt-4.1-estimator"
-    assert estimation_session["model"] == "openai/gpt-4.1-estimator"
-    assert token_turn["model"] == "openai/gpt-4.1-estimator"
+    assert llm.requests[0]["model"] == "openai/gpt-4.1-control"
+    assert estimation_session["model"] == "openai/gpt-4.1-control"
+    assert token_turn["model"] == "openai/gpt-4.1-control"
 
 def test_estimate_routes_model_to_selected_adapter_allowed_models(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)

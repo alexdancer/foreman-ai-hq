@@ -1171,7 +1171,7 @@ test("archived Pipeline is restore-first and does not expose active workflow con
   }));
   assert.match(markup, /Restore project/);
   assert.match(markup, /Archived project/);
-  assert.doesNotMatch(markup, /Short task intake|Active Worker Runs|Execution Floor<\/a>/);
+  assert.doesNotMatch(markup, /Planning Chat|Active Worker Runs|Execution Floor<\/a>/);
 });
 
 test("Pipeline renders project readiness, Needs You, planning, intake, and Estimated work only", () => {
@@ -1216,7 +1216,7 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     "Review proposed Task Breakdown",
     "DEMO_INTAKE_2099_999.md · 1 candidate",
     "Planning Inbox",
-    "Short task intake",
+    "Planning Chat",
     "Filter loaded tasks",
     "Codex",
     "gpt-5.4",
@@ -1305,7 +1305,7 @@ test("Execution Floor renders active runs, Review queue, and recently-finished t
   assert.match(floor, /class="token-comparison finished-token-comparison" aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
   assert.match(floor, /status-pill-glyph[^>]*aria-hidden="true">▮<\/span><span class="status-pill-label">Queue idle<\/span>/);
   assert.ok(floor.indexOf("finished-token-comparison") < floor.indexOf("Done DEMO task"));
-  assert.doesNotMatch(floor, /Short task intake|Planning Inbox|Estimated DEMO task|Task details/);
+  assert.doesNotMatch(floor, /Planning Chat|Planning Inbox|Estimated DEMO task|Task details/);
 });
 
 test("Evidence Drawer fetches its Session Report handoff and reuses bounded evidence components", async () => {
@@ -1363,29 +1363,6 @@ test("legacy form errors survive the canonical Pipeline redirect", () => {
   assert.equal(boardNoticeFromSearch(""), null);
 });
 
-test("board intake shows progress while task estimation is running", () => {
-  const idle = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999", data: boardData(), error: null, loading: false, action: () => {},
-  }));
-  assert.match(idle, /Estimate task/);
-  assert.doesNotMatch(idle, /Estimating…/);
-  assert.doesNotMatch(idle, /role="progressbar"/);
-
-  const busy = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999", data: boardData(), error: null, loading: false, action: () => {}, estimating: true,
-  }));
-  assert.match(busy, /Estimating…/);
-  assert.match(busy, /Preparing Task Breakdown Review/);
-  assert.match(busy, /Estimating and breaking down the task/);
-  assert.match(busy, /role="progressbar"/);
-  assert.match(busy, /aria-valuetext="Estimating task and preparing review"/);
-  assert.match(busy, /aria-busy="true"/);
-  assert.equal((busy.match(/aria-describedby="board-estimating-reason"/g) || []).length, 3);
-  assert.match(busy, /Task estimation is already in progress\./);
-  assert.match(busy, /disabled=""/);
-  assertDisabledControlsHaveReasons(busy);
-});
-
 test("board cards derive short names from long task descriptions", () => {
   assert.equal(taskDisplayName({ summary: { text: "# Dashboard card cleanup\nMake every card easier to scan." } }), "Dashboard card cleanup");
   assert.equal(taskDisplayName({ summary: { text: "Please update the dashboard so that card titles read like short names and preserve the full task body." } }), "Update the dashboard");
@@ -1423,7 +1400,7 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
   assert.doesNotMatch(populated, /href="\/app\/projects\/demo-999\/board"/);
 });
 
-test("React task history renders Scout and blocked-condition labels", () => {
+test("React task history does not render a Scout label", () => {
   const markup = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
     data: { filters: [], tasks: [
@@ -1438,7 +1415,7 @@ test("React task history renders Scout and blocked-condition labels", () => {
     onUnarchive: () => {},
     notice: null,
   }));
-  assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
+  assert.doesNotMatch(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
   assertStatusPillsHaveGlyphs(markup);
   assert.match(markup, /class="status-pill-label">Done<\/span>/);
   assert.match(markup, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
@@ -1475,7 +1452,7 @@ test("board action controller negotiates JSON, reloads, reports failures, and na
 
   let destination = null;
   const navigated = await submitBoardAction({
-    url: "/projects/demo-999/tasks/estimate-form",
+    url: "/api/projects/demo-999/planning/intake",
     body,
     fetchImpl: async () => ({
       ok: true,
@@ -2407,33 +2384,7 @@ function scoutBoardData(overrides = {}) {
   };
 }
 
-function lowConfidenceItem(decisionState, overrides = {}) {
-  const base = "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision";
-  const rev = "?estimate_revision=1";
-  const actionsByState = {
-    decision_required: [
-      { kind: "acknowledge_estimate", label: "Acknowledge estimate", method: "POST", href: `${base}/acknowledge${rev}` },
-      { kind: "manual_estimate", label: "Enter manual estimate", method: "POST", href: `${base}/manual${rev}` },
-      { kind: "create_scout", label: "Create linked Scout", method: "POST", href: `${base}/scout${rev}` },
-    ],
-    scout_pending: [
-      { kind: "view_scout", label: "View linked Scout", method: "GET", href: "/projects/demo-999#task-scout-1" },
-    ],
-    findings_ready: [
-      { kind: "view_scout_report", label: "View Scout report", method: "GET", href: "/sessions/sess-scout" },
-      { kind: "request_reestimate", label: "Request re-estimate", method: "POST", href: `${base}/scout/reestimate${rev}` },
-    ],
-    reestimate_ready: [
-      { kind: "view_scout_report", label: "View Scout report", method: "GET", href: "/sessions/sess-scout" },
-      { kind: "apply_reestimate", label: "Apply re-estimate", method: "POST", href: `${base}/scout/reestimate/apply?estimate_revision=1&attempt_id=att-1` },
-      { kind: "dismiss_reestimate", label: "Dismiss re-estimate", method: "POST", href: `${base}/scout/reestimate/dismiss?estimate_revision=1&attempt_id=att-1` },
-    ],
-    reestimate_failed: [
-      { kind: "view_scout_report", label: "View Scout report", method: "GET", href: "/sessions/sess-scout" },
-      { kind: "retry_reestimate", label: "Retry re-estimate", method: "POST", href: `${base}/scout/reestimate/retry?estimate_revision=1&attempt_id=att-1` },
-      { kind: "dismiss_reestimate", label: "Dismiss re-estimate", method: "POST", href: `${base}/scout/reestimate/dismiss?estimate_revision=1&attempt_id=att-1` },
-    ],
-  };
+function lowConfidenceItem(overrides = {}) {
   return {
     id: "task:task-estimated-999:low_confidence_estimate",
     kind: "low_confidence_estimate",
@@ -2443,30 +2394,15 @@ function lowConfidenceItem(decisionState, overrides = {}) {
     task_kind: "implementation",
     advisory: true,
     confidence: 0.5,
-    decision_state: decisionState,
-    scout_task_id: decisionState === "decision_required" ? null : "scout-1",
-    session_href: decisionState.startsWith("reestimate") || decisionState === "findings_ready" ? "/sessions/sess-scout" : null,
-    actions: actionsByState[decisionState] || [],
+    href: "/projects/demo-999/plan?question=low%20confidence%20estimate&task_id=task-estimated-999",
+    action_label: "Investigate in chat",
     ...overrides,
   };
 }
 
-test("Pipeline intake selector defaults to implementation", () => {
-  const markup = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999",
-    surface: "pipeline",
-    data: boardData(),
-    error: null,
-    loading: false,
-    action: () => {},
-  }));
-  assert.match(markup, /<select[^>]*name="task_kind"[^>]*>\s*<option value="implementation">/);
-  assert.match(markup, /<option value="scout">/);
-  assert.doesNotMatch(markup, /<option value="acceptance_verification">/);
-});
-
-test("TaskCard renders bounded Scout kind label and launch controls", () => {
-  const data = scoutBoardData();
+test("TaskCard does not render a Scout kind label", () => {
+  const data = boardData();
+  data.tasks_by_status.Estimated[0].task_kind = "scout";
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
     surface: "pipeline",
@@ -2475,14 +2411,12 @@ test("TaskCard renders bounded Scout kind label and launch controls", () => {
     loading: false,
     action: () => {},
   }));
-  assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
-  assert.match(markup, /Launch/);
+  assert.doesNotMatch(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
 });
 
-test("Needs You renders three initial low-confidence choices", () => {
-  const data = scoutBoardData({
-    needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem("decision_required")] },
-  });
+test("TaskCard renders an acceptance_verification kind label", () => {
+  const data = boardData();
+  data.tasks_by_status.Estimated[0].task_kind = "acceptance_verification";
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
     surface: "pipeline",
@@ -2491,18 +2425,12 @@ test("Needs You renders three initial low-confidence choices", () => {
     loading: false,
     action: () => {},
   }));
-  assert.match(markup, /Acknowledge estimate/);
-  assert.match(markup, /<form[^>]*class="needs-you-inline"[^>]*>.*?<input[^>]*type="number"/s);
-  assert.match(markup, /Create linked Scout/);
-  const needsYouSection = markup.match(/<section class="panel needs-you"[^>]*>.*?<\/section>/s)?.[0] ?? "";
-  const buttons = [...needsYouSection.matchAll(/<button[^>]*class="[^"]*btn[^"]*"/g)];
-  assert.equal(buttons.length, 3);
+  assert.match(markup, /<span[^>]*class="[^"]*pill[^"]*"[^>]*>acceptance_verification<\/span>/);
 });
 
-test("Needs You renders a visible Scout label for Scout decisions", () => {
-  const data = scoutBoardData({
-    needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem("decision_required", { task_kind: "scout" })] },
-  });
+test("Needs You renders the investigate-in-chat low-confidence choice", () => {
+  const data = boardData();
+  data.needs_you = { project_id: "demo-999", count: 1, items: [lowConfidenceItem()] };
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
     surface: "pipeline",
@@ -2511,79 +2439,6 @@ test("Needs You renders a visible Scout label for Scout decisions", () => {
     loading: false,
     action: () => {},
   }));
-  const needsYouSection = markup.match(/<section class="panel needs-you"[^>]*>.*?<\/section>/s)?.[0] ?? "";
-  assert.match(needsYouSection, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
-});
-
-test("Needs You GET action renders a safe anchor", () => {
-  const data = scoutBoardData({
-    needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem("scout_pending")] },
-  });
-  const markup = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999",
-    surface: "pipeline",
-    data,
-    error: null,
-    loading: false,
-    action: () => {},
-  }));
-  assert.match(markup, /<a[^>]*class="[^"]*btn[^"]*secondary[^"]*"[^>]*href="\/projects\/demo-999#task-scout-1"[^>]*>View linked Scout<\/a>/);
-});
-
-test("Needs You linked Scout re-estimation states render Apply, Dismiss, and duplicate-spend Retry", () => {
-  for (const [state, expected] of [
-    ["findings_ready", ["View Scout report", "Request re-estimate"]],
-    ["reestimate_ready", ["View Scout report", "Apply re-estimate", "Dismiss re-estimate"]],
-    ["reestimate_failed", ["View Scout report", "Retry re-estimate", "Dismiss re-estimate"]],
-  ]) {
-    const data = scoutBoardData({
-      needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem(state)] },
-    });
-    const markup = renderToStaticMarkup(React.createElement(BoardState, {
-      projectId: "demo-999",
-      surface: "pipeline",
-      data,
-      error: null,
-      loading: false,
-      action: () => {},
-    }));
-    for (const text of expected) {
-      assert.match(markup, new RegExp(text));
-    }
-  }
-});
-
-test("submitBoardAction sends re-estimate retry with duplicate-spend acknowledgement", async () => {
-  let request;
-  const result = await submitBoardAction({
-    url: "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/scout/reestimate/retry?estimate_revision=1&attempt_id=att-1",
-    body: JSON.stringify({ acknowledge_possible_duplicate_spend: true }),
-    fetchImpl: async (url, options) => {
-      request = { url, options };
-      return { ok: true, json: async () => ({ ok: true, next_href: null }) };
-    },
-    navigate: () => assert.fail("successful action must not navigate"),
-    reload: async () => {},
-    onNotice: () => {},
-  });
-  assert.equal(result, "reloaded");
-  assert.equal(request.url, "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/scout/reestimate/retry?estimate_revision=1&attempt_id=att-1");
-  assert.equal(request.options.body, JSON.stringify({ acknowledge_possible_duplicate_spend: true }));
-});
-
-test("submitBoardAction failure preserves backend error and setup href", async () => {
-  let notice;
-  const result = await submitBoardAction({
-    url: "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/scout/reestimate/apply?estimate_revision=1&attempt_id=att-1",
-    body: JSON.stringify({}),
-    fetchImpl: async () => ({
-      ok: false,
-      json: async () => ({ ok: false, error: "Stale re-estimate.", setup_href: "/settings/workers" }),
-    }),
-    navigate: () => assert.fail("failure must not navigate"),
-    reload: async () => {},
-    onNotice: (n) => { notice = n; },
-  });
-  assert.equal(result, "failed");
-  assert.deepEqual(notice, { message: "Stale re-estimate.", setupHref: "/settings/workers" });
+  assert.match(markup, /Investigate in chat/);
+  assert.match(markup, /href="\/projects\/demo-999\/plan\?question/);
 });

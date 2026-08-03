@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import { AppLink, isReactOwnedPath, NavContext } from "../nav.jsx";
 import { getJSON } from "../api.js";
+import PlanningChat from "./PlanningChat.jsx";
 import { drainLiveEvents, runSingleFlight } from "../live-events.js";
 import { LiveRunDock, liveRunsFromTasks } from "../components/LiveRunDock.jsx";
 import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
@@ -135,7 +136,6 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState(() => boardNoticeFromSearch(window.location.search));
-  const [estimating, setEstimating] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const eventCursors = React.useRef(new Map());
   const eventPollInFlight = React.useRef(false);
@@ -234,15 +234,6 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
     });
   };
 
-  const estimateTask = async (body) => {
-    setEstimating(true);
-    try {
-      await action(`/projects/${projectId}/tasks/estimate-form`, body);
-    } finally {
-      setEstimating(false);
-    }
-  };
-
   return <>
     <BoardState
       projectId={projectId}
@@ -254,10 +245,9 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
       setQuery={setQuery}
       notice={notice}
       action={action}
-      estimateTask={estimateTask}
-      estimating={estimating}
       openEvidence={setSelectedTask}
       onRetry={load}
+      onTurnComplete={load}
     />
     <EvidenceDrawer
       task={selectedTask}
@@ -278,10 +268,9 @@ export function BoardState({
   setQuery = () => {},
   notice = null,
   action = () => {},
-  estimateTask = () => {},
-  estimating = false,
   openEvidence = () => {},
   onRetry = () => {},
+  onTurnComplete = () => {},
 }) {
   if (loading) return <Loading>Loading {surface === "floor" ? "Execution Floor" : "Pipeline"}…</Loading>;
   if (isArchivedBoardError(error)) return <>
@@ -318,14 +307,13 @@ export function BoardState({
     <ProjectHeader projectId={projectId} workspace={workspace} action={action} />
     {notice && <Notice variant="danger">{notice.message}{notice.setupHref && <> · <a href={notice.setupHref}>Open setup</a></>}</Notice>}
     {surface === "floor"
-      ? <FloorSurface {...common} query={query} setQuery={setQuery} />
+      ? <FloorSurface {...common} query={query} setQuery={setQuery} onTurnComplete={onTurnComplete} />
       : <PipelineSurface
           {...common}
           query={query}
           setQuery={setQuery}
-          estimateTask={estimateTask}
-          estimating={estimating}
           cards={cards}
+          onTurnComplete={onTurnComplete}
         />}
   </>;
 }
@@ -396,59 +384,33 @@ function PipelineSurface({
   openEvidence,
   query,
   setQuery,
-  estimateTask,
-  estimating,
   cards,
+  onTurnComplete,
 }) {
   const needsYou = data.needs_you || { count: 0, items: [] };
   const planning = needsYou.items.filter((item) => item.kind === "breakdown_review");
   const estimated = tasksByStatus.Estimated.filter(visible);
-  return <>
-    <NeedsYou items={needsYou.items} count={needsYou.count} action={action} />
-    <Panel className="board-intake-panel" aria-busy={estimating}>
-      <PanelHeader title="Short task intake" />
-      <PanelBody>
-        <form className="board-intake" onSubmit={(event) => { event.preventDefault(); if (estimating) return; estimateTask(new FormData(event.currentTarget)); }}>
-          <label className="board-intake-task-field" htmlFor="react-board-intake">
-            <span>Task description</span>
-            <textarea className="board-input" id="react-board-intake" name="description" placeholder="Describe a short task or paste Markdown" rows="3" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined} />
-          </label>
-          <label className="board-intake-kind-field">
-            <span>Task kind</span>
-            <select className="board-input" name="task_kind" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined}><option value="implementation">implementation</option><option value="scout">scout</option></select>
-          </label>
-          <label className="board-intake-file-field">
-            <span>Markdown file <em>(optional)</em></span>
-            <input className="board-file" name="markdown_file" type="file" accept=".md,text/markdown,text/plain" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined} />
-          </label>
-          <Button size="small" type="submit" disabled={estimating} disabledReason="Task estimation is already in progress.">{estimating ? "Estimating…" : "Estimate task"}</Button>
-          {estimating && <div className="board-intake-progress" role="status" aria-live="polite">
-            <div className="board-intake-progress-copy">
-              <strong>Preparing Task Breakdown Review</strong>
-              <span id="board-estimating-reason">Estimating and breaking down the task. Keep this page open.</span>
-            </div>
-            <div className="board-intake-progress-track" role="progressbar" aria-label="Task estimation progress" aria-valuetext="Estimating task and preparing review">
-              <span className="board-intake-progress-bar" />
-            </div>
-          </div>}
-        </form>
-        <p className="board-intake-hint muted">Markdown paste or upload opens authoritative Task Breakdown Review.</p>
-      </PanelBody>
-    </Panel>
-    <Panel className="planning-inbox">
-      <PanelHeader title="Planning Inbox" count={planning.length} />
-      <PanelBody className="needs-you-list">
-        {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="planning-inbox-meta mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · <StatusPill tone={statusTone(item.status)} label={item.status || "unknown"} /> · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
-        {planning.length === 0 && <EmptyState>No proposed Task Breakdowns await review.</EmptyState>}
-      </PanelBody>
-    </Panel>
-    <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter loaded tasks" /><span className="column-count">{cards.filter(visible).length} of {cards.length} visible</span></div>
-    <section className="column pipeline-estimated">
-      <PanelHeader title="Estimated" count={estimated.length} />
-      {estimated.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} />)}
-      {estimated.length === 0 && <EmptyState>{query ? "No matching tasks" : data.board_empty_states.Estimated}</EmptyState>}
-    </section>
-  </>;
+  return <div className="board-layout">
+    <div className="board-main">
+      <NeedsYou items={needsYou.items} count={needsYou.count} action={action} />
+      <Panel className="planning-inbox">
+        <PanelHeader title="Planning Inbox" count={planning.length} />
+        <PanelBody className="needs-you-list">
+          {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="planning-inbox-meta mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · <StatusPill tone={statusTone(item.status)} label={item.status || "unknown"} /> · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
+          {planning.length === 0 && <EmptyState>No proposed Task Breakdowns await review.</EmptyState>}
+        </PanelBody>
+      </Panel>
+      <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter loaded tasks" /><span className="column-count">{cards.filter(visible).length} of {cards.length} visible</span></div>
+      <section className="column pipeline-estimated">
+        <PanelHeader title="Estimated" count={estimated.length} />
+        {estimated.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} />)}
+        {estimated.length === 0 && <EmptyState>{query ? "No matching tasks" : data.board_empty_states.Estimated}</EmptyState>}
+      </section>
+    </div>
+    <div className="board-pane">
+      <PlanningChat projectId={projectId} onTurnComplete={onTurnComplete} compact />
+    </div>
+  </div>;
 }
 
 function NeedsYou({ items, count, action }) {
@@ -463,13 +425,10 @@ function NeedsYou({ items, count, action }) {
 
 function NeedsYouItem({ item, action }) {
   const [value, setValue] = useState("");
-  const post = (a, body = {}) => action(a.href, JSON.stringify({
-    ...(a.kind === "retry_reestimate" ? { acknowledge_possible_duplicate_spend: true } : {}),
-    ...body,
-  }));
+  const post = (a, body = {}) => action(a.href, JSON.stringify(body));
   return <div className="needs-you-item" role="group">
     <div className="needs-you-main">
-      <strong>{item.title}{item.task_kind === "scout" && <span className="pill scout" title="Kind: scout">scout</span>}</strong>
+      <strong>{item.title}</strong>
       <span>{item.reason}</span>
       {item.action_label && <em>{item.action_label}</em>}
     </div>
@@ -487,31 +446,46 @@ function NeedsYouItem({ item, action }) {
         return <Button key={a.kind} size="small" onClick={() => post(a)}>{a.label}</Button>;
       })}
     </div>}
+    {!item.actions && item.href && item.action_label && <div className="needs-you-actions">
+      <Button size="small" variant="secondary" as="a" href={item.href}>{item.action_label}</Button>
+    </div>}
   </div>;
 }
 
-function FloorSurface({ projectId, data, tasksByStatus, visible, action, openEvidence, query, setQuery }) {
+function FloorSurface({ projectId, data, tasksByStatus, visible, action, openEvidence, query, setQuery, onTurnComplete }) {
+  const [chatExpanded, setChatExpanded] = useState(false);
   const queueRunning = data.automation.queue.status === "running";
   const running = tasksByStatus.Running.filter(visible);
   const review = tasksByStatus.Review.filter(visible);
   const done = tasksByStatus.Done.filter(visible);
-  return <div className="execution-floor">
-    <div className="board-command-bar">
-      <div className="board-command-status">
-        <StatusPill tone={queueRunning ? "running" : "idle"} label={`Queue ${data.automation.queue.status}`} />
-        <span className="column-count">{running.length} active · {review.length} review</span>
-      </div>
-      <div className="board-command-actions">
-        <Button size="small" onClick={() => action(`/projects/${projectId}/run-next`)}>Run next</Button>
-        {queueRunning ? <Button size="small" onClick={() => action(`/projects/${projectId}/queue/stop`)}>Stop queue</Button> : <QueueStart projectId={projectId} queue={data.automation.queue} action={action} />}
-        {done.length > 0 && <Button size="small" onClick={() => action(`/projects/${projectId}/tasks/archive-done`)}>Archive all Done</Button>}
-      </div>
+  return <div className="board-layout execution-floor">
+    <div className="floor-planning-rail board-pane">
+      <Panel className="floor-planning-panel">
+        <div className="panel-header">
+          <h3>Planning</h3>
+          <Button size="small" variant="secondary" onClick={() => setChatExpanded((value) => !value)}>{chatExpanded ? "Collapse" : "Expand"}</Button>
+        </div>
+        {chatExpanded && <PanelBody><PlanningChat projectId={projectId} onTurnComplete={onTurnComplete} compact /></PanelBody>}
+      </Panel>
     </div>
-    <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter Floor tasks" /></div>
-    <LiveRunDock runs={liveRunsFromTasks(tasksByStatus.Running)} />
-    <section className="floor-section"><PanelHeader title="Active Worker Runs" count={running.length} /><div className="floor-active-grid">{running.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" />)}{running.length === 0 && <EmptyState>No Worker Runs are active.</EmptyState>}</div></section>
-    <section className="floor-section"><PanelHeader title="Review queue" count={review.length} /><div className="floor-review-grid">{review.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" />)}{review.length === 0 && <EmptyState>No completed runs await review.</EmptyState>}</div></section>
-    <section className="floor-section"><PanelHeader title="Recently finished" count={done.length} /><div className="floor-finished-trail">{done.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} recentlyFinished actionVariant="primary" />)}{done.length === 0 && <EmptyState>No unarchived finished runs.</EmptyState>}</div></section>
+    <div className="floor-main board-main">
+      <div className="board-command-bar">
+        <div className="board-command-status">
+          <StatusPill tone={queueRunning ? "running" : "idle"} label={`Queue ${data.automation.queue.status}`} />
+          <span className="column-count">{running.length} active · {review.length} review</span>
+        </div>
+        <div className="board-command-actions">
+          <Button size="small" onClick={() => action(`/projects/${projectId}/run-next`)}>Run next</Button>
+          {queueRunning ? <Button size="small" onClick={() => action(`/projects/${projectId}/queue/stop`)}>Stop queue</Button> : <QueueStart projectId={projectId} queue={data.automation.queue} action={action} />}
+          {done.length > 0 && <Button size="small" onClick={() => action(`/projects/${projectId}/tasks/archive-done`)}>Archive all Done</Button>}
+        </div>
+      </div>
+      <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter Floor tasks" /></div>
+      <LiveRunDock runs={liveRunsFromTasks(tasksByStatus.Running)} />
+      <section className="floor-section"><PanelHeader title="Active Worker Runs" count={running.length} /><div className="floor-active-grid">{running.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" />)}{running.length === 0 && <EmptyState>No Worker Runs are active.</EmptyState>}</div></section>
+      <section className="floor-section"><PanelHeader title="Review queue" count={review.length} /><div className="floor-review-grid">{review.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" />)}{review.length === 0 && <EmptyState>No completed runs await review.</EmptyState>}</div></section>
+      <section className="floor-section"><PanelHeader title="Recently finished" count={done.length} /><div className="floor-finished-trail">{done.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} recentlyFinished actionVariant="primary" />)}{done.length === 0 && <EmptyState>No unarchived finished runs.</EmptyState>}</div></section>
+    </div>
   </div>;
 }
 
@@ -574,14 +548,14 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
     <header className="task-heading">
       <span className="task-id">{task.id}</span>
       <h4 className="task-title" title={fullSummary}>{displayName}</h4>
-      {task.task_kind && task.task_kind !== "implementation" && <span className="pill scout" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
+      {task.task_kind === "acceptance_verification" && <span className="pill" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
       <StatusPill tone={taskStatusTone(task.status)} label={task.status || "Unknown status"} />
       {task.status === "Running" && <span className="live-pulse-dot" aria-label="Running live" title="Running live" />}
     </header>
     <BlockedCondition reason={task.blocked_condition?.reason} announce />
     {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
     {task.status === "Running" && <LatestEventLine timeline={task.timeline} />}
-    <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}</div>
+    <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}{task.intake_decision && <span title={task.intake_decision_reason || ""}>Intake: {task.intake_decision}</span>}</div>
     {controls.can_launch && <div className="card-controls">
       <label>Worker Adapter<select className="board-input" aria-describedby={selectedAdapter?.tracking?.label ? `adapter-tracking-${task.id}` : undefined} value={adapterId} onChange={(event) => {
         const nextId = event.target.value;

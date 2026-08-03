@@ -25,8 +25,8 @@ flowchart LR
         board --> estimation[Task Estimation]
         breakdown -->|accepted candidates| estimation
         estimation -->|confidence below 0.60| decisions[Needs You]
-        decisions -->|create linked investigation| scout[Scout Task]
-        scout --> launch
+        decisions -->|investigate in chat| planning[Planning Chat]
+        planning --> breakdown
         estimation --> routing[Deterministic Model Routing]
         routing --> launch[Launch Guardrails]
         budget[Token Budget] --> launch
@@ -75,7 +75,7 @@ Operator reviews, marks Done, or Blocks with a reason
 Acceptance Verification proves the combined result when a plan was split
 ```
 
-When automatic estimate confidence is below `0.60`, Needs You adds an advisory branch without changing the Task lifecycle or blocking launch by itself. The operator may acknowledge the estimate, replace it manually, or create one linked Scout for the current estimate revision. A completed Scout supplies bounded findings for a separately requested re-estimate; the canonical estimate changes only after an explicit Apply action succeeds.
+When automatic estimate confidence is below `0.60`, Needs You adds an advisory branch without changing the Task lifecycle or blocking launch by itself. The operator may acknowledge the estimate, replace it manually, or open the Planning Chat to investigate the task before re-estimating.
 
 ## Control Plane and execution backends
 
@@ -104,7 +104,7 @@ The board is not a backlog dump. Work enters through **Estimate task**:
 - Each proposed slice carries enough policy evidence to review it: objective, proof path, split/merge rationale, dependencies, likely entry points when known, and whether it is AFK-launchable or HITL.
 - Constraints, non-goals, and verification notes are preserved as task metadata or rejected as non-tasks; they should not become fake implementation tasks.
 
-Every Task has an explicit kind: `implementation`, `scout`, or `acceptance_verification`. The Task Breakdown Agent proposes a Scout only when a concrete unanswered repository question materially prevents an honest estimate or executable slice. The candidate must name the question, inspection boundary, expected findings, and proof path; generic research and ordinary implementation-time inspection stay out of separate Scout cards.
+Every Task has an explicit kind: `implementation` or `acceptance_verification`. The Planning Chat is the place to investigate a concrete unanswered repository question that materially prevents an honest estimate or executable slice; it does not produce a separate Task.
 
 For integrated work, the breakdown should include a final **Acceptance Verification** task. That task checks the combined result against the original source contract instead of rerunning the whole implementation as one large task.
 
@@ -137,7 +137,7 @@ The first verified local path is OpenCode through native usage import. Claude Co
 
 `proxy_governed` is a real architecture path for proxy-capable adapters, but it should not be presented as the default local proof unless a stock adapter is verified end-to-end through the proxy.
 
-Read-only capability is separate from tracking authority. A verified `native_usage` or `proxy_governed` adapter may launch compatible implementation Tasks without having an adapter-enforced read-only profile. Scout launch requires both. The current built-in Scout-compatible profile is Codex with its native `--sandbox read-only` enforcement; `observed_only` remains non-launchable regardless of read-only command support.
+Read-only capability is separate from tracking authority. A verified `native_usage` or `proxy_governed` adapter may launch compatible implementation Tasks without having an adapter-enforced read-only profile. `observed_only` remains non-launchable regardless of read-only command support.
 
 ## Launch guardrails
 
@@ -149,15 +149,14 @@ Before a task can move from **Estimated** to **Running**, the harness checks:
 - the selected model is allowed and compatible with the adapter;
 - any required session-key or proxy wiring exists;
 - budget override acknowledgement is recorded when the estimate exceeds remaining budget.
-- for a Scout, the selected adapter has a verified adapter-enforced read-only profile.
 
-Launch mode is determined by canonical Task kind: `implementation` launches write-capable, `acceptance_verification` and `scout` launch read-only. There is no third mode and no operator override.
+Launch mode is determined by canonical Task kind: `implementation` launches write-capable, `acceptance_verification` launches read-only. There is no third mode and no operator override.
 
 Write-capable sessions require a detected git repository, a clean working tree before launch, an operator-confirmed base branch, and an operator-confirmed test command when one is used. A dirty working tree is refused and the offending paths are named; the Harness does not stash or commit operator changes unasked. The harness creates the task branch from the confirmed base branch, lets the Worker edit there, and owns the final commit only after configured verification passes. When no test command is configured or verification fails, the Task stays in Review and the operator must explicitly Approve commit.
 
 Read-only inspection sessions may run against a dirty repo and do not create a branch or commit.
 
-Canonical Task kind forces every Scout into read-only launch mode server-side, regardless of client input or stale metadata. Scouts never receive a Task branch or Harness-owned commit. Before/after repository checks remain audit and defense evidence, but they do not replace pre-execution adapter enforcement; any detected Scout mutation records a hard safety Blocked Condition with preserved run evidence.
+Canonical Task kind forces `acceptance_verification` into read-only launch mode server-side, regardless of client input or stale metadata. Read-only Tasks never receive a Task branch or Harness-owned commit.
 
 Operational launch failures such as CLI timeout, nonzero exit, or missing usage evidence return the Task to **Estimated** with sanitized launch-error evidence so it can be retried. Hard safety or workflow failures preserve the canonical lifecycle state and record a Blocked Condition with evidence.
 
@@ -170,7 +169,7 @@ The harness tracks both:
 
 Both count against the daily budget, but they are labeled separately so operator overhead does not distort task execution actuals.
 
-Scout usage is Worker spend attached to the Scout Task, not hidden orchestration spend. It is excluded from implementation estimate-accuracy aggregates and coefficient fitting, and Scout calibration examples do not cross-calibrate implementation Tasks solely because their text overlaps.
+Investigation in Planning Chat is orchestration spend, not Worker spend. It does not affect implementation estimate-accuracy aggregates or coefficient fitting.
 
 Budget governance is soft by design. Over-budget launches require explicit operator override and audit evidence; non-budget Launch Guardrail failures such as unverified tracking, invalid project setup, disallowed models, or missing required wiring remain non-launchable. The harness records overruns, raises alarms, and preserves evidence. It does not silently kill a running native-usage Worker mid-task.
 
@@ -187,7 +186,6 @@ Each Worker Run preserves enough evidence to review and audit the run later:
 - stdout/stderr or native usage evidence, redacted where needed;
 - branch, diff summary, verification command, and commit metadata for write-capable work;
 - alarms, failures, review prompts, Agent Review output, and operator disposition.
-- for Scouts, the enforced read-only profile plus bounded findings, risks, recommendation, and unchanged-repository evidence.
 
 The Session Artifact is the replayable record. Checkpoints and reports should be derived from this evidence rather than from unverified prose.
 

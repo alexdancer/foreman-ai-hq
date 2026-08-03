@@ -493,7 +493,7 @@ function CandidateEditor({ candidate, update, updateField, loadField }) {
   return <article className="review-candidate">
     <label className="check-row"><input type="checkbox" checked={candidate.selected} onChange={(event) => update((current) => ({ ...current, selected: event.target.checked }))} /> Accept candidate {candidate.index + 1}</label>
     <div className="review-field-row">
-      <label>Candidate kind<select value={candidate.kind} onChange={(event) => update((current) => ({ ...current, kind: event.target.value, kindTouched: true }))}><option value="implementation">implementation</option><option value="scout">scout</option><option value="acceptance_verification">acceptance_verification</option></select></label>
+      <label>Candidate kind<select value={candidate.kind} onChange={(event) => update((current) => ({ ...current, kind: event.target.value, kindTouched: true }))}><option value="implementation">implementation</option><option value="acceptance_verification">acceptance_verification</option></select></label>
       <label>Execution mode<select value={candidate.executionMode} onChange={(event) => update((current) => ({ ...current, executionMode: event.target.value, executionModeTouched: true }))}><option value="AFK">AFK</option><option value="HITL">HITL</option></select></label>
     </div>
     {controls(primary)}

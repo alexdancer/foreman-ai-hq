@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unconfigured_orchestrator
 
 
 BLOCKED = [
-    ("post", "/estimate", {"json": {"description": "anything"}}),
+    ("post", "/api/projects/proj_x/planning/intake", {"data": {"message": "anything"}}),
     ("post", "/tasks/task_x/launch", {"json": {}}),
     ("post", "/api/projects/proj_x/planning/start", {"json": {}}),
     ("post", "/api/projects/proj_x/planning/message", {"json": {"message": "hi"}}),

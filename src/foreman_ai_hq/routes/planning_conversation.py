@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from foreman_ai_hq import db
+from foreman_ai_hq import db, intake
 from foreman_ai_hq.auth import require_portal_auth
 from foreman_ai_hq.orchestrator_gate import require_configured_orchestrator
 from foreman_ai_hq.pi_adapter import (
@@ -226,6 +226,47 @@ def poll_planning_events(
         "events": events,
         "next_since_id": next_since_id,
         "has_more": has_more,
+    }
+
+
+@router.post("/api/projects/{project_id}/planning/intake", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
+async def intake_planning_conversation(
+    project_id: str,
+    request: Request,
+    message: str = Form(""),
+    markdown_file: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    """Accept chat intake, run the orchestrator decision, and route to a Task or Breakdown Review."""
+    database_path = request.app.state.settings.database_path
+    registry: PlanningConversationRegistry = request.app.state.planning_registry
+    try:
+        live = registry.get(project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="planning conversation not started") from exc
+
+    try:
+        source_text, intake_metadata = await intake.normalize_chat_intake(
+            message or None, markdown_file
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    outcome = await intake.process_chat_intake(request, project_id, source_text, intake_metadata)
+    response_text = (
+        f"Intake decision: {outcome['decision']}. {outcome['reason']}"
+    )
+    db.record_planning_turn_event(
+        database_path,
+        session_id=live.planning_session_id,
+        operator_message=source_text[:500],
+        agent_response=response_text,
+        stop_reason="end_turn",
+    )
+    return {
+        "planning_session_id": live.planning_session_id,
+        "content": response_text,
+        "stop_reason": "end_turn",
+        "outcome": outcome,
     }
 
 

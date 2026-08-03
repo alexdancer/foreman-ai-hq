@@ -34,8 +34,7 @@ def test_settings_defaults_point_to_local_development_files(monkeypatch):
     assert settings.control_plane_api_key_env == "FOREMAN_AI_HQ_CONTROL_API_KEY"
     assert settings.control_plane_base_url == ""
     assert settings.provider_api_key_env == "PROVIDER_API_KEY"
-    assert settings.estimator_model is None
-    assert settings.task_breakdown_model is None
+    assert settings.legacy_orchestration_model_overrides == {}
     assert settings.task_breakdown_timeout_seconds == 120
     assert settings.portal_token_env == "TOKEN_TRACKER_PORTAL_TOKEN"
     assert settings.portal_cookie_secure is False
@@ -68,10 +67,7 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     assert settings.control_plane_api_key_env == "CUSTOM_CONTROL_KEY"
     assert settings.control_plane_base_url == "https://provider.example/v1"
     assert settings.provider_api_key_env == "ANTHROPIC_API_KEY"
-    # One Orchestrator Model drives every orchestration job; the per-job model
-    # env vars are gone, so both follow the orchestrator.
-    assert settings.estimator_model == "anthropic/claude-sonnet-4-20250514"
-    assert settings.task_breakdown_model == "anthropic/claude-sonnet-4-20250514"
+    assert settings.legacy_orchestration_model_overrides == {}
     assert settings.task_breakdown_timeout_seconds == 240
     assert settings.portal_token_env == "CUSTOM_PORTAL_TOKEN"
     assert settings.portal_cookie_secure is True
@@ -102,8 +98,7 @@ def test_settings_ignores_the_retired_model_env_aliases(monkeypatch):
     settings = Settings(operator_config={})
 
     assert settings.orchestrator_model is None
-    assert settings.estimator_model is None
-    assert settings.task_breakdown_model is None
+    assert settings.legacy_orchestration_model_overrides == {}
 
 
 def test_settings_prefers_config_orchestrator_model_over_control_plane_model(monkeypatch):
@@ -160,6 +155,26 @@ def test_settings_reads_operator_config_when_env_missing(monkeypatch):
     assert settings.control_plane_model == "gpt-5.4-mini"
     assert settings.task_breakdown_timeout_seconds == 180
     assert settings.local_runner_enabled is True
+
+
+def test_settings_preserves_divergent_legacy_models_as_migration_evidence(monkeypatch):
+    monkeypatch.delenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", raising=False)
+
+    from foreman_ai_hq.settings import Settings
+
+    settings = Settings(
+        operator_config={
+            "orchestrator_model": "anthropic/claude-opus-5",
+            "estimator_model": "openai/gpt-4.1-estimator",
+            "task_breakdown_model": "openai/gpt-4.1-breakdown",
+        }
+    )
+
+    assert settings.orchestrator_model == "anthropic/claude-opus-5"
+    assert settings.legacy_orchestration_model_overrides == {
+        "estimator_model": "openai/gpt-4.1-estimator",
+        "task_breakdown_model": "openai/gpt-4.1-breakdown",
+    }
 
 
 def test_settings_environment_overrides_operator_config(monkeypatch):

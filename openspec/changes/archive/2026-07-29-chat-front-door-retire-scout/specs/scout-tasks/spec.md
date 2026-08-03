@@ -24,34 +24,6 @@
 **Reason**: The isolation rule existed because Scout actuals were Worker spend that would otherwise contaminate implementation coefficient fitting. Investigation spend is now orchestration spend and is already excluded from Task actuals and coefficient fitting by that classification.
 **Migration**: No Task actuals are produced by investigation, so no kind-based exclusion is required. Coefficient fitting continues to use Done implementation Tasks with trustworthy actuals.
 
-## MODIFIED Requirements
-
 ### Requirement: Low estimator confidence creates advisory Needs You work
-An automatically estimated Task with confidence below `0.60` SHALL produce a project-scoped Needs You item without changing the Task lifecycle state or blocking launch solely because of confidence. The item SHALL offer backend-authoritative actions to acknowledge the current estimate, enter a manual estimate, or open the Planning Chat with the investigation question loaded. The system SHALL NOT create an investigation Task, and SHALL NOT spend tokens re-estimating automatically.
-
-#### Scenario: Confidence below threshold
-- **WHEN** a Task receives an automatic estimate with confidence less than `0.60`
-- **THEN** the Task remains in its existing Estimated lifecycle state
-- **AND** Needs You shows the confidence and actions to acknowledge, estimate manually, or investigate in the Planning Chat
-- **AND** launch remains available when all ordinary Launch Guardrails pass
-
-#### Scenario: Confidence equals threshold
-- **WHEN** an automatic estimate has confidence equal to `0.60`
-- **THEN** low-confidence Needs You work is not created
-
-#### Scenario: Operator accepts current estimate
-- **WHEN** the operator acknowledges the low-confidence estimate
-- **THEN** the backend records the decision durably
-- **AND** the low-confidence Needs You item is removed
-- **AND** the estimate value remains unchanged
-
-#### Scenario: Operator enters manual estimate
-- **WHEN** the operator replaces the low-confidence estimate manually
-- **THEN** the Task stores the manual estimate and manual provenance
-- **AND** the low-confidence Needs You item is resolved
-
-#### Scenario: Operator investigates in the Planning Chat
-- **WHEN** the operator chooses to investigate a low-confidence estimate
-- **THEN** the system SHALL open the Planning Chat for that project with the investigation question loaded and the Task identified
-- **AND** it SHALL NOT create a separate investigation Task
-- **AND** the resulting conversation spend SHALL be recorded as `planning` orchestration spend
+**Reason**: The requirement survives the Scout's retirement but cannot live in a capability that is being removed. Its home is the Needs You queue, which already owns the low-confidence projection and its mutation contracts.
+**Migration**: Moved verbatim to `needs-you-queue`, with the linked-Scout action replaced by opening the Planning Chat with the investigation question loaded. The `0.60` threshold and its boundary behaviour are unchanged.

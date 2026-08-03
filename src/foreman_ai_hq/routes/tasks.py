@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from pydantic import ValidationError
@@ -53,11 +53,6 @@ from foreman_ai_hq.task_breakdown import (
 from foreman_ai_hq.estimate_decision import (
     acknowledge_low_confidence,
     apply_manual_estimate,
-    apply_reestimate,
-    create_scout_for_task,
-    dismiss_reestimate,
-    request_scout_reestimate,
-    retry_reestimate,
 )
 from foreman_ai_hq.worker_model_allowlist import allowed_worker_model_ids
 
@@ -65,16 +60,6 @@ router = APIRouter()
 CANONICAL_TASK_STATUSES = {"Estimated", "Running", "Review", "Done"}
 PositiveStrictInt = Annotated[int, Field(strict=True, gt=0)]
 NonNegativeStrictInt = Annotated[int, Field(strict=True, ge=0)]
-
-
-class TaskCreateRequest(BaseModel):
-    description: str = Field(min_length=1)
-    status: str | None = None
-    estimate_tokens: PositiveStrictInt | None = None
-    recommended_model: str | None = None
-    actual_tokens: NonNegativeStrictInt | None = None
-    session_id: str | None = None
-    metadata: dict[str, Any] | None = None
 
 
 class TaskUpdateRequest(BaseModel):
@@ -85,14 +70,6 @@ class TaskUpdateRequest(BaseModel):
     actual_tokens: NonNegativeStrictInt | None = None
     session_id: str | None = None
     metadata: dict[str, Any] | None = None
-
-
-class EstimateRequest(BaseModel):
-    description: str = Field(min_length=1)
-    adapter_id: str | None = None
-    remaining_daily_tokens: NonNegativeStrictInt | None = None
-    daily_cap_tokens: PositiveStrictInt | None = None
-    task_kind: str | None = None
 
 
 class TaskLaunchRequest(BaseModel):
@@ -119,26 +96,6 @@ class ManualEstimateRequest(BaseModel):
 
 class RetryReestimateRequest(BaseModel):
     acknowledge_possible_duplicate_spend: bool = False
-
-
-@router.post("/tasks")
-def create_task(payload: TaskCreateRequest, request: Request) -> dict[str, Any]:
-    database_path = request.app.state.settings.database_path
-    try:
-        status, metadata = _initial_task_status_and_metadata(payload, database_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    metadata = _with_single_project_default(database_path, metadata)
-    return db.create_task(
-        database_path,
-        description=payload.description,
-        status=status,
-        estimate_tokens=payload.estimate_tokens,
-        recommended_model=payload.recommended_model,
-        actual_tokens=payload.actual_tokens,
-        session_id=payload.session_id,
-        metadata=metadata,
-    )
 
 
 @router.put("/tasks/{task_id}")
@@ -364,76 +321,6 @@ async def manual_estimate_decision(project_id: str, task_id: str, request: Reque
     return result
 
 
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout", dependencies=[Depends(require_portal_auth)])
-async def create_scout_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = await create_scout_for_task(request, database_path, project_id, task_id, _estimate_revision_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate", dependencies=[Depends(require_portal_auth)])
-async def request_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = await request_scout_reestimate(request, database_path, project_id, task_id, _estimate_revision_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate/retry", dependencies=[Depends(require_portal_auth)])
-async def retry_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        body = await request.json()
-        ack = bool(body.get("acknowledge_possible_duplicate_spend"))
-    except Exception:
-        try:
-            form = await request.form()
-            ack = str(form.get("acknowledge_possible_duplicate_spend", "")).lower() in {"1", "true", "on"}
-        except Exception:
-            return JSONResponse(status_code=422, content={"detail": "invalid request body"})
-    try:
-        result = await retry_reestimate(request, database_path, project_id, task_id, _estimate_revision_query(request), _attempt_id_query(request), ack)
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate/apply", dependencies=[Depends(require_portal_auth)])
-async def apply_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = apply_reestimate(database_path, project_id, task_id, _estimate_revision_query(request), _attempt_id_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate/dismiss", dependencies=[Depends(require_portal_auth)])
-async def dismiss_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = dismiss_reestimate(database_path, project_id, task_id, _estimate_revision_query(request), _attempt_id_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/estimate", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
-async def estimate(payload: EstimateRequest, request: Request) -> dict[str, Any]:
-    return await _estimate_and_create_task(
-        request,
-        payload.description,
-        adapter_id=payload.adapter_id,
-        remaining_daily_tokens=payload.remaining_daily_tokens,
-        daily_cap_tokens=payload.daily_cap_tokens,
-    )
-
-
 async def _estimate_and_create_task(
     request: Request,
     description: str,
@@ -452,7 +339,7 @@ async def _estimate_and_create_task(
         except KeyError:
             pass
     settings = request.app.state.settings
-    estimator_model = settings.estimator_model
+    estimator_model = settings.orchestrator_model
     adapter = _selected_worker_adapter(database_path, adapter_id)
     if task_kind is None:
         task_kind = read_task_kind(extra_metadata) if extra_metadata else DEFAULT_TASK_KIND
@@ -545,107 +432,6 @@ def _selected_worker_adapter(database_path: Path | str, adapter_id: str | None) 
     return next((item for item in adapters if item.get("is_default")), adapters[0] if adapters else None)
 
 
-@router.post("/tasks/estimate-form", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
-async def estimate_form(
-    request: Request,
-    description: str = Form(""),
-    task_kind: str = Form(DEFAULT_TASK_KIND),
-    markdown_file: UploadFile | None = File(None),
-):
-    """HTML or negotiated JSON intake: plain text estimates; Markdown is review-first."""
-    return await _estimate_form_for_project(request, description=description, task_kind=task_kind, markdown_file=markdown_file)
-
-
-@router.post("/projects/{project_id}/tasks/estimate-form", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
-async def project_estimate_form(
-    project_id: str,
-    request: Request,
-    description: str = Form(""),
-    task_kind: str = Form(DEFAULT_TASK_KIND),
-    markdown_file: UploadFile | None = File(None),
-):
-    return await _estimate_form_for_project(
-        request,
-        description=description,
-        task_kind=task_kind,
-        markdown_file=markdown_file,
-        project_id=project_id,
-    )
-
-
-async def _estimate_form_for_project(
-    request: Request,
-    *,
-    description: str,
-    task_kind: str,
-    markdown_file: UploadFile | None,
-    project_id: str | None = None,
-):
-    wants_json = _wants_react_json(request)
-    project_metadata: dict[str, Any] = {}
-    board_path = "/board"
-    if project_id:
-        board_path = f"/projects/{project_id}"
-        try:
-            project = db.get_connected_project(request.app.state.settings.database_path, project_id)
-        except KeyError as exc:
-            if wants_json:
-                return _react_action_outcome(
-                    ok=False,
-                    error="connected project not found",
-                    status_code=404,
-                )
-            raise HTTPException(status_code=404, detail="connected project not found") from exc
-        if db.project_is_archived(project):
-            error = "restore archived project before adding tasks"
-            if wants_json:
-                return _react_action_outcome(ok=False, error=error, status_code=409)
-            return RedirectResponse(
-                f"{board_path}?error={quote(error)}",
-                status_code=303,
-            )
-        project_metadata = project_task_metadata(project)
-    try:
-        task_kind = validate_task_kind(task_kind)
-        if task_kind not in {"implementation", "acceptance_verification"}:
-            raise ValueError("short intake task_kind must be implementation or acceptance_verification")
-    except ValueError as exc:
-        error = str(exc)
-        if wants_json:
-            return _react_action_outcome(ok=False, error=error, status_code=422)
-        return RedirectResponse(f"{board_path}?error={quote(error)}", status_code=303)
-
-    try:
-        normalized_description, intake_metadata = await _description_from_intake_form(description, markdown_file)
-    except ValueError as exc:
-        if wants_json:
-            return _react_action_outcome(ok=False, error=str(exc), status_code=422)
-        return RedirectResponse(f"{board_path}?error={quote(str(exc))}", status_code=303)
-
-    intake_metadata = _with_single_project_default(
-        request.app.state.settings.database_path,
-        {"task_kind": task_kind, **intake_metadata, **project_metadata},
-    )
-
-    if _requires_task_breakdown_review(normalized_description, intake_metadata):
-        # Large or Markdown-shaped intake is reviewed before it becomes board cards.
-        breakdown = await _create_task_breakdown_review(request, normalized_description, intake_metadata)
-        review_href = f"/task-breakdowns/{breakdown['id']}/review"
-        if wants_json:
-            return _react_action_outcome(ok=True, next_href=review_href)
-        return RedirectResponse(review_href, status_code=303)
-
-    task = await _estimate_and_create_task(
-        request,
-        normalized_description,
-        task_kind=task_kind,
-        extra_metadata=intake_metadata,
-    )
-    if wants_json:
-        return _react_action_outcome(ok=True, task=task)
-    return RedirectResponse(board_path, status_code=303)
-
-
 @router.get("/task-breakdowns/{breakdown_id}/review", response_class=HTMLResponse, dependencies=[Depends(require_portal_auth)])
 def task_breakdown_review(breakdown_id: str, request: Request):
     from foreman_ai_hq.routes.react_shell import react_shell_or_missing_build
@@ -684,6 +470,17 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
             )
         return RedirectResponse(f"/task-breakdowns/{breakdown_id}/review", status_code=303)
 
+    if not _breakdown_has_intake_provenance(breakdown):
+        message = "Task Breakdown has no Planning Chat intake provenance. Start a new intake in Planning Chat."
+        if wants_json:
+            return _breakdown_action_outcome(
+                breakdown,
+                status_code=409,
+                error=message,
+                retry_href=f"/task-breakdowns/{breakdown_id}/review",
+            )
+        raise HTTPException(status_code=409, detail=message)
+
     try:
         form = await request.form()
         candidates = breakdown.get("candidates")
@@ -702,7 +499,6 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
         accepted_candidates = _accepted_breakdown_candidates(
             breakdown, form, presence_aware=True
         )
-        _validate_scout_target_tasks(database_path, breakdown, accepted_candidates)
         claimed_breakdown = db.update_task_breakdown(
             database_path,
             breakdown_id,
@@ -772,21 +568,6 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
                     "task_breakdown_global_constraints": global_constraints,
                     "task_breakdown_verification": verification,
                     "task_breakdown_recommended_last": candidate["kind"] == "acceptance_verification",
-                    **(
-                        {
-                            "scout_question": candidate["objective"],
-                            "scout_inspection_boundary": candidate["constraints"],
-                            "scout_expected_findings": candidate["acceptance_criteria"],
-                            "scout_proof": candidate["proof"],
-                            **(
-                                {"target_task_id": candidate["target_task_id"]}
-                                if candidate.get("target_task_id")
-                                else {}
-                            ),
-                        }
-                        if candidate["kind"] == "scout"
-                        else {}
-                    ),
                 },
             )
             created_task_ids.append(task["id"])
@@ -1037,12 +818,6 @@ async def manual_task_breakdown_candidate(
     return RedirectResponse(f"/task-breakdowns/{breakdown_id}/review", status_code=303)
 
 
-def _requires_task_breakdown_review(description: str, intake_metadata: dict[str, Any]) -> bool:
-    if intake_metadata.get("intake_source") in {"markdown_paste", "markdown_upload"}:
-        return True
-    return len(description.split()) >= 120
-
-
 async def _create_task_breakdown_review(
     request: Request, description: str, intake_metadata: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1072,7 +847,7 @@ async def _task_breakdown_agent_updates(
 ) -> dict[str, Any]:
     database_path = request.app.state.settings.database_path
     settings = request.app.state.settings
-    model = settings.task_breakdown_model
+    model = settings.orchestrator_model
     repo_context, repo_context_evidence = _build_breakdown_repo_context(intake_metadata)
     try:
         result, job_result = await breakdown_task_source(
@@ -1222,6 +997,18 @@ def _breakdown_action_outcome(
     )
 
 
+def _breakdown_has_intake_provenance(breakdown: dict[str, Any]) -> bool:
+    metadata = breakdown.get("intake_metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        bool(metadata.get("intake_source"))
+        and metadata.get("intake_decision") in {"single_task", "needs_breakdown"}
+        and isinstance(metadata.get("intake_decision_reason"), str)
+        and bool(metadata["intake_decision_reason"].strip())
+    )
+
+
 def _validate_breakdown_accept_form(form: Any, *, candidate_count: int) -> None:
     global_fields = {
         "global_contract_summary",
@@ -1322,7 +1109,7 @@ def _accepted_breakdown_candidates(
             fallback="Merging this with adjacent work would broaden the Worker prompt and weaken reviewability.",
             presence_aware=presence_aware,
         )
-        if kind not in {"implementation", "scout", "acceptance_verification"}:
+        if kind not in {"implementation", "acceptance_verification"}:
             raise HTTPException(status_code=422, detail="Task breakdown acceptance is invalid.")
         if execution_mode not in {"AFK", "HITL"}:
             raise HTTPException(status_code=422, detail="Task breakdown acceptance is invalid.")
@@ -1345,7 +1132,6 @@ def _accepted_breakdown_candidates(
                 "why_not_larger": why_not_larger,
                 "dependencies": _candidate_form_lines(form, original, "dependencies", index, presence_aware=presence_aware),
                 "likely_entry_points": _candidate_form_lines(form, original, "likely_entry_points", index, presence_aware=presence_aware),
-                "target_task_id": original.get("target_task_id"),
                 "execution_mode": execution_mode,
                 "hitl_reason": hitl_reason,
                 "human_in_loop": execution_mode == "HITL",
@@ -1380,27 +1166,6 @@ def _accepted_breakdown_candidates(
         {**candidate.as_dict(), "_source_index": source_index}
         for source_index, candidate in zip(source_indexes, result.candidates, strict=True)
     ]
-
-
-def _validate_scout_target_tasks(
-    database_path: Path | str,
-    breakdown: dict[str, Any],
-    candidates: list[dict[str, Any]],
-) -> None:
-    intake_metadata = breakdown.get("intake_metadata") or {}
-    project_id = intake_metadata.get("connected_project_id")
-    for candidate in candidates:
-        target_task_id = candidate.get("target_task_id")
-        if not target_task_id:
-            continue
-        if candidate.get("kind") != "scout" or not project_id:
-            raise HTTPException(status_code=422, detail="Scout target Task is invalid.")
-        try:
-            target = db.get_task(database_path, str(target_task_id))
-        except KeyError as exc:
-            raise HTTPException(status_code=422, detail="Scout target Task is invalid.") from exc
-        if not task_matches_project(target, str(project_id)):
-            raise HTTPException(status_code=422, detail="Scout target Task is invalid.")
 
 
 def _task_breakdown_candidate_task_id(breakdown_id: str, source_index: int) -> str:
@@ -1501,14 +1266,6 @@ def _breakdown_candidate_description(
         )
         if source_text.strip():
             sections.extend(["", "Original source contract:", source_text.strip()])
-    elif candidate.get("kind") == "scout":
-        sections.extend(
-            [
-                "",
-                "Scout scope:",
-                "This is a read-only investigation. Ask the bounded question, inspect only the declared boundary, collect the expected findings, and report. Do not edit files, run destructive commands, migrations, or commits.",
-            ]
-        )
     else:
         sections.extend(
             [
@@ -1541,47 +1298,6 @@ def _breakdown_candidate_description(
 
 def _textarea_lines(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
-
-
-async def _description_from_intake_form(
-    description: str, markdown_file: UploadFile | None
-) -> tuple[str, dict[str, Any]]:
-    if markdown_file and markdown_file.filename:
-        filename = Path(markdown_file.filename).name
-        if Path(filename).suffix.lower() != ".md":
-            raise ValueError("Upload a Markdown .md file or paste Markdown text.")
-        raw = await markdown_file.read()
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("Markdown upload must be UTF-8 text.") from exc
-        normalized = text.strip()
-        if not normalized:
-            raise ValueError("Markdown upload is empty.")
-        return normalized, {"intake_source": "markdown_upload", "intake_filename": filename}
-
-    normalized = description.strip()
-    if not normalized:
-        raise ValueError("Describe a coding task or upload a Markdown .md file.")
-    metadata = {"intake_source": "markdown_paste"} if _looks_like_markdown(normalized) else {"intake_source": "plain_text"}
-    return normalized, metadata
-
-
-def _looks_like_markdown(text: str) -> bool:
-    markdown_patterns = (
-        r"(?m)^\s{0,3}#{1,6}\s+",
-        r"(?m)^\s{0,3}(?:[-+*]\s+|\d+[.)]\s+|>\s*)",
-        r"(?m)^\s{0,3}(?:```|~~~)",
-        r"(?m)^\s{0,3}(?:[-*_]\s*){3,}$",
-        r"!?\[[^\]]+\]\([^\)]+\)",
-        r"(?:\*\*|__)[^\n]+?(?:\*\*|__)",
-        r"(?<!\*)\*[^*\n]+\*(?!\*)|(?<![\w_])_[^\n]+?_(?![\w_])",
-        r"`+[^`\n]+`+",
-        r"~~[^\n]+?~~",
-        r"<(?:https?://|mailto:)[^>\n]+>",
-        r"(?m)^\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}",
-    )
-    return any(re.search(pattern, text) for pattern in markdown_patterns)
 
 
 def _markdown_task_items(description: str) -> list[str]:
@@ -2226,50 +1942,6 @@ def _task_kind_metadata(metadata: dict[str, Any] | None, default: str = DEFAULT_
     elif default:
         metadata["task_kind"] = default
     return metadata
-
-
-def _initial_task_status_and_metadata(
-    payload: TaskCreateRequest, database_path: Path | str
-) -> tuple[str, dict[str, Any]]:
-    metadata = _task_kind_metadata(payload.metadata, default=DEFAULT_TASK_KIND)
-    has_estimate = payload.estimate_tokens is not None and bool(payload.recommended_model)
-    if payload.status is not None:
-        # Direct task writes cannot bypass the estimate/launch/review lifecycle routes.
-        normalized_status = "Estimated" if payload.status == "Ready" else payload.status
-        if normalized_status in CANONICAL_TASK_STATUSES:
-            lifecycle_status = _constrain_direct_lifecycle_status(
-                database_path,
-                requested_status=normalized_status,
-                session_id=payload.session_id,
-                metadata=metadata,
-            )
-            if lifecycle_status is not None:
-                return lifecycle_status, metadata
-            if not has_estimate:
-                metadata.setdefault("blocked_reason", "Estimate task before launch.")
-                metadata.setdefault("requires_manual_estimate", True)
-                metadata.setdefault("requested_status", payload.status)
-                metadata.setdefault(
-                    "blocked_condition",
-                    _blocked_condition("Estimate task before launch.", "task_create"),
-                )
-                return "Estimated", metadata
-            return normalized_status, metadata
-        metadata.setdefault("blocked_reason", f"Unsupported task status: {payload.status}")
-        metadata.setdefault("original_status", payload.status)
-        metadata.setdefault(
-            "blocked_condition",
-            _blocked_condition(f"Unsupported task status: {payload.status}", "task_create"),
-        )
-        return "Estimated", metadata
-    if has_estimate:
-        return "Estimated", metadata
-    metadata.setdefault("blocked_reason", "Estimate task before launch.")
-    metadata.setdefault("requires_manual_estimate", True)
-    metadata.setdefault(
-        "blocked_condition", _blocked_condition("Estimate task before launch.", "task_create")
-    )
-    return "Estimated", metadata
 
 
 def _canonicalize_task_updates(

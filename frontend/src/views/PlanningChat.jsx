@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-import { getJSON, postJSON } from "../api.js";
+import { getJSON, postForm, postJSON } from "../api.js";
 import {
   Button,
   EmptyState,
@@ -20,10 +20,13 @@ export function PlanningChatState({
   started,
   transcript,
   message,
+  attachment,
   sending,
   onMessageChange,
+  onFileChange,
   onSend,
   onCancel,
+  compact,
 }) {
   const safeError = (err) => {
     if (!err) return null;
@@ -40,16 +43,18 @@ export function PlanningChatState({
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    if (!message.trim() || sending || !started) return;
-    onSend(message.trim());
+    if ((!message.trim() && !attachment) || sending || !started) return;
+    onSend(message.trim(), attachment);
   };
 
   const noticeVariant = error?.status === 503 ? "warning" : "danger";
 
   return (
     <>
-      <h1 className="page-title">{projectId} · Plan</h1>
-      <p className="page-sub">Governed planning conversation · one turn at a time.</p>
+      {!compact && <>
+        <h1 className="page-title">{projectId} · Plan</h1>
+        <p className="page-sub">Governed planning conversation · one turn at a time.</p>
+      </>}
       <Panel>
         <PanelHeader title="Planning Chat" count={transcript.length || null} />
         <PanelBody className="planning-chat-feed">
@@ -97,7 +102,17 @@ export function PlanningChatState({
                 disabled={!started || sending}
               />
             </label>
-            <Button type="submit" disabled={!started || sending || !message.trim()}>
+            <label>
+              <span>Markdown file <em>(optional)</em></span>
+              <input
+                className="board-file"
+                type="file"
+                accept=".md,text/markdown,text/plain"
+                disabled={!started || sending}
+                onChange={(event) => onFileChange(event.target.files?.[0] || null)}
+              />
+            </label>
+            <Button type="submit" disabled={!started || sending || (!message.trim() && !attachment)}>
               {sending ? "Sending…" : "Send"}
             </Button>
             {sending && (
@@ -112,13 +127,14 @@ export function PlanningChatState({
   );
 }
 
-export default function PlanningChat({ projectId }) {
+export default function PlanningChat({ projectId, onTurnComplete, compact }) {
   const [state, setState] = useState({
     loading: true,
     error: null,
     started: false,
     transcript: [],
     message: "",
+    attachment: null,
     sending: false,
   });
 
@@ -134,7 +150,7 @@ export default function PlanningChat({ projectId }) {
 
   useEffect(() => {
     let active = true;
-    setState((s) => ({ ...s, loading: true, error: null, started: false, transcript: [] }));
+    setState((s) => ({ ...s, loading: true, error: null, started: false, transcript: [], message: "", attachment: null }));
 
     async function start() {
       try {
@@ -151,6 +167,7 @@ export default function PlanningChat({ projectId }) {
             content: event.detail?.text || "",
             stopReason: event.detail?.stop_reason || null,
             createdAt: event.created_at,
+            outcome: event.detail?.outcome || null,
           })),
         }));
       } catch (error) {
@@ -166,27 +183,36 @@ export default function PlanningChat({ projectId }) {
   }, [projectId, base]);
 
   const handleMessageChange = (value) => setState((s) => ({ ...s, message: value }));
+  const handleFileChange = (file) => setState((s) => ({ ...s, attachment: file }));
 
-  const handleSend = async (text) => {
-    setState((s) => ({ ...s, message: text, sending: true, error: null }));
+  const handleSend = async (text, file) => {
+    setState((s) => ({ ...s, message: text, attachment: file, sending: true, error: null }));
     try {
-      const turn = await postJSON(`${base}/message`, { message: text });
+      const body = new FormData();
+      body.append("message", text || "");
+      if (file) {
+        body.append("markdown_file", file, file.name);
+      }
+      const turn = await postForm(`${base}/intake`, body);
       if (!mounted.current) return;
       setState((s) => ({
         ...s,
         message: "",
+        attachment: null,
         sending: false,
         transcript: [
           ...s.transcript,
           {
             id: `turn-${Date.now()}`,
-            operator: text,
+            operator: text || (file ? `Attached ${file.name}` : ""),
             content: turn.content,
             stopReason: turn.stop_reason || null,
             createdAt: new Date().toISOString(),
+            outcome: turn.outcome || null,
           },
         ],
       }));
+      onTurnComplete?.(turn);
     } catch (error) {
       if (!mounted.current) return;
       setState((s) => ({ ...s, sending: false, error }));
@@ -209,10 +235,13 @@ export default function PlanningChat({ projectId }) {
       started={state.started}
       transcript={state.transcript}
       message={state.message}
+      attachment={state.attachment}
       sending={state.sending}
       onMessageChange={handleMessageChange}
+      onFileChange={handleFileChange}
       onSend={handleSend}
       onCancel={handleCancel}
+      compact={compact}
     />
   );
 }

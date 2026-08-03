@@ -54,14 +54,14 @@ def test_save_persists_model_and_drives_every_orchestration_job(tmp_path, monkey
         assert response.status_code == 200, response.text
         settings = client.app.state.settings
 
-    # One model, every job: there is no per-job opt-in checkbox any more.
+    # One model drives every job; saving removes obsolete selectors instead of
+    # rewriting them as a second source of truth.
     assert settings.orchestrator_model == OTHER_MODEL
-    assert settings.estimator_model == OTHER_MODEL
-    assert settings.task_breakdown_model == OTHER_MODEL
+    assert settings.legacy_orchestration_model_overrides == {}
     config = load_operator_config(tmp_path / ".foreman" / "config.toml")
     assert config["orchestrator_model"] == OTHER_MODEL
-    assert config["estimator_model"] == OTHER_MODEL
-    assert config["task_breakdown_model"] == OTHER_MODEL
+    assert "estimator_model" not in config
+    assert "task_breakdown_model" not in config
 
 
 def test_save_revalidates_against_a_fresh_inventory(tmp_path, monkeypatch):
@@ -205,8 +205,12 @@ def test_handoff_flags_per_job_models_that_diverge(tmp_path, monkeypatch):
     monkeypatch.setenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL", TEST_ORCHESTRATOR_MODEL)
 
     with _client(tmp_path) as client:
-        # Only a hand-edited config can diverge; save always writes them together.
-        object.__setattr__(client.app.state.settings, "estimator_model", OTHER_MODEL)
+        # Hand-edited legacy values remain visible as migration evidence only.
+        object.__setattr__(
+            client.app.state.settings,
+            "legacy_orchestration_model_overrides",
+            {"estimator_model": OTHER_MODEL},
+        )
         response = client.get("/api/settings/control-plane", headers=_portal_headers())
 
     assert response.json()["diverging_jobs"] == {"estimator_model": OTHER_MODEL}

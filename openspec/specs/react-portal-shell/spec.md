@@ -878,75 +878,97 @@ React SHALL render Budget Settings inside the shared Portal chrome on the canoni
 - **AND** it SHALL surface the outcome inline and refetch authoritative counter state
 
 ### Requirement: React Control Plane Settings JSON is authenticated, exact, and bounded
-FastAPI SHALL expose a new authenticated JSON handoff for Control Plane Settings that requires Portal authentication and reuses the existing settings and connection-status computation. The response SHALL be placeholder-only and preserve every field the operator needs to configure the connection and read its test status without recomputing control-plane rules in the frontend.
+FastAPI SHALL expose an authenticated JSON handoff for Orchestrator Model Settings that requires Portal authentication and reads persisted pi inventory and verification evidence without invoking pi during page rendering. The response SHALL contain exactly the configured model, configured state, inventory evidence, verification evidence, divergent legacy job settings, environment-shadowed settings, and sanitized status. It SHALL NOT expose provider, base URL, API-key fields or presence, curated models, or retired connection-test state.
 
 #### Scenario: Control-plane handoff requires authentication
 - **WHEN** an unauthenticated caller requests the authenticated React Control Plane Settings JSON handoff while portal auth is required
 - **THEN** FastAPI SHALL reject the request using the Portal authentication boundary
-- **AND** SHALL NOT return control-plane settings data
+- **AND** SHALL NOT return Orchestrator Model settings data
 
-#### Scenario: Control-plane JSON is placeholder-only and exact
+#### Scenario: Orchestrator settings JSON is exact and credential-free
 - **WHEN** an authenticated caller requests the React Control Plane Settings JSON handoff
-- **THEN** the response SHALL include provider, model, base URL, api-key env name, `api_key_present` boolean, estimator model, task-breakdown model, legacy-env presence, environment-shadowed settings, the curated model list from the authoritative source, and a sanitized connection status carrying its `online`/`needs_test`/`offline` state
-- **AND** it SHALL NOT include the control-plane API key value in any field
+- **THEN** the response SHALL contain exactly `model`, `configured`, `inventory`, `verification`, `diverging_jobs`, `shadowed_settings`, and `connection_status`
+- **AND** inventory SHALL expose persisted models, discovery time and state, authentication-needed state, and sanitized reasons
+- **AND** verification SHALL expose passed, verified-at, model, stale, and sanitized reasons
+- **AND** the response SHALL NOT include provider, base URL, API-key value or presence, curated models, estimator or task-breakdown model fields, or retired connection-test state
 - **AND** absent optional values SHALL be typed `null` rather than fabricated defaults
 
+#### Scenario: Rendering reads persisted evidence only
+- **WHEN** React loads the Orchestrator Model settings handoff
+- **THEN** FastAPI SHALL read persisted inventory and verification evidence
+- **AND** it SHALL NOT invoke pi as a side effect of rendering the page
+
 ### Requirement: React negotiates the control-plane save and test outcomes
-The existing `POST /settings/control-plane` and `POST /settings/control-plane/test` actions SHALL return a bounded, sanitized JSON outcome to React/JSON callers while preserving the current redirects for HTML callers. Config persistence, secret storage, live apply, stale-test marking, and the connection test SHALL remain authoritative for both caller types.
+The existing `POST /settings/control-plane` save action and the new `POST /settings/control-plane/discover` and `POST /settings/control-plane/verify` actions SHALL return bounded, sanitized JSON outcomes to React/JSON callers while preserving redirects for HTML callers. Fresh inventory validation, model persistence, discovery evidence, stale-verification marking, and real metered-turn verification SHALL remain backend-authoritative for both caller types. The retired `POST /settings/control-plane/test` action SHALL NOT exist.
 
 #### Scenario: React caller receives a JSON save outcome
-- **WHEN** a React/JSON caller submits valid control-plane settings
-- **THEN** FastAPI SHALL persist and apply them using the existing authoritative behavior and mark prior test evidence as needing a new test
+- **WHEN** a React/JSON caller submits an exact provider-qualified model present in a freshly discovered pi inventory
+- **THEN** FastAPI SHALL persist it as the Orchestrator Model for every orchestration job and mark prior verification evidence stale
 - **AND** SHALL return a bounded JSON outcome sufficient for React to refresh authoritative state
-- **AND** the outcome SHALL NOT contain the control-plane API key value
+- **AND** the outcome SHALL NOT contain provider credentials or API-key presence
 
-#### Scenario: React save error is sanitized
-- **WHEN** a React/JSON caller's save fails while writing config or secret storage
-- **THEN** FastAPI SHALL return a sanitized error outcome envelope
-- **AND** raw filesystem paths or exception detail SHALL NOT reach the operator
+#### Scenario: React save rejects a stale inventory choice
+- **WHEN** a React/JSON caller submits a model absent from the fresh pi inventory used during save
+- **THEN** FastAPI SHALL reject the save with a sanitized error
+- **AND** SHALL NOT persist or apply that model
 
-#### Scenario: React caller receives a JSON test outcome
-- **WHEN** a React/JSON caller runs the control-plane connection test
-- **THEN** FastAPI SHALL execute the existing test against the last-saved-and-applied config and record sanitized success or failure evidence
-- **AND** SHALL return a bounded JSON outcome carrying the resulting `online` or `offline` status
+#### Scenario: React caller receives a JSON discovery outcome
+- **WHEN** a React/JSON caller requests Orchestrator Model discovery
+- **THEN** FastAPI SHALL invoke pi explicitly, persist sanitized inventory evidence, and return models, state, reasons, discovery time, and whether provider authentication is needed
+- **AND** an empty auth-filtered inventory SHALL direct the operator to `pi /login`
 
-#### Scenario: HTML callers keep the redirects
-- **WHEN** a browser form caller submits the save or test action without negotiating `application/json`
-- **THEN** FastAPI SHALL preserve the existing redirect behavior for that action
-- **AND** the negotiated JSON path SHALL NOT alter that HTML behavior
+#### Scenario: React caller receives a JSON verification outcome
+- **WHEN** a React/JSON caller runs Orchestrator verification
+- **THEN** FastAPI SHALL execute the real sentinel turn on the saved Orchestrator Model and record sanitized evidence
+- **AND** SHALL report success only when the sentinel matched and a token turn was recorded
+
+#### Scenario: HTML callers keep redirects
+- **WHEN** a browser form caller submits save, discovery, or verification without negotiating `application/json`
+- **THEN** FastAPI SHALL preserve the redirect to `/settings/control-plane`
+- **AND** negotiated JSON behavior SHALL NOT alter that HTML behavior
+
+#### Scenario: Retired connection-test route is absent
+- **WHEN** a caller posts to `/settings/control-plane/test`
+- **THEN** FastAPI SHALL return not found
+- **AND** it SHALL NOT run the old direct-provider connection test
 
 ### Requirement: React Control Plane Settings navigates inside the shell
-React SHALL render Control Plane Settings inside the shared Portal chrome on the canonical `/settings/control-plane` URL when the complete build is available, and that URL SHALL return the missing-build recovery response when the build is missing or partial. The view SHALL preserve provider-filtered curated model selection with a custom-model path, placeholder-only key entry, the three-state connection status, and the environment-shadow warning.
+React SHALL render Orchestrator Model Settings inside the shared Portal chrome on the canonical `/settings/control-plane` URL when the complete build is available, and that URL SHALL return the missing-build recovery response when the build is missing or partial. The view SHALL present only pi inventory discovery, one provider-qualified Orchestrator Model choice, model verification, discovery time, environment shadowing, and divergent legacy job warnings. It SHALL NOT present provider, base URL, API-key, curated/custom-model, or direct connection-test controls.
 
-#### Scenario: Built canonical route opens React Control Plane Settings in-shell
+#### Scenario: Built canonical route opens React Orchestrator Model Settings in-shell
 - **WHEN** an authenticated operator opens `/settings/control-plane` while the complete React build is available
-- **THEN** FastAPI SHALL serve the React shell and render Control Plane Settings inside the full Portal chrome
-- **AND** React SHALL request the authenticated control-plane JSON for its form and status
+- **THEN** FastAPI SHALL serve the React shell and render Orchestrator Model Settings inside the full Portal chrome
+- **AND** React SHALL request the authenticated Orchestrator Model settings JSON for its form and evidence
 
 #### Scenario: Missing or partial build returns the recovery response at canonical Control Plane Settings
 - **WHEN** an authenticated operator opens `/settings/control-plane` while the React build is missing or partial
 - **THEN** FastAPI SHALL return the missing-build recovery response at the same canonical URL
 - **AND** it SHALL NOT return a blank shell or redirect to an alternate URL
 
-#### Scenario: Key input is placeholder-only and blank keeps the existing key
-- **WHEN** the React Control Plane Settings form renders
-- **THEN** the API key input SHALL be a password field that is empty by default and never prefilled with the stored key
-- **AND** submitting the form with the key field blank SHALL preserve the existing stored key through the existing backend behavior
+#### Scenario: Inventory drives the model selector
+- **WHEN** pi discovery evidence contains runnable models
+- **THEN** React SHALL offer only those exact provider-qualified ids in the Orchestrator Model selector
+- **AND** it SHALL NOT expose a custom-model path or harness-authored model choices
 
-#### Scenario: Dirty form disables the connection test
-- **WHEN** the operator has unsaved edits in the React Control Plane Settings form
-- **THEN** React SHALL disable the Test action and show an inline hint to save before testing
-- **AND** after a successful save the form SHALL become pristine and the Test action SHALL re-enable with status shown as `needs_test`
+#### Scenario: Empty inventory directs authentication
+- **WHEN** pi reports no runnable models because no provider is authenticated
+- **THEN** React SHALL direct the operator to run `pi /login` and refresh inventory
+- **AND** it SHALL NOT render an empty selector as normal configured state
 
-#### Scenario: Provider selection filters the curated model dropdown
-- **WHEN** the operator changes the provider in the React form
-- **THEN** the curated model dropdown SHALL show only that provider's curated choices and otherwise expose the custom-model path
-- **AND** an existing saved model outside the curated choices SHALL be preserved through the custom-model path
+#### Scenario: Save resets divergent job models
+- **WHEN** legacy estimator or task-breakdown model settings diverge from the Orchestrator Model
+- **THEN** React SHALL show a warning naming the divergent settings
+- **AND** saving the selected Orchestrator Model again SHALL remove those legacy persisted values while every job continues to use that model
+
+#### Scenario: Verify shows authoritative evidence
+- **WHEN** the operator runs Verify on a configured Orchestrator Model
+- **THEN** React SHALL show the sanitized verification result, model, time, stale state, and reasons from authoritative backend evidence
+- **AND** it SHALL distinguish inventory presence from successful metered-turn verification
 
 #### Scenario: Save stays on page with inline outcome and authoritative refetch
-- **WHEN** an operator saves control-plane settings from the React view and the save succeeds
+- **WHEN** an operator saves the Orchestrator Model and the save succeeds
 - **THEN** React SHALL show an inline success outcome without leaving the page
-- **AND** React SHALL refetch authoritative control-plane state rather than optimistically trusting the submitted values
+- **AND** React SHALL refetch authoritative Orchestrator Model state rather than optimistically trusting the submitted value
 
 ### Requirement: React Worker Settings JSON is authenticated, exact, and bounded
 FastAPI SHALL expose a new authenticated JSON handoff for Worker Settings that requires Portal authentication and reuses the existing adapter view-model, active-adapter selection, and next-action computation. The response SHALL be bounded and sanitized so the frontend can render adapter configuration, the discover→approve model workflow, readiness, and evidence without recomputing Worker-adapter rules in the browser.
@@ -1042,7 +1064,7 @@ FastAPI SHALL expose a new authenticated JSON handoff for Project Settings that 
 - **AND** it SHALL NOT include raw exception text
 
 ### Requirement: React negotiates the project archive outcome and consumes the existing project actions
-The existing `POST /projects/{id}/archive` action SHALL return a bounded, sanitized JSON outcome to React/JSON callers while preserving the current redirects for HTML callers, including the block-reason redirect. The existing `POST /settings/project/connect`, `POST /projects/{id}/restore`, and `POST /settings/project/{id}/read-only-proof` actions SHALL keep their current negotiated JSON outcomes unchanged. Project connection, capability evaluation, archive/restore, and the read-only proof launch SHALL remain authoritative for both caller types.
+The existing `POST /projects/{id}/archive` action SHALL return a bounded, sanitized JSON outcome to React/JSON callers while preserving the current redirects for HTML callers, including the block-reason redirect. The existing `POST /settings/project/connect` and `POST /projects/{id}/restore` actions SHALL keep their current negotiated JSON outcomes unchanged. Project connection, capability evaluation, and archive/restore SHALL remain authoritative for both caller types.
 
 #### Scenario: React caller receives a JSON archive outcome
 - **WHEN** a React/JSON caller archives a connected project that is eligible for archiving
@@ -1054,8 +1076,8 @@ The existing `POST /projects/{id}/archive` action SHALL return a bounded, saniti
 - **THEN** FastAPI SHALL return a sanitized error outcome envelope carrying the block reason
 - **AND** raw exception detail SHALL NOT reach the operator
 
-#### Scenario: React consumes connect, restore, and read-only-proof unchanged
-- **WHEN** a React/JSON caller connects a project, restores an archived project, or runs the read-only launch proof
+#### Scenario: React consumes connect and restore unchanged
+- **WHEN** a React/JSON caller connects a project or restores an archived project
 - **THEN** FastAPI SHALL execute the existing action and return its existing bounded outcome
 - **AND** the negotiated JSON path SHALL NOT alter those existing action shapes
 
@@ -1065,7 +1087,7 @@ The existing `POST /projects/{id}/archive` action SHALL return a bounded, saniti
 - **AND** the negotiated JSON path SHALL NOT alter that HTML behavior
 
 ### Requirement: React Project Settings navigates inside the shell
-React SHALL render Project Settings inside the shared Portal chrome on the canonical `/settings/project` URL when the complete build is available, and that URL SHALL return the missing-build recovery response when the build is missing or partial. The view SHALL preserve the connect-project form, the Local Runner backend-status panel, per-project capability, the read-only-proof action, and archive/restore.
+React SHALL render Project Settings inside the shared Portal chrome on the canonical `/settings/project` URL when the complete build is available, and that URL SHALL return the missing-build recovery response when the build is missing or partial. The view SHALL preserve the connect-project form, the Local Runner backend-status panel, per-project capability, and archive/restore.
 
 #### Scenario: Built canonical route opens React Project Settings in-shell
 - **WHEN** an authenticated operator opens `/settings/project` while the complete React build is available
@@ -1081,11 +1103,6 @@ React SHALL render Project Settings inside the shared Portal chrome on the canon
 - **WHEN** an operator connects a project or archives a connected project from the React view and the action succeeds
 - **THEN** React SHALL show an inline success outcome without leaving the page
 - **AND** React SHALL refetch authoritative Project Settings state rather than optimistically trusting the submitted values
-
-#### Scenario: Read-only proof stays on page with inline outcome
-- **WHEN** an operator runs the read-only launch proof from the React view
-- **THEN** React SHALL show the inline pass or guardrail-block outcome without leaving the page
-- **AND** React SHALL refetch authoritative Project Settings state after the proof completes
 
 #### Scenario: Redirect-borne archive block reason survives into React
 - **WHEN** an HTML archive caller is blocked and redirected to the project settings page with an error query, and the complete React build serves that canonical URL

@@ -22,7 +22,7 @@ const textOrStrings = Type.Union([
 
 const candidate = Type.Object(
 	{
-		kind: StringEnum(["implementation", "scout", "acceptance_verification"] as const),
+		kind: StringEnum(["implementation", "acceptance_verification"] as const),
 		title: Type.String({ minLength: 1, maxLength: 500 }),
 		objective: Type.String({ minLength: 1, maxLength: 8000 }),
 		prompt: Type.String({ minLength: 1, maxLength: 20000 }),
@@ -34,7 +34,6 @@ const candidate = Type.Object(
 		why_not_larger: Type.String({ minLength: 1, maxLength: 4000 }),
 		dependencies: textOrStrings,
 		likely_entry_points: textOrStrings,
-		target_task_id: Type.Optional(Type.Union([Type.String({ maxLength: 200 }), Type.Null()])),
 		execution_mode: StringEnum(["AFK", "HITL"] as const),
 		hitl_reason: Type.String({ maxLength: 4000 }),
 		human_in_loop: Type.Boolean(),

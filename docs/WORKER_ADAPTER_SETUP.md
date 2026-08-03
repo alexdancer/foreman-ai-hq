@@ -2,7 +2,7 @@
 
 Worker Adapters are local coding-agent CLI integrations. The supported local setup verifies that the installed CLI can run a harmless sentinel prompt and emit trustworthy, run-bound usage evidence for the selected model.
 
-| Worker Adapter | Worker CLI auth source | Launchable evidence | Scout read-only profile | Common failure |
+| Worker Adapter | Worker CLI auth source | Launchable evidence | Read-only launch | Common failure |
 |---|---|---|---|---|
 | OpenCode | Installed `opencode` CLI config/auth | Machine-readable, selected-model-aware, successful-exit, run-bound OpenCode usage evidence | Not currently verified | CLI not installed, no model discovery, no allowed models, native usage missing run-bound tokens |
 | Claude Code | Installed `claude` CLI config/auth | `claude -p --output-format json` or `stream-json --verbose` evidence with usage/cost tied to the run | Not currently verified | `claude models` unavailable, budget cap confused with accounting proof, cache tokens omitted |
@@ -17,7 +17,7 @@ Worker Adapters are local coding-agent CLI integrations. The supported local set
 
 Diagnostic-only observation is useful for PATH checks and troubleshooting, but it is not normal Orchestration Board launchable.
 
-Tracking authority and read-only capability are independent. A verified adapter may launch compatible implementation Tasks while remaining unavailable for Scouts. Scout launch requires budget-authoritative tracking plus a verified adapter-enforced read-only profile; a prompt asking the Worker not to edit and a post-run diff check are not sufficient on their own.
+Tracking authority and read-only capability are independent. A verified adapter may launch compatible implementation Tasks without a verified adapter-enforced read-only profile; read-only launch requires both budget-authoritative tracking and a verified read-only profile.
 
 ## Key rule
 

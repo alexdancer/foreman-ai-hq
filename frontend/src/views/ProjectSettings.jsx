@@ -55,7 +55,6 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
   const [baseBranch, setBaseBranch] = useState("");
   const [status, setStatus] = useState(null);
   const [inlineError, setInlineError] = useState(null);
-  const [proofResult, setProofResult] = useState(null);
   // Which action is in flight, so only that button shows its busy label.
   const [activeAction, setActiveAction] = useState(null);
   const busy = activeAction !== null;
@@ -131,41 +130,6 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
       }
     } catch (err) {
       setInlineError(boundedError(err.message, "Could not restore project."));
-    } finally {
-      setActiveAction(null);
-    }
-  };
-
-  const runReadOnlyProof = async (projectId) => {
-    clearMessages();
-    setProofResult(null);
-    setActiveAction({ projectId, kind: "proof" });
-    try {
-      const res = await fetch(`/settings/project/${projectId}/read-only-proof`, {
-        method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({}),
-      });
-      const outcome = await res.json();
-      if (res.ok) {
-        setProofResult({ projectId, outcome, passed: true });
-        setStatus("Read-only proof launched.");
-        onRefresh();
-      } else if (res.status === 409 && outcome?.launch_guardrails) {
-        setProofResult({ projectId, outcome, passed: false });
-        setInlineError(
-          boundedError(
-            outcome.launch_guardrails.reasons?.join(" "),
-            "Read-only proof blocked.",
-          )
-        );
-      } else {
-        const detail = outcome?.detail || outcome?.error || "Read-only proof failed.";
-        throw new Error(detail);
-      }
-    } catch (err) {
-      setInlineError(boundedError(err.message, "Could not launch read-only proof."));
     } finally {
       setActiveAction(null);
     }
@@ -310,17 +274,6 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                   </div>
                 )}
                 <div className="project-profile-actions">
-                  {project.capability?.state === "launch_ready" && (
-                    <button
-                      type="button"
-                      className="project-settings-primary"
-                      onClick={() => runReadOnlyProof(project.id)}
-                      disabled={busy}
-                      aria-describedby={busyReasonId}
-                    >
-                      {isBusy(project.id, "proof") ? "Running proof…" : "Run read-only proof"}
-                    </button>
-                  )}
                   <button
                     type="button"
                     className="project-settings-secondary"
@@ -331,9 +284,6 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                     {isBusy(project.id, "archive") ? "Archiving…" : "Archive project"}
                   </button>
                 </div>
-                {proofResult?.projectId === project.id && (
-                  <ProofOutcome outcome={proofResult.outcome} passed={proofResult.passed} />
-                )}
               </article>
               ))}
             </div>
@@ -492,16 +442,6 @@ function ProjectProfileEditor({
 function CapabilityPill({ state }) {
   const label = state === "launch_ready" ? "Launch-ready via Local Runner" : state === "analysis_ready" ? "Analysis-ready" : "Blocked";
   return <StatusPill tone={capabilityStatusTone(state)} label={label} />;
-}
-
-function ProofOutcome({ outcome, passed }) {
-  const reasons = outcome?.launch_guardrails?.reasons;
-  return (
-    <p>
-      <StatusPill tone={passed ? "success" : "warning"} label={passed ? "Read-only proof launched" : "Read-only proof blocked"} />
-      {reasons?.length ? `: ${reasons.join(" ")}` : ""}
-    </p>
-  );
 }
 
 function ProfileRow({ label, value }) {

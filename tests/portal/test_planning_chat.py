@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from foreman_ai_hq import db
+from foreman_ai_hq import db, intake
 from foreman_ai_hq.pi_adapter import PiAuthRequired
 from foreman_ai_hq.routes import planning_conversation, react_shell
 from tests.portal.helpers import PORTAL_TOKEN, _client, _connect_project, _portal_headers
@@ -44,6 +44,55 @@ def test_planning_chat_serves_shell_or_the_missing_build_recovery_response(
         assert response.status_code == 503
         assert "not built" in response.text
     assert missing.status_code == 404
+
+
+def test_only_planning_chat_can_create_tasks_with_intake_provenance(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    db.init_db(tmp_path / "harness.db")
+    project = _connect_project(tmp_path / "harness.db", tmp_path / "repo")
+
+    async def _single_task(_request, _source, _metadata):
+        return {"decision": "single_task", "reason": "One bounded vertical slice."}
+
+    async def _create_estimated(request, description, *, extra_metadata=None, **_kwargs):
+        return db.create_task(
+            request.app.state.settings.database_path,
+            description=description,
+            status="Estimated",
+            estimate_tokens=100,
+            metadata=extra_metadata,
+        )
+
+    monkeypatch.setattr(intake, "run_intake_decision", _single_task)
+    monkeypatch.setattr(intake, "_estimate_and_create_task", _create_estimated)
+
+    with _client(tmp_path) as client:
+        registry = client.app.state.planning_registry
+        registry._live[project["id"]] = planning_conversation.LiveConversation(
+            conv=SimpleNamespace(proc=SimpleNamespace(poll=lambda: None), close=lambda: None),
+            planning_session_id="sess_planning_intake",
+            last_used_at=time.monotonic(),
+        )
+        created = client.post(
+            f"/api/projects/{project['id']}/planning/intake",
+            headers=_portal_headers(),
+            data={"message": "Add a bounded task"},
+        )
+        retired = [
+            client.post("/tasks", json={"description": "bypass"}),
+            client.post("/estimate", json={"description": "bypass"}),
+            client.post("/tasks/estimate-form", data={"description": "bypass"}),
+            client.post(
+                f"/projects/{project['id']}/tasks/estimate-form",
+                data={"description": "bypass"},
+            ),
+        ]
+
+    assert created.status_code == 200
+    task = db.list_tasks(tmp_path / "harness.db")[0]
+    assert task["metadata"]["intake_decision"] == "single_task"
+    assert task["metadata"]["intake_decision_reason"] == "One bounded vertical slice."
+    assert all(response.status_code == 404 for response in retired)
 
 
 def test_planning_start_surfaces_provider_auth_required_instead_of_a_dead_turn(tmp_path, monkeypatch):

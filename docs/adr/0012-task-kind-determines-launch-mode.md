@@ -13,8 +13,8 @@ Branch, and end in a Harness-Owned Commit after configured verification passes. 
 `task_launch.py:191-192` resolves three:
 
 ```python
-read_only     = task_kind == "scout" or metadata.get("read_only") or launch_mode == "read_only"
-write_capable = task_kind != "scout" and (metadata.get("write_capable") or launch_mode == "write_capable")
+read_only     = task_kind == "acceptance_verification" or metadata.get("read_only") or launch_mode == "read_only"
+write_capable = task_kind == "implementation" and (metadata.get("write_capable") or launch_mode == "write_capable")
 ```
 
 Neither flag is ever set for an implementation task. An exhaustive search finds
@@ -50,9 +50,7 @@ unimplemented. This is implemented, tested, and unreachable.
 
 2. **`acceptance_verification` launches read-only.** Its deliverable is findings, and
    read-only already permits the non-mutating commands it needs to run its proofs. A
-   verifier must not be able to modify the code it was asked to check. This also gives
-   read-only a real product user after the Scout's retirement (ADR-0011) removes its only
-   previous trigger.
+   verifier must not be able to modify the code it was asked to check.
 
 3. **The test command is configured, not guessed.** `_detect_test_command` maps four
    manifest files to four hardcoded strings, and `_run_test_command` executes the result

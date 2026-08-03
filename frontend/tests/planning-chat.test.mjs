@@ -33,8 +33,10 @@ const baseProps = {
   started: true,
   transcript: [],
   message: "",
+  attachment: null,
   sending: false,
   onMessageChange: () => {},
+  onFileChange: () => {},
   onSend: () => {},
   onCancel: () => {},
 };
@@ -60,7 +62,7 @@ function makeFetch(events = []) {
     if (url.includes("/planning/events")) {
       return jsonResponse({ events, next_since_id: events.length ? events.at(-1).id : 0, has_more: false });
     }
-    if (url.includes("/planning/message")) {
+    if (url.includes("/planning/intake")) {
       return new Promise((resolve) => {
         messageResolve = resolve;
       });
@@ -180,7 +182,7 @@ test("PlanningChat sends a message and appends the returned turn", async () => {
     renderer = create(React.createElement(PlanningChat, { projectId: "demo-999" }));
   });
 
-  const input = renderer.root.findByType("input");
+  const input = renderer.root.findByProps({ placeholder: "Describe the task or goal…" });
   const form = renderer.root.findByType("form");
 
   await act(async () => {
@@ -191,11 +193,11 @@ test("PlanningChat sends a message and appends the returned turn", async () => {
     form.props.onSubmit({ preventDefault: () => {} });
   });
 
-  const messageRequests = requests.filter((r) => r.url.includes("/planning/message"));
-  assert.equal(messageRequests.length, 1);
-  assert.deepEqual(JSON.parse(messageRequests[0].options.body), { message: "Add tests" });
+  const intakeRequests = requests.filter((r) => r.url.includes("/planning/intake"));
+  assert.equal(intakeRequests.length, 1);
+  assert.equal(intakeRequests[0].options.body.get("message"), "Add tests");
 
-  assert.equal(renderer.root.findByType("input").props.disabled, true);
+  assert.equal(renderer.root.findByProps({ placeholder: "Describe the task or goal…" }).props.disabled, true);
   assert.ok(JSON.stringify(renderer.toJSON()).includes("Sending…"));
 
   await act(async () => {
@@ -205,7 +207,7 @@ test("PlanningChat sends a message and appends the returned turn", async () => {
   const markup = JSON.stringify(renderer.toJSON());
   assert.match(markup, /Add tests/);
   assert.match(markup, /I'll add tests\./);
-  assert.equal(renderer.root.findByType("input").props.disabled, false);
+  assert.equal(renderer.root.findByProps({ placeholder: "Describe the task or goal…" }).props.disabled, false);
 
   await act(async () => {
     renderer.unmount();
@@ -221,7 +223,7 @@ test("PlanningChat cancels an in-flight turn and renders the partial result", as
     renderer = create(React.createElement(PlanningChat, { projectId: "demo-999" }));
   });
 
-  const input = renderer.root.findByType("input");
+  const input = renderer.root.findByProps({ placeholder: "Describe the task or goal…" });
   const form = renderer.root.findByType("form");
 
   await act(async () => {
@@ -250,7 +252,45 @@ test("PlanningChat cancels an in-flight turn and renders the partial result", as
   assert.match(markup, /Big refactor/);
   assert.match(markup, /partial plan/);
   assert.match(markup, /cancelled/);
-  assert.equal(renderer.root.findByType("input").props.disabled, false);
+  assert.equal(renderer.root.findByProps({ placeholder: "Describe the task or goal…" }).props.disabled, false);
+
+  await act(async () => {
+    renderer.unmount();
+  });
+});
+
+// 9.7: the board refresh is an operator-initiated consequence of a completed turn,
+// so it must fire exactly once per turn and never depend on background polling.
+test("PlanningChat notifies once when a turn completes", async () => {
+  const { fetchMock, getMessageResolve } = makeFetch([]);
+  globalThis.fetch = fetchMock;
+
+  const completions = [];
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(PlanningChat, {
+      projectId: "demo-999",
+      onTurnComplete: (turn) => completions.push(turn),
+    }));
+  });
+
+  const input = renderer.root.findByProps({ placeholder: "Describe the task or goal…" });
+  const form = renderer.root.findByType("form");
+
+  await act(async () => {
+    input.props.onChange({ target: { value: "Add tests" } });
+  });
+  await act(async () => {
+    form.props.onSubmit({ preventDefault: () => {} });
+  });
+
+  assert.equal(completions.length, 0, "an in-flight turn must not refresh the board");
+
+  await act(async () => {
+    getMessageResolve()(jsonResponse({ content: "I'll add tests.", stop_reason: null }));
+  });
+
+  assert.equal(completions.length, 1);
 
   await act(async () => {
     renderer.unmount();

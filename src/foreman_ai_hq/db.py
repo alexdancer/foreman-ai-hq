@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
 from foreman_ai_hq.native_usage import token_usage_components
-from foreman_ai_hq.task_kind import read_task_kind
 from foreman_ai_hq.worker_model_allowlist import SEEDED_WORKER_ADAPTER_MODELS
 
 SCHEMA = """
@@ -2173,11 +2172,10 @@ def budgeted_token_usage(path: Path | str, *, since: str | None = None) -> int:
 
 
 def estimation_accuracy(path: Path | str) -> dict[str, Any]:
-    """Compute estimation accuracy from completed implementation tasks.
+    """Compute estimation accuracy from completed tasks.
 
     Returns completed_count, median_error_ratio, within_2x_pct.
-    All values null when no completed implementation tasks with both estimate
-    and actual exist. Scout actuals are excluded from implementation aggregates.
+    All values null when no completed tasks with both estimate and actual exist.
     Error ratio = actual_tokens / estimate_tokens.
     """
     with connect(path) as conn:
@@ -2191,7 +2189,6 @@ def estimation_accuracy(path: Path | str) -> dict[str, Any]:
               and actual_tokens > 0
             """
         ).fetchall()
-    rows = [row for row in rows if read_task_kind(_from_json(row["metadata_json"])) == "implementation"]
     if not rows:
         return {
             "completed_count": None,

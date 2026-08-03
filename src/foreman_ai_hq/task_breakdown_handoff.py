@@ -234,7 +234,7 @@ def _candidate_mode(candidate: dict[str, Any]) -> str:
 def _normalized_candidate(candidate: Any) -> dict[str, Any]:
     source = _mapping(candidate)
     normalized = dict(source)
-    normalized["kind"] = source.get("kind") if source.get("kind") in {"implementation", "scout", "acceptance_verification"} else "implementation"
+    normalized["kind"] = source.get("kind") if source.get("kind") in {"implementation", "acceptance_verification"} else "implementation"
     normalized["execution_mode"] = _candidate_mode(source)
     normalized["human_in_loop"] = normalized["execution_mode"] == "HITL"
     return normalized
@@ -290,9 +290,9 @@ def _candidate_items(context: dict[str, Any]) -> list[dict[str, Any]]:
         item: dict[str, Any] = {
             "index": index,
             "accepted_by_default": proposed,
-            "kind": candidate.get("kind") if candidate.get("kind") in {"implementation", "scout", "acceptance_verification"} else "implementation",
+            "kind": candidate.get("kind") if candidate.get("kind") in {"implementation", "acceptance_verification"} else "implementation",
             "execution_mode": _candidate_mode(candidate),
-            "target_task_id": _safe_id(candidate.get("target_task_id")),
+            "target_task_id": None,
         }
         for selector, (field, limit) in _CANDIDATE_TEXT_FIELDS.items():
             item[field] = _bounded(

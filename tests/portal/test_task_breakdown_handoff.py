@@ -13,6 +13,25 @@ from foreman_ai_hq.task_breakdown_handoff import redact_breakdown_text
 from tests.portal.helpers import PORTAL_TOKEN, _client, _portal_headers
 
 
+def test_breakdown_accept_rejects_missing_planning_chat_provenance(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    database_path = tmp_path / "harness.db"
+    breakdown = _seed_breakdown(
+        database_path,
+        intake_metadata={"intake_source": "plain_text"},
+    )
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            f"/task-breakdowns/{breakdown['id']}/accept",
+            headers={**_portal_headers(), "Accept": "application/json"},
+        )
+
+    assert response.status_code == 409
+    assert "no Planning Chat intake provenance" in response.json()["error"]
+    assert db.list_tasks(database_path) == []
+
+
 def _candidate(index=0, *, long=False):
     suffix = (" safe-text " * 2500 + "END2099") if long else f" {index}"
     return {
@@ -42,7 +61,12 @@ def _seed_breakdown(path, *, status="pending_review", candidates=None, source_te
         path,
         source_text=source_text or "DEMO source 2099",
         source_sha256="demo-sha-999",
-        intake_metadata=intake_metadata or {"private": "DEMO_INTAKE_SECRET_999"},
+        intake_metadata=intake_metadata or {
+            "private": "DEMO_INTAKE_SECRET_999",
+            "intake_source": "plain_text",
+            "intake_decision": "needs_breakdown",
+            "intake_decision_reason": "DEMO work requires breakdown.",
+        },
         status=status,
         decision="proposed_task_breakdown",
         model="DEMO-model-999",
@@ -441,76 +465,6 @@ def test_json_accept_is_presence_aware_and_idempotent(tmp_path, monkeypatch):
     assert stored["global_constraints"] == [] and stored["verification"] == []
     assert stored["candidates"][0]["constraints"] == []
     assert len(db.list_tasks(path)) == 1
-
-
-def test_accepting_scout_preserves_same_project_target_task_link(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    path = tmp_path / "harness.db"
-    db.init_db(path)
-    root = tmp_path / "connected-project"
-    root.mkdir()
-    project = db.upsert_connected_project(
-        path,
-        name=root.name,
-        root_path=str(root.resolve()),
-        profile={"name": root.name, "root_path": str(root.resolve()), "test_command": "pytest"},
-        capability={"state": "launch_ready", "can_launch": True},
-    )
-    target = db.create_task(
-        path,
-        task_id="target-DEMO-999",
-        description="Implementation target",
-        status="Estimated",
-        estimate_tokens=999,
-        recommended_model="DEMO-model-999",
-        metadata={"task_kind": "implementation", **project_task_metadata(project)},
-    )
-    candidate = {
-        **_candidate(),
-        "kind": "scout",
-        "target_task_id": target["id"],
-        "objective": "Which routing seam determines the implementation scope?",
-        "constraints": ["Inspect routing modules read-only."],
-        "acceptance_criteria": "Report the relevant files and dependency boundary.",
-        "proof": "Cite inspected file paths in the Session Report.",
-    }
-    breakdown = _seed_breakdown(
-        path,
-        candidates=[candidate],
-        intake_metadata=project_task_metadata(project),
-    )
-
-    async def fake_estimate(request, description, *, extra_metadata, task_id=None):
-        return db.create_task(
-            request.app.state.settings.database_path,
-            task_id=task_id,
-            description=description,
-            status="Estimated",
-            estimate_tokens=500,
-            recommended_model="DEMO-model-999",
-            metadata=extra_metadata,
-        )
-
-    monkeypatch.setattr(tasks, "_estimate_and_create_task", fake_estimate)
-    with _client(tmp_path) as client:
-        response = client.post(
-            f"/task-breakdowns/{breakdown['id']}/accept",
-            headers={**_portal_headers(), "Accept": "application/json"},
-            data={"accept_0": "1"},
-        )
-
-    assert response.status_code == 200
-    materialized = [task for task in db.list_tasks(path) if task["id"] != target["id"]]
-    assert len(materialized) == 1
-    assert materialized[0]["metadata"]["task_kind"] == "scout"
-    assert materialized[0]["metadata"]["target_task_id"] == target["id"]
-    assert materialized[0]["metadata"]["scout_question"] == candidate["objective"]
-    assert materialized[0]["metadata"]["scout_inspection_boundary"] == candidate["constraints"]
-    assert materialized[0]["metadata"]["scout_expected_findings"] == candidate["acceptance_criteria"]
-    assert materialized[0]["metadata"]["scout_proof"] == candidate["proof"]
-    unchanged_target = db.get_task(path, target["id"])
-    assert unchanged_target["estimate_tokens"] == 999
-    assert unchanged_target["status"] == "Estimated"
 
 
 def test_json_accept_partial_failure_keeps_immutable_claim_and_fails_closed(
