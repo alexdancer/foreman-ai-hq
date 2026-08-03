@@ -63,20 +63,18 @@
   margin-bottom: 12px;
 }
 
-.floor-planning-rail .panel-header {
+.planning-pane-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
 
-.floor-planning-rail .panel-body {
+.planning-pane-body {
   max-height: 60vh;
   overflow-y: auto;
 }
 
-/* Split board layout: pane beside main content on wide viewports, collapsed to
-   full-width below the breakpoint so board cards never squeeze below legibility. */
 .board-layout {
   display: flex;
   flex-wrap: wrap;
@@ -93,6 +91,11 @@
   flex: 0 1 360px;
   min-width: 280px;
   max-width: 100%;
+}
+
+.board-pane.is-collapsed {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 @media (max-width: 760px) {

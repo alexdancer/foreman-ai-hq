@@ -14,7 +14,7 @@ The system SHALL persist Task Breakdown Agent output as a durable Proposed Task 
 
 #### Scenario: Review record preserves breakdown evidence
 - **WHEN** a Proposed Task Breakdown is created
-- **THEN** the record preserves source metadata, candidate tasks, rejected/non-task items, constraints, verification criteria, Task Breakdown Model identity, and linked orchestration token/session evidence when available
+- **THEN** the record preserves source metadata, the Planning Chat intake decision and reason, candidate tasks, rejected/non-task items, constraints, verification criteria, Orchestrator Model identity, and linked orchestration token/session evidence when available
 
 ### Requirement: Breakdown review page
 The system SHALL provide a separate canonical review page for Proposed Task Breakdowns rather than representing breakdown review as an Orchestration Board column or Task state. When the complete React build is available, `/task-breakdowns/{breakdown_id}/review` SHALL render inside the React Portal shell; when the build is missing or partial, the same canonical URL SHALL return the missing-build recovery response.
@@ -62,6 +62,7 @@ The breakdown review page SHALL show candidate vertical slices and explicitly sh
 #### Scenario: React preserves secondary review evidence
 - **WHEN** rejected items, non-goals, recommended sequence, source/model/session evidence, rationale, or Repo Context evidence exists
 - **THEN** React SHALL keep that evidence visible in bounded summary or native disclosure sections
+- **AND** it SHALL show the bounded Planning Chat intake decision and reason separately from the Task Breakdown Agent rationale
 - **AND** the Session link SHALL use the canonical React-owned Session Report route
 - **AND** local project root, secret-bearing source metadata, raw provider payloads, and unknown persisted fields SHALL NOT be exposed
 
@@ -257,8 +258,8 @@ The Task Breakdown Agent SHALL receive bounded Repo Context Brief information wh
 - **AND** the connected project root can be read
 - **THEN** the Task Breakdown Agent request includes bounded repo context before proposing implementation and Acceptance Verification candidates
 
-#### Scenario: Global breakdown stays unchanged
-- **WHEN** an operator submits Markdown or oversized task intake outside a connected project
+#### Scenario: Legacy unbound breakdown stays reviewable
+- **WHEN** the operator reviews a persisted historical breakdown without a connected-project binding
 - **THEN** the Task Breakdown Agent request does not include project repo context
 - **AND** Task Breakdown review proceeds with the existing source text, intake metadata, and structure hints
 
@@ -353,10 +354,10 @@ Accepted implementation candidates SHALL produce Worker-facing task text that is
 - **AND** it SHALL frame the work as verification/proof rather than reimplementation
 
 ### Requirement: Breakdown failure diagnostics are safe and actionable
-The system SHALL record Task Breakdown Agent failures with safe diagnostics that distinguish provider rejection from large-request timeout behavior while preserving manual recovery.
+The system SHALL record pi-backed Task Breakdown Agent failures with safe diagnostics that distinguish runtime rejection from timeout behavior while preserving manual recovery.
 
-#### Scenario: Anthropic parameter rejection creates failed review
-- **WHEN** the Task Breakdown Agent provider rejects a request with a sanitized HTTP error such as an unsupported parameter error
+#### Scenario: Orchestration runtime rejection creates failed review
+- **WHEN** the pi-backed Task Breakdown Agent fails with a sanitized runtime or provider error
 - **THEN** the Proposed Task Breakdown record SHALL be marked failed with `manual_required` decision
 - **AND** the failure message SHALL include the sanitized provider error and model identity when available
 - **AND** retry, manual candidate creation, single manual candidate creation, and cancel actions SHALL remain available
@@ -367,12 +368,6 @@ The system SHALL record Task Breakdown Agent failures with safe diagnostics that
 - **AND** the failure message SHALL include safe diagnostics for model, timeout seconds, source character length, and max output tokens
 - **AND** the failure message SHALL NOT include raw source text, prompt text, API keys, or secret values
 - **AND** retry, manual candidate creation, single manual candidate creation, and cancel actions SHALL remain available
-
-#### Scenario: Connection test success is not treated as breakdown success
-- **WHEN** the Control Plane connection test has recorded success for a model
-- **AND** a later Task Breakdown Agent request fails because of provider parameter rejection or timeout
-- **THEN** the Task Breakdown review SHALL show the Task Breakdown failure state
-- **AND** it SHALL NOT present the prior connection test as proof that the full breakdown request succeeded
 
 ### Requirement: Task Breakdown Review mutations remain backend-authoritative and idempotent
 FastAPI SHALL remain the sole domain authority for review status, presence-aware candidate/global edits, candidate validation, Task Estimation, Task creation, project binding, Retry, Manual Candidate recovery, and idempotency. Transport-specific JSON/HTML negotiation SHALL NOT redefine those domain outcomes.

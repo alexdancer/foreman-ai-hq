@@ -44,10 +44,11 @@ Foreman AI HQ has two model layers:
 
 | Layer | What it powers | Auth source |
 |---|---|---|
-| Control Plane / orchestrator model | Estimates, planning, task breakdown, summaries, reports; deterministic routing uses estimator evidence plus Worker Adapter allowed models | `/settings/control-plane`, ignored `.foreman/secrets.env`, or env vars |
+| Orchestrator model | Estimates, planning, task breakdown, Agent Review, summaries, and reports | Selected from pi inventory; provider auth via `pi /login` |
+| Harness Proxy upstream | Provider traffic only for `proxy_governed` Workers | Optional direct-provider settings and API key in the shell or ignored `.foreman/secrets.env` |
 | Worker / coding harness models | The actual coding task launched through OpenCode, Claude Code, Codex, or another adapter | The native CLI's own auth/config |
 
-Pasting a control-plane API key does not configure native Worker CLIs.
+Harness Proxy upstream credentials configure neither pi orchestration nor native Worker CLIs.
 
 ## What Foreman AI HQ governs
 
@@ -63,16 +64,15 @@ Foreman AI HQ cannot govern arbitrary external-agent token spend. The supported 
 
 ## Investigating in Planning Chat
 
-Use the **Planning Chat** when you need a bounded repository answer before implementation. The Planning Chat is a conversational planning workspace: it lets you investigate the task, refine the source contract, and produce a reviewable Task Breakdown without creating a separate Worker Task.
+Use the **Planning Chat** to investigate a bounded repository question and refine the source contract without creating a Task. **Send** continues the governed conversation. **Create governed work** explicitly submits the shaped source for a recorded `single_task` or `needs_breakdown` decision and reason.
 
 An automatic estimate below `0.60` confidence appears in Needs You as an advisory decision. You may acknowledge the estimate, replace it manually, or open the Planning Chat for the task to investigate before re-estimating.
 
 ## Local secret storage
 
 - `.foreman/config.toml` stores non-secret config only.
-- `.foreman/secrets.env` is ignored local storage for the shared-access portal token and control-plane API key.
-- The portal can write a submitted control-plane API key to `.foreman/secrets.env` but never shows that raw value again.
-- Blank API-key submissions preserve the existing key.
+- `.foreman/secrets.env` is ignored local storage for the shared-access portal token and an optional Harness Proxy upstream key.
+- Set the optional upstream key in `.foreman/secrets.env` or the shell only when a `proxy_governed` Worker needs it; the Orchestrator settings page does not collect it.
 - Do not paste `.foreman/secrets.env`, API keys, portal tokens, bearer tokens, or raw credentials into support issues.
 
 ## Docker and Local Runner limits

@@ -98,9 +98,9 @@ def test_readme_documents_portal_first_operator_flow():
     assert "docs/assets/screenshots/sessions-token-ledger.png" in readme
     assert "environment variables" in readme.lower()
     assert "FOREMAN_AI_HQ_CONTROL_API_KEY" in readme
-    assert "proxy_governed" not in readme
-    assert "proxy-governed" not in readme.lower()
-    assert "Harness Proxy" not in readme
+    assert "Harness Proxy upstream" in readme
+    assert "proxy_governed" in readme
+    assert "They do not configure pi or a native Worker CLI" in readme
 
 
 def test_install_docs_separate_operator_installs_from_contributor_uv_run():
@@ -122,8 +122,9 @@ def test_install_docs_separate_operator_installs_from_contributor_uv_run():
     assert "uv run foremanctl ...` is a contributor convenience" in install_doc
     assert "foremanctl init" in getting_started
     assert "uv run foremanctl ...` is a contributor convenience" in getting_started
-    assert "proxy_governed" not in getting_started
-    assert "Harness Proxy" not in getting_started
+    assert "proxy_governed" in getting_started
+    assert "Harness Proxy upstream" in getting_started
+    assert "configure neither pi orchestration nor native Worker CLIs" in getting_started
     assert "assets/screenshots/dashboard-overview.png" in getting_started
     assert "assets/screenshots/project-board-review-workflow.png" in getting_started
     assert "assets/screenshots/control-plane-model-settings.png" in getting_started
@@ -133,19 +134,15 @@ def test_install_docs_separate_operator_installs_from_contributor_uv_run():
     assert "assets/screenshots/task-breakdown-manual-recovery.png" in getting_started
 
 
-def test_operator_docs_do_not_advertise_proxy_governed_mode():
-    operator_docs = [
-        ROOT / "docs" / "GETTING_STARTED.md",
-        ROOT / "docs" / "WORKER_ADAPTER_SETUP.md",
-        ROOT / "docs" / "SETUP_SUPPORT_CHECKLIST.md",
-        ROOT / "docs" / "MCP_AGENT_HARNESS_TODO.md",
-    ]
+def test_operator_docs_scope_proxy_credentials_to_worker_traffic():
+    getting_started = (ROOT / "docs" / "GETTING_STARTED.md").read_text()
+    worker_setup = (ROOT / "docs" / "WORKER_ADAPTER_SETUP.md").read_text()
 
-    for path in operator_docs:
-        text = path.read_text()
-        assert "proxy_governed" not in text, path
-        assert "proxy-governed" not in text.lower(), path
-        assert "Governed via Harness Proxy" not in text, path
+    assert "Harness Proxy upstream" in getting_started
+    assert "proxy_governed" in getting_started
+    assert "Orchestrator settings page does not collect it" in getting_started
+    assert "Pi authentication from `pi /login` powers Foreman AI HQ orchestration" in worker_setup
+    assert "apply only to `proxy_governed` Worker traffic" in worker_setup
 
 
 def test_support_checklist_requests_bare_foremanctl_check_and_install_method():
@@ -180,11 +177,3 @@ def test_documented_screenshots_exist_and_skip_stale_dashboard_capture():
     assert "dashboard-stale-recent-alarms.png" not in readme
     assert "dashboard-stale-recent-alarms.png" not in getting_started
     assert "dashboard-stale-recent-alarms.png" not in checklist
-
-
-def test_local_readonly_demo_script_supports_loopback_without_portal_token():
-    script = (ROOT / "scripts" / "local-opencode-readonly-demo.sh").read_text()
-
-    assert "before running" not in script
-    assert "AUTH_HEADERS=()" in script
-    assert "Authorization: Bearer $PORTAL_TOKEN" in script

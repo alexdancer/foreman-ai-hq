@@ -4,7 +4,7 @@
 TBD - created by archiving change orchestrator-model-runtime. Update Purpose after archive.
 ## Requirements
 ### Requirement: The orchestrator has its own model setting
-The system SHALL provide an orchestrator model setting that names the model used for every orchestration job — the governed planning conversation, task estimation, task breakdown, and agent review — distinct from any Worker adapter model. The setting SHALL be a provider-qualified model id for the orchestration runtime, resolved from the operator configuration and a single environment override. The system SHALL NOT define a built-in default orchestrator model: absent a configured value, the orchestrator SHALL be reported as not configured rather than falling back to a model name the runtime never offered. Estimation, task breakdown, and agent review SHALL read the orchestrator model setting rather than a separate control-plane or per-job model setting, and SHALL NOT require an operator-supplied provider, base URL, or API credential, because provider authentication belongs to the orchestration runtime. Legacy persisted `estimator_model` and `task_breakdown_model` values MAY be surfaced only as migration warnings and SHALL never select a runtime model; saving the Orchestrator Model SHALL remove those legacy values.
+The system SHALL provide an orchestrator model setting that names the model used for every orchestration job — the governed planning conversation, intake judgment, task estimation, task breakdown, and agent review — distinct from any Worker adapter model. The setting SHALL be a provider-qualified model id for the orchestration runtime, resolved from the operator configuration and a single environment override. The system SHALL NOT define a built-in default orchestrator model: absent a configured value, the orchestrator SHALL be reported as not configured rather than falling back to a model name the runtime never offered. Intake judgment, estimation, task breakdown, and agent review SHALL read the orchestrator model setting rather than a separate control-plane or per-job model setting, and SHALL NOT require an operator-supplied provider, base URL, or API credential, because provider authentication belongs to the orchestration runtime. Legacy persisted `estimator_model` and `task_breakdown_model` values MAY be surfaced only as migration warnings and SHALL never select a runtime model; saving the Orchestrator Model SHALL remove those legacy values.
 
 #### Scenario: Every orchestration job uses the orchestrator model
 - **WHEN** the harness performs planning, intake judgment, task estimation, task breakdown, or agent review
@@ -31,12 +31,12 @@ The system SHALL retire the control-plane model setting in favor of the orchestr
 - **AND** no caller SHALL still depend on a separate control-plane model setting
 
 #### Scenario: No caller reads a separate control-plane model
-- **WHEN** the harness resolves the model for planning, estimation, task breakdown, agent review, the CLI health check, or the portal settings surface
+- **WHEN** the harness resolves the model for planning, intake judgment, estimation, task breakdown, agent review, the CLI health check, or the portal settings surface
 - **THEN** each SHALL resolve the orchestrator model
 - **AND** no code path SHALL read a distinct control-plane model setting
 
 ### Requirement: Orchestration turns meter as orchestration spend
-Orchestration turns — the planning conversation and any other orchestrator-model work metered through the governed proxy — SHALL be recorded with their existing spend classification (planning turns as planning spend), held separate from Worker execution spend, and SHALL NOT be counted as any Task's Worker execution actuals or against a per-session Worker execution cap. This capability SHALL NOT introduce a new operator-visible spend-category rollup key; orchestration spend continues to aggregate under the existing summary categories.
+Orchestration turns SHALL be recorded from pi's native usage evidence with their existing spend classification, held separate from Worker execution spend, and SHALL NOT be counted as any Task's Worker execution actuals or against a per-session Worker execution cap. Orchestration turns SHALL NOT traverse the Harness Proxy. This capability SHALL NOT introduce a new operator-visible spend-category rollup key; orchestration spend continues to aggregate under the existing summary categories.
 
 #### Scenario: Orchestration spend is separate from Worker execution
 - **WHEN** an orchestration turn is recorded
@@ -114,7 +114,7 @@ Every orchestration token turn SHALL record the model as the orchestration runti
 - **THEN** the recorded turn model SHALL be that provider-qualified value
 
 #### Scenario: All orchestration jobs agree on the model string
-- **WHEN** planning, estimation, task breakdown, and agent review each record a token turn on the same configured orchestrator model
+- **WHEN** planning, intake judgment, estimation, task breakdown, and agent review each record a token turn on the same configured orchestrator model
 - **THEN** every recorded turn SHALL carry the same model string
 
 #### Scenario: Missing runtime model falls back to the setting
@@ -122,7 +122,7 @@ Every orchestration token turn SHALL record the model as the orchestration runti
 - **THEN** the recorded turn model SHALL be the configured orchestrator model in the same provider-qualified convention
 
 ### Requirement: An unconfigured orchestrator blocks orchestration but not evidence
-When the orchestrator is not configured, the system SHALL refuse to start orchestration work — the planning conversation, task estimation, task breakdown, and agent review — and SHALL refuse board access and Worker launches, directing the operator to orchestrator setup. The system SHALL keep sign-in, every settings surface, and read-only evidence surfaces reachable, so an absent or expired provider authentication cannot deny the operator access to their own audit trail or to the pages required to fix the configuration. The refusal SHALL be evaluated from persisted configuration and discovery evidence rather than by invoking the orchestration runtime, and SHALL NOT be bypassable through an environment setting that weakens production behavior.
+When the orchestrator is not configured, the system SHALL refuse to start orchestration work — the planning conversation, intake judgment, task estimation, task breakdown, and agent review — and SHALL refuse board access and Worker launches, directing the operator to orchestrator setup. The system SHALL keep sign-in, every settings surface, and read-only evidence surfaces reachable, so an absent or expired provider authentication cannot deny the operator access to their own audit trail or to the pages required to fix the configuration. The refusal SHALL be evaluated from persisted configuration and discovery evidence rather than by invoking the orchestration runtime, and SHALL NOT be bypassable through an environment setting that weakens production behavior.
 
 #### Scenario: Orchestration and board are blocked when unconfigured
 - **WHEN** the orchestrator is not configured and the operator requests the board, a Worker launch, or any orchestration job
@@ -139,4 +139,3 @@ When the orchestrator is not configured, the system SHALL refuse to start orches
 - **THEN** it SHALL read persisted configuration and discovery evidence
 - **AND** it SHALL NOT invoke the orchestration runtime to make that determination
 - **AND** no environment setting SHALL bypass the gate
-

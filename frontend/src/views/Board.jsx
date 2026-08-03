@@ -137,6 +137,7 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState(() => boardNoticeFromSearch(window.location.search));
   const [selectedTask, setSelectedTask] = useState(null);
+  const investigateTaskId = new URLSearchParams(window.location.search).get("investigate_task");
   const eventCursors = React.useRef(new Map());
   const eventPollInFlight = React.useRef(false);
   const runningSessionKey = useMemo(() => (state.data?.tasks_by_status?.Running || [])
@@ -248,6 +249,7 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
       openEvidence={setSelectedTask}
       onRetry={load}
       onTurnComplete={load}
+      investigateTaskId={investigateTaskId}
     />
     <EvidenceDrawer
       task={selectedTask}
@@ -271,6 +273,7 @@ export function BoardState({
   openEvidence = () => {},
   onRetry = () => {},
   onTurnComplete = () => {},
+  investigateTaskId = null,
 }) {
   if (loading) return <Loading>Loading {surface === "floor" ? "Execution Floor" : "Pipeline"}…</Loading>;
   if (isArchivedBoardError(error)) return <>
@@ -314,6 +317,7 @@ export function BoardState({
           setQuery={setQuery}
           cards={cards}
           onTurnComplete={onTurnComplete}
+          investigateTaskId={investigateTaskId}
         />}
   </>;
 }
@@ -386,6 +390,7 @@ function PipelineSurface({
   setQuery,
   cards,
   onTurnComplete,
+  investigateTaskId,
 }) {
   const needsYou = data.needs_you || { count: 0, items: [] };
   const planning = needsYou.items.filter((item) => item.kind === "breakdown_review");
@@ -407,10 +412,68 @@ function PipelineSurface({
         {estimated.length === 0 && <EmptyState>{query ? "No matching tasks" : data.board_empty_states.Estimated}</EmptyState>}
       </section>
     </div>
-    <div className="board-pane">
-      <PlanningChat projectId={projectId} onTurnComplete={onTurnComplete} compact />
-    </div>
+    <PlanningPane
+      projectId={projectId}
+      onTurnComplete={onTurnComplete}
+      defaultExpanded
+      initialMessage={investigationMessage(cards, investigateTaskId)}
+    />
   </div>;
+}
+
+export function investigationMessage(tasks, taskId) {
+  if (!taskId) return "";
+  const task = tasks.find((candidate) => String(candidate.id) === taskId);
+  const summaryValue = typeof task?.summary === "string" ? task.summary : task?.summary?.text;
+  const summary = typeof summaryValue === "string" ? summaryValue.trim() : "";
+  return summary
+    ? `Investigate Task ${taskId} before re-estimation:\n${summary}`
+    : `Investigate Task ${taskId} before re-estimation.`;
+}
+
+export function PlanningPane({
+  projectId,
+  onTurnComplete,
+  defaultExpanded,
+  initialMessage = "",
+}) {
+  const [expanded, setExpanded] = useState(() => (
+    defaultExpanded && !(typeof window !== "undefined" && window.matchMedia?.("(max-width: 760px)").matches)
+  ));
+  useEffect(() => {
+    if (!defaultExpanded || typeof window === "undefined" || !window.matchMedia) return undefined;
+    const media = window.matchMedia("(max-width: 760px)");
+    const onChange = (event) => {
+      if (event.matches) setExpanded(false);
+    };
+    media.addEventListener?.("change", onChange);
+    return () => media.removeEventListener?.("change", onChange);
+  }, [defaultExpanded]);
+  const contentId = `planning-pane-${projectId}-${defaultExpanded ? "pipeline" : "floor"}`;
+  return <section className={`board-pane planning-pane ${expanded ? "is-expanded" : "is-collapsed"}`}>
+    <Panel>
+      <div className="panel-header planning-pane-header">
+        <h3>Planning</h3>
+        <Button
+          size="small"
+          variant="secondary"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Collapse" : "Expand"}
+        </Button>
+      </div>
+      <PanelBody id={contentId} className="planning-pane-body" hidden={!expanded}>
+        {expanded && <PlanningChat
+          projectId={projectId}
+          onTurnComplete={onTurnComplete}
+          compact
+          initialMessage={initialMessage}
+        />}
+      </PanelBody>
+    </Panel>
+  </section>;
 }
 
 function NeedsYou({ items, count, action }) {
@@ -453,21 +516,12 @@ function NeedsYouItem({ item, action }) {
 }
 
 function FloorSurface({ projectId, data, tasksByStatus, visible, action, openEvidence, query, setQuery, onTurnComplete }) {
-  const [chatExpanded, setChatExpanded] = useState(false);
   const queueRunning = data.automation.queue.status === "running";
   const running = tasksByStatus.Running.filter(visible);
   const review = tasksByStatus.Review.filter(visible);
   const done = tasksByStatus.Done.filter(visible);
   return <div className="board-layout execution-floor">
-    <div className="floor-planning-rail board-pane">
-      <Panel className="floor-planning-panel">
-        <div className="panel-header">
-          <h3>Planning</h3>
-          <Button size="small" variant="secondary" onClick={() => setChatExpanded((value) => !value)}>{chatExpanded ? "Collapse" : "Expand"}</Button>
-        </div>
-        {chatExpanded && <PanelBody><PlanningChat projectId={projectId} onTurnComplete={onTurnComplete} compact /></PanelBody>}
-      </Panel>
-    </div>
+    <PlanningPane projectId={projectId} onTurnComplete={onTurnComplete} defaultExpanded={false} />
     <div className="floor-main board-main">
       <div className="board-command-bar">
         <div className="board-command-status">

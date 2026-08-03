@@ -18,9 +18,8 @@ All notable changes to Foreman AI HQ will be documented in this file.
 - A deterministic Playwright Recorded Demo that drives the production-shaped React/FastAPI workflow against an isolated synthetic Git project and Worker stream.
 - Driver-based token estimation: the Estimator emits structural drivers, the Harness computes the estimate from adapter/model coefficients, and the LLM's direct estimate is retained only as a shadow quality signal.
 - Per-driver coefficient provenance and fitting from trustworthy completed Worker Runs, with seed values used where evidence does not yet exist.
-- Canonical `scout` Tasks for bounded read-only repository investigation, with visible estimates, Worker usage, Review state, and Session Reports.
-- Advisory Needs You decisions for automatic estimates below `0.60` confidence, including acknowledgement, manual-estimate, linked-Scout, and explicit Scout-informed re-estimation actions.
-- Adapter-enforced Scout launch safety, currently backed by the Codex `--sandbox read-only` profile, with repository mutation detection retained as defense and audit evidence.
+- Planning Chat as the sole public Task intake, with conversational repository investigation and explicit recorded `single_task` or `needs_breakdown` decisions before Task creation.
+- Advisory Needs You decisions for automatic estimates below `0.60` confidence, including acknowledgement, manual-estimate, and Planning Chat investigation actions.
 - Reusable React UI primitives, expanded design tokens, a responsive Portal shell, and accessibility improvements for drawers, notices, loading states, and navigation.
 
 ### Changed
@@ -29,13 +28,11 @@ All notable changes to Foreman AI HQ will be documented in this file.
 - Retired duplicated authenticated Jinja operator surfaces. React now owns canonical Portal routes; server-rendered UI remains only for login and bounded missing-build recovery.
 - Canonical project navigation now uses `/projects/{project_id}` for the Pipeline and `/projects/{project_id}/floor` for execution; the former board URL redirects instead of maintaining a duplicate surface.
 - Replaced the persisted Blocked board column with a Blocked Condition that preserves the Task's canonical lifecycle position and exposes recovery through Needs You.
-- Moved full logs, token components, Agent Review findings, Scout findings, and other deep evidence out of board-card payloads and into the Evidence Drawer or Session Report.
+- Moved full logs, token components, Agent Review findings, and other deep evidence out of board-card payloads and into the Evidence Drawer or Session Report.
 - Review Disposition remains human-owned: Agent Review is advisory, Block records a Blocked Condition without relocating the Task, and Mark Done remains explicit.
 - Task Breakdown Review now preserves editable candidate/global context, slicing evidence, pagination, unsaved-edit protection, idempotent acceptance, and explicit failed-review recovery.
 - Task Breakdown policy now favors independently verifiable vertical slices, preserves AFK/HITL intent, and proposes Acceptance Verification for integrated artifacts.
-- Task kind is explicit as `implementation`, `scout`, or `acceptance_verification` across intake, Task Breakdown Review, board cards, estimation, history, and calibration.
-- Scout-informed estimates remain pending until the operator explicitly applies them; Scout execution never rewrites the target Task automatically.
-- Implementation accuracy and coefficient fitting exclude Scout actuals while preserving Scout Worker spend in normal budget accounting.
+- Task kind is explicit as `implementation` or `acceptance_verification`; repository investigation remains conversational orchestration rather than a third Task kind.
 - Worker launch continues to use final native/proxy evidence as accounting authority even when provisional stream events are available during execution.
 - Refreshed curated Control Plane and Worker model identifiers while retaining legacy seeded-model detection so old defaults require explicit re-approval.
 - Loopback `foremanctl serve` now supports the intended no-login local path, while shared/non-loopback access retains Portal token authentication.
@@ -53,10 +50,10 @@ All notable changes to Foreman AI HQ will be documented in this file.
 
 ### Testing and documentation
 
-- Added frontend component/contract tests, Portal API tests, Worker streaming tests, adversarial Scout/re-estimation coverage, and production-shaped browser verification.
+- Added frontend component/contract tests, Portal API tests, Worker streaming tests, intake-provenance coverage, and production-shaped browser verification.
 - Added Node and Playwright support to CI while keeping tests isolated from real providers, Worker credentials, and operator repositories.
-- Added maintained architecture, product, design-system, domain-glossary, setup, and ADR documentation for the React Portal, two-surface board, decision queue, estimation model, Scouts, and future Planning Chat direction.
-- Synchronized and strictly validated the canonical OpenSpec suite, including archived implementation evidence for the React migration, OpenRouter/cost reporting, live streaming, recorded demo, two-surface board, driver-based estimation, and Scout workflow.
+- Added maintained architecture, product, design-system, domain-glossary, setup, and ADR documentation for the React Portal, two-surface board, decision queue, estimation model, and Planning Chat workflow.
+- Synchronized and strictly validated the canonical OpenSpec suite, including archived implementation evidence for the React migration, OpenRouter/cost reporting, live streaming, recorded demo, two-surface board, driver-based estimation, and Planning Chat workflow.
 - Removed completed implementation plans whose durable history is already preserved by archived OpenSpec changes and ADRs.
 
 ## 0.1.0 - 2026-07-03

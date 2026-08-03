@@ -153,9 +153,11 @@ def test_init_writes_non_secret_operator_config(monkeypatch, tmp_path, capsys):
     assert "Start with foremanctl serve" in output
     assert "/settings/control-plane" in output
     assert "open http://localhost:8000/" in output
+    assert "pi /login" in output
     assert "Portal token for shared access: set TOKEN_TRACKER_PORTAL_TOKEN" in output
-    assert "Control-plane API key: configure FOREMAN_AI_HQ_CONTROL_API_KEY" in output
-    assert ".foreman/secrets.env or shell env remain supported alternatives" in output
+    assert "Optional Harness Proxy upstream API key for proxy_governed Workers" in output
+    assert "FOREMAN_AI_HQ_CONTROL_API_KEY in .foreman/secrets.env or the shell environment" in output
+    assert "never configures pi orchestration" in output
     assert "export TOKEN_TRACKER_PORTAL_TOKEN" not in output
 
 
@@ -297,7 +299,8 @@ def test_init_preserves_existing_config_and_prints_configured_secret_env_names(m
     assert "Start with foremanctl serve" in output
     assert "/settings/control-plane" in output
     assert "Portal token for shared access: set CUSTOM_PORTAL_TOKEN" in output
-    assert "Control-plane API key: configure CUSTOM_CONTROL_API_KEY" in output
+    assert "Optional Harness Proxy upstream API key for proxy_governed Workers" in output
+    assert "CUSTOM_CONTROL_API_KEY in .foreman/secrets.env or the shell environment" in output
 
 
 def test_init_migrates_secret_values_mistakenly_written_as_env_names(monkeypatch, tmp_path, capsys):

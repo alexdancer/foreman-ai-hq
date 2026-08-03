@@ -10,7 +10,7 @@ labels: needs-triage
 - [ ] Install
 - [ ] `foremanctl init`
 - [ ] Portal login
-- [ ] `/settings/control-plane` save/test
+- [ ] `/settings/control-plane` discovery/save/verification
 - [ ] Project connect
 - [ ] Worker Adapter setup
 - [ ] Worker launch
@@ -32,8 +32,9 @@ Paste `foremanctl check` output here. If you are using a source checkout without
 - Install method: pipx / curl installer / Homebrew / source checkout / Docker / other
 - Does `command -v foremanctl` succeed?: yes / no
 - Docker or local Python:
-- Control-plane provider/model:
-- Control-plane key configured through: `/settings/control-plane` / `.foreman/secrets.env` / environment variable
+- Orchestrator Model and pi inventory state:
+- Optional Harness Proxy upstream configuration in use: yes / no
+- If yes, upstream key source: `.foreman/secrets.env` / environment variable
 - Worker Adapter: OpenCode / Claude Code / Codex / Hermes / other
 - Tracking mode: `proxy_governed` / `native_usage` / `observed_only` / unknown
 
@@ -41,5 +42,4 @@ Paste `foremanctl check` output here. If you are using a source checkout without
 
 
 ## Expected behavior
-
 

@@ -7,13 +7,13 @@ Define how operators can submit multi-line markdown task descriptions or markdow
 The system SHALL allow an operator to submit a task description as multi-line markdown text or as an uploaded `.md` file for estimation through the Planning Chat composer, including long demo task markdown artifacts used for OpenCode comparison runs. There SHALL NOT be a separate board intake form for this purpose. Markdown upload and Markdown paste SHALL be interpreted through Task Breakdown Review before any Orchestration Board Task is created, even when the Task Breakdown Agent decides the Markdown describes one coherent Task. The system SHALL NOT expose a direct JSON estimation boundary that creates Tasks outside Planning Chat or bypasses this review. Deterministic Markdown parsing MAY provide structure hints to the Task Breakdown Agent, but SHALL NOT directly create Tasks, serve as a fallback, or be exposed as a quick-import product path.
 
 #### Scenario: Paste markdown into the conversation composer
-- **WHEN** the operator pastes a multi-line markdown task description into the Planning Chat composer and submits
+- **WHEN** the operator pastes a multi-line markdown task description into the Planning Chat composer and selects **Create governed work**
 - **THEN** the system creates or routes to a Proposed Task Breakdown review before estimation
 - **AND** no Orchestration Board Task is created until the operator accepts one or more reviewed candidates
 - **AND** the review preserves enough source context to show it came from markdown intake
 
 #### Scenario: Attach markdown file in the conversation composer
-- **WHEN** the operator attaches a `.md` file in the Planning Chat composer and submits
+- **WHEN** the operator attaches a `.md` file in the Planning Chat composer and selects **Create governed work**
 - **THEN** the system decodes the file content and creates or routes to a Proposed Task Breakdown review before estimation
 - **AND** no Orchestration Board Task is created until the operator accepts one or more reviewed candidates
 

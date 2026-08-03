@@ -21,4 +21,4 @@ Tracking authority and read-only capability are independent. A verified adapter 
 
 ## Key rule
 
-The control-plane API key from `/settings/control-plane` powers Foreman AI HQ estimation, planning, recommendations, and reports. It does not configure OpenCode, Claude Code, Codex, or other native Worker CLIs.
+Pi authentication from `pi /login` powers Foreman AI HQ orchestration. Optional Harness Proxy upstream credentials apply only to `proxy_governed` Worker traffic and do not configure pi, OpenCode, Claude Code, Codex, or other native Worker CLIs.

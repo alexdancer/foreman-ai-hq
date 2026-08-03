@@ -10,7 +10,6 @@ import Sessions from "./views/Sessions.jsx";
 import SessionReport from "./views/SessionReport.jsx";
 import TaskBreakdownReview from "./views/TaskBreakdownReview.jsx";
 import TaskHistory from "./views/TaskHistory.jsx";
-import PlanningChat from "./views/PlanningChat.jsx";
 import Alarms from "./views/Alarms.jsx";
 import BudgetSettings from "./views/BudgetSettings.jsx";
 import ControlPlaneSettings from "./views/ControlPlaneSettings.jsx";
@@ -84,7 +83,12 @@ export default function App() {
   } else if (route.view === "taskHistory") {
     content = <TaskHistory key={route.projectId} projectId={route.projectId} />;
   } else if (route.view === "planningChat") {
-    content = <PlanningChat key={route.projectId} projectId={route.projectId} />;
+    content = <Board
+      key={`pipeline:${route.projectId}`}
+      projectId={route.projectId}
+      surface="pipeline"
+      onStateChanged={() => setNavRefreshKey((current) => current + 1)}
+    />;
   } else if (route.view === "budgetSettings") {
     content = <BudgetSettings />;
   } else if (route.view === "controlPlaneSettings") {

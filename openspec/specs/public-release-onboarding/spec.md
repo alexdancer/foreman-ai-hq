@@ -31,8 +31,9 @@ The system SHALL provide public documentation that explains what Foreman AI HQ d
 - **AND** it SHALL explicitly state that Foreman AI HQ cannot govern arbitrary external-agent token spend unless traffic routes through the Harness Proxy or trustworthy run-bound native usage evidence is imported
 
 #### Scenario: Operator reviews local secret storage
-- **WHEN** an operator reads control-plane credential guidance
-- **THEN** the documentation SHALL state that portal-submitted control-plane API key values are written only to ignored local secret storage such as `.foreman/secrets.env`
+- **WHEN** an operator reads credential guidance
+- **THEN** the documentation SHALL state that optional Harness Proxy upstream API keys belong only in ignored local secret storage such as `.foreman/secrets.env` or the shell environment
+- **AND** it SHALL state that the Orchestrator settings portal does not collect those keys and pi authentication comes from `pi /login`
 - **AND** raw key values SHALL NOT be shown as expected support artifacts
 
 ### Requirement: Public support and release hygiene
@@ -40,7 +41,7 @@ The repo SHALL include public-release hygiene files and support templates that h
 
 #### Scenario: Public support template requests actionable context
 - **WHEN** an operator opens a setup/support issue template
-- **THEN** the template SHALL ask for redacted `foremanctl check` output, OS, install method, control-plane provider, Worker Adapter identity, tracking mode, and whether the control-plane key was configured through portal or environment
+- **THEN** the template SHALL ask for redacted `foremanctl check` output, OS, install method, Orchestrator Model state, Worker Adapter identity, tracking mode, and whether optional Harness Proxy upstream configuration is in use
 - **AND** it SHALL instruct the operator not to paste API keys, portal tokens, `.foreman/secrets.env`, or raw credentials
 
 #### Scenario: Release hygiene docs exist

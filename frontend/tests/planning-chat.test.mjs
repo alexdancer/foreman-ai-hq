@@ -38,6 +38,7 @@ const baseProps = {
   onMessageChange: () => {},
   onFileChange: () => {},
   onSend: () => {},
+  onIntake: () => {},
   onCancel: () => {},
 };
 
@@ -53,6 +54,7 @@ function jsonResponse(body, status = 200) {
 
 function makeFetch(events = []) {
   let messageResolve = null;
+  let intakeResolve = null;
   const requests = [];
   const fetchMock = async (url, options = {}) => {
     requests.push({ url, options });
@@ -62,9 +64,14 @@ function makeFetch(events = []) {
     if (url.includes("/planning/events")) {
       return jsonResponse({ events, next_since_id: events.length ? events.at(-1).id : 0, has_more: false });
     }
-    if (url.includes("/planning/intake")) {
+    if (url.includes("/planning/message")) {
       return new Promise((resolve) => {
         messageResolve = resolve;
+      });
+    }
+    if (url.includes("/planning/intake")) {
+      return new Promise((resolve) => {
+        intakeResolve = resolve;
       });
     }
     if (url.includes("/planning/cancel")) {
@@ -72,7 +79,12 @@ function makeFetch(events = []) {
     }
     return new Response("not found", { status: 404 });
   };
-  return { fetchMock, requests, getMessageResolve: () => messageResolve };
+  return {
+    fetchMock,
+    requests,
+    getMessageResolve: () => messageResolve,
+    getIntakeResolve: () => intakeResolve,
+  };
 }
 
 test("PlanningChatState renders the loading state while starting", () => {
@@ -141,10 +153,17 @@ test("PlanningChatState renders the provider sign-in state on a provider-auth 40
 });
 
 test("PlanningChatState disables the composer while a turn is in flight and shows Cancel", () => {
-  const markup = renderState({ started: true, sending: true, message: "do this" });
+  const markup = renderState({ started: true, sending: "message", message: "do this" });
   assert.match(markup, /disabled/);
   assert.match(markup, /Sending…/);
   assert.match(markup, /Cancel/);
+});
+
+test("PlanningChatState separates conversational Send from governed intake", () => {
+  const markup = renderState({ message: "shape this" });
+  assert.match(markup, />Send</);
+  assert.match(markup, /Create governed work/);
+  assert.match(markup, /Markdown intake/);
 });
 
 test("PlanningChat loads the transcript on open", async () => {
@@ -173,7 +192,7 @@ test("PlanningChat loads the transcript on open", async () => {
   });
 });
 
-test("PlanningChat sends a message and appends the returned turn", async () => {
+test("PlanningChat sends a conversational message and appends the returned turn", async () => {
   const { fetchMock, requests, getMessageResolve } = makeFetch([]);
   globalThis.fetch = fetchMock;
 
@@ -193,9 +212,10 @@ test("PlanningChat sends a message and appends the returned turn", async () => {
     form.props.onSubmit({ preventDefault: () => {} });
   });
 
-  const intakeRequests = requests.filter((r) => r.url.includes("/planning/intake"));
-  assert.equal(intakeRequests.length, 1);
-  assert.equal(intakeRequests[0].options.body.get("message"), "Add tests");
+  const messageRequests = requests.filter((r) => r.url.includes("/planning/message"));
+  assert.equal(messageRequests.length, 1);
+  assert.deepEqual(JSON.parse(messageRequests[0].options.body), { message: "Add tests" });
+  assert.equal(requests.filter((r) => r.url.includes("/planning/intake")).length, 0);
 
   assert.equal(renderer.root.findByProps({ placeholder: "Describe the task or goal…" }).props.disabled, true);
   assert.ok(JSON.stringify(renderer.toJSON()).includes("Sending…"));
@@ -208,6 +228,47 @@ test("PlanningChat sends a message and appends the returned turn", async () => {
   assert.match(markup, /Add tests/);
   assert.match(markup, /I'll add tests\./);
   assert.equal(renderer.root.findByProps({ placeholder: "Describe the task or goal…" }).props.disabled, false);
+
+  await act(async () => {
+    renderer.unmount();
+  });
+});
+
+test("PlanningChat submits governed intake only from the explicit intake action", async () => {
+  const { fetchMock, requests, getIntakeResolve } = makeFetch([]);
+  globalThis.fetch = fetchMock;
+
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(PlanningChat, { projectId: "demo-999" }));
+  });
+
+  const input = renderer.root.findByProps({ placeholder: "Describe the task or goal…" });
+  await act(async () => {
+    input.props.onChange({ target: { value: "Create a bounded task" } });
+  });
+  const intakeButton = renderer.root.findAllByType("button")
+    .find((button) => button.children.join("").includes("Create governed work"));
+
+  await act(async () => {
+    intakeButton.props.onClick();
+  });
+
+  const intakeRequests = requests.filter((request) => request.url.includes("/planning/intake"));
+  assert.equal(intakeRequests.length, 1);
+  assert.equal(intakeRequests[0].options.body.get("message"), "Create a bounded task");
+  assert.equal(requests.filter((request) => request.url.includes("/planning/message")).length, 0);
+  assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /Cancel/);
+
+  await act(async () => {
+    getIntakeResolve()(jsonResponse({
+      content: "Intake decision: single_task. One bounded slice.",
+      stop_reason: "end_turn",
+      outcome: { decision: "single_task", reason: "One bounded slice." },
+    }));
+  });
+
+  assert.match(JSON.stringify(renderer.toJSON()), /Intake decision: single_task/);
 
   await act(async () => {
     renderer.unmount();

@@ -4,7 +4,7 @@
 TBD - created by archiving change pi-planning-conversation-lifecycle. Update Purpose after archive.
 ## Requirements
 ### Requirement: A governed planning conversation has a server-side HTTP lifecycle
-The system SHALL expose portal-authenticated, project-scoped HTTP endpoints to drive a governed pi planning conversation across multiple requests: start a conversation for a project, send one operator message that drives exactly one governed pi turn, poll the conversation's turns since a cursor, cancel an in-flight turn, and end the conversation. A driven turn SHALL flow through the governed launch path and SHALL be recorded as a `planning` token turn with spend category `planning` and usage source `harness_proxy`. The endpoints SHALL NOT introduce any un-metered model call, and SHALL keep pi persona-driven and tool-scoped (read-only) exactly as the governed launch does.
+The system SHALL expose portal-authenticated, project-scoped HTTP endpoints to drive a governed pi planning conversation across multiple requests: start a conversation for a project, send one operator message that drives exactly one governed pi turn, poll the conversation's turns since a cursor, cancel an in-flight turn, and end the conversation. A driven turn SHALL be recorded as a `planning` token turn with spend category `planning` from pi's native usage evidence. The endpoints SHALL NOT introduce any un-metered model call, and SHALL keep pi persona-driven and tool-scoped (read-only) exactly as the governed launch does.
 
 #### Scenario: Starting a planning conversation returns a usable session
 - **WHEN** an authenticated operator starts a planning conversation for a project
@@ -14,7 +14,7 @@ The system SHALL expose portal-authenticated, project-scoped HTTP endpoints to d
 #### Scenario: Sending a message drives exactly one metered planning turn
 - **WHEN** the operator sends one message to a started planning conversation
 - **THEN** the system SHALL drive exactly one governed pi turn with that text and return the agent's response
-- **AND** the turn SHALL be recorded as a `planning` token turn with spend category `planning` and usage source `harness_proxy`
+- **AND** the turn SHALL be recorded as a `planning` token turn with spend category `planning` from pi's native usage evidence
 - **AND** the turn SHALL be retrievable from the conversation's poll feed
 
 #### Scenario: Unauthenticated access is rejected
@@ -110,4 +110,3 @@ The system SHALL allow the Orchestrator to investigate the project repository wi
 - **WHEN** task estimation, task breakdown, or agent review runs
 - **THEN** it SHALL have no repository tools
 - **AND** an investigation-recommended signal SHALL surface as an offer to investigate in the conversation rather than creating a dispatched Task
-

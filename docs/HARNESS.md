@@ -95,16 +95,17 @@ Hosted workspaces are useful for analysis and estimation before they are launch-
 
 ## Task intake and slicing
 
-The board is not a backlog dump. Work enters through **Estimate task**:
+The board is not a backlog dump. Planning Chat is the sole public Task intake:
 
-- Short plain-text tasks may go straight to estimation.
-- Markdown uploads, Markdown paste, and clearly oversized tasks go through the **Task Breakdown Agent** first.
+- The operator can converse and investigate without creating a Task.
+- **Create governed work** records a structured `single_task` or `needs_breakdown` decision and reason.
+- `single_task` intake proceeds to estimation; `needs_breakdown`, Markdown uploads, and Markdown paste go through the **Task Breakdown Agent** first.
 - Breakdown is semantic, not bullet-count based.
 - Proposed tasks should be narrow vertical slices that are independently grabbable, demoable or verifiable, dependency-aware, and small enough for one Worker run.
 - Each proposed slice carries enough policy evidence to review it: objective, proof path, split/merge rationale, dependencies, likely entry points when known, and whether it is AFK-launchable or HITL.
 - Constraints, non-goals, and verification notes are preserved as task metadata or rejected as non-tasks; they should not become fake implementation tasks.
 
-Every Task has an explicit kind: `implementation` or `acceptance_verification`. The Planning Chat is the place to investigate a concrete unanswered repository question that materially prevents an honest estimate or executable slice; it does not produce a separate Task.
+Every Task has an explicit kind: `implementation` or `acceptance_verification`. Planning Chat investigation does not produce a separate Task.
 
 For integrated work, the breakdown should include a final **Acceptance Verification** task. That task checks the combined result against the original source contract instead of rerunning the whole implementation as one large task.
 

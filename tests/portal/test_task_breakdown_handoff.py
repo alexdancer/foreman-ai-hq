@@ -166,13 +166,16 @@ def test_review_projection_is_exact_bounded_redacted_and_no_store(tmp_path, monk
     assert set(payload) == {"review", "candidates", "context", "repo_context", "controls", "links"}
     assert set(payload["review"]) == {
         "id", "status", "decision", "model", "session_id", "session_href", "rationale",
-        "source_text", "failure_type", "failure_message", "created_task_ids",
+        "intake_decision", "intake_decision_reason", "source_text", "failure_type",
+        "failure_message", "created_task_ids",
     }
     assert set(payload["controls"]) == {"can_accept", "can_retry", "can_create_manual_candidate"}
     assert set(payload["links"]) == {
         "self_href", "api_href", "board_href", "accept_href", "retry_href", "manual_href",
     }
     assert payload["review"]["status"] == "proposed"
+    assert payload["review"]["intake_decision"] == "needs_breakdown"
+    assert payload["review"]["intake_decision_reason"]["preview"] == "DEMO work requires breakdown."
     assert payload["controls"] == {"can_accept": True, "can_retry": False, "can_create_manual_candidate": False}
     assert payload["candidates"]["pagination"]["total"] == 21
     assert payload["candidates"]["pagination"]["has_more"] is True

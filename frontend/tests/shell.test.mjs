@@ -24,6 +24,7 @@ let loadEvidenceDrawer;
 let boardNoticeFromSearch;
 let mergeBoardStatus;
 let taskDisplayName;
+let investigationMessage;
 let parseRoute;
 let ProjectsState;
 let pollBoardStatus;
@@ -120,6 +121,7 @@ before(async () => {
     pollBoardStatus,
     submitBoardAction,
     taskDisplayName,
+    investigationMessage,
   } = await server.ssrLoadModule("/src/views/Board.jsx"));
   ({ WorkspaceState, submitProjectRestore } = await server.ssrLoadModule("/src/views/Workspace.jsx"));
   ({ SessionsState } = await server.ssrLoadModule("/src/views/Sessions.jsx"));
@@ -1234,6 +1236,8 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
   assert.match(pipeline, /type="file"/);
   assert.match(pipeline, /type="number"/);
   assert.match(pipeline, /type="checkbox"/);
+  assert.match(pipeline, /aria-expanded="true"/);
+  assert.match(pipeline, />Collapse</);
   assert.doesNotMatch(pipeline, /Active Worker Runs|Review queue|Recently finished|Server board/);
 
   const emptyData = boardData();
@@ -1304,8 +1308,27 @@ test("Execution Floor renders active runs, Review queue, and recently-finished t
   assert.match(floor, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
   assert.match(floor, /class="token-comparison finished-token-comparison" aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
   assert.match(floor, /status-pill-glyph[^>]*aria-hidden="true">▮<\/span><span class="status-pill-label">Queue idle<\/span>/);
+  assert.match(floor, /aria-expanded="false"/);
+  assert.match(floor, />Expand</);
   assert.ok(floor.indexOf("finished-token-comparison") < floor.indexOf("Done DEMO task"));
   assert.doesNotMatch(floor, /Planning Chat|Planning Inbox|Estimated DEMO task|Task details/);
+});
+
+test("Planning Chat investigation links prefill bounded Task context", () => {
+  const tasks = Object.values(boardData().tasks_by_status).flat();
+  assert.equal(
+    investigationMessage(tasks, "task-estimated-999"),
+    "Investigate Task task-estimated-999 before re-estimation:\nEstimated DEMO task",
+  );
+  const markup = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    surface: "pipeline",
+    data: boardData(),
+    error: null,
+    loading: false,
+    investigateTaskId: "task-estimated-999",
+  }));
+  assert.match(markup, /value="Investigate Task task-estimated-999 before re-estimation:[\s\S]*Estimated DEMO task"/);
 });
 
 test("Evidence Drawer fetches its Session Report handoff and reuses bounded evidence components", async () => {
@@ -1650,6 +1673,8 @@ function breakdownReviewData(status = "proposed") {
     review: {
       id: "breakdown-demo-999", status, decision: "proposed_task_breakdown",
       model: bounded("DEMO-model-999"), session_id: "session-demo-999",
+      intake_decision: "needs_breakdown",
+      intake_decision_reason: bounded("DEMO intake reason 999"),
       session_href: "/sessions/session-demo-999", rationale: bounded("DEMO rationale 999"),
       source_text: bounded("DEMO source 2099", { truncated: true, full_href: "/api/task-breakdowns/demo/text/source" }),
       failure_type: status === "failed" ? bounded("provider_error") : null,
@@ -1731,6 +1756,7 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
     "Task Breakdown Review", "DEMO title 999", "Candidate kind", "Execution mode",
     "Acceptance criteria", "Candidate proof / verification path", "Task slicing evidence",
     "Global contract summary", "Rejected as Tasks", "Repo Context Brief",
+    "Intake decision", "needs_breakdown", "Intake reason", "DEMO intake reason 999",
     "Accept selected and estimate", "Unsaved browser-local edits",
   ]) assert.match(markup, new RegExp(text));
   assert.match(markup, /Load full text before editing/);

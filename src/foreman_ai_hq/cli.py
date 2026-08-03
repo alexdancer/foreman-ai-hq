@@ -63,13 +63,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Wrote {_display_path(secrets_path, cwd)}")
         print(f"Wrote {_display_path(guardrails_path, cwd)}")
         print(f"Wrote {_display_path(database_path, cwd)}")
-        print("Start with foremanctl serve, open http://localhost:8000/, then add the control-plane API key in /settings/control-plane.")
+        print(
+            "Start with foremanctl serve, open http://localhost:8000/, run `pi /login`, "
+            "then choose and verify the Orchestrator Model in /settings/control-plane."
+        )
         portal_token_env, control_key_env = secret_env_names(config)
         secrets_display = _display_path(secrets_path, cwd)
         print(f"Portal token for shared access: set {portal_token_env} in {secrets_display}")
         print(
-            f"Control-plane API key: configure {control_key_env} in /settings/control-plane; "
-            f"{secrets_display} or shell env remain supported alternatives."
+            f"Optional Harness Proxy upstream API key for proxy_governed Workers: set "
+            f"{control_key_env} in {secrets_display} or the shell environment; it never "
+            "configures pi orchestration."
         )
         return 0
 

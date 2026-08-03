@@ -34,7 +34,7 @@ Each job SHALL terminate by calling a dedicated submit tool (`submit_estimate` f
 - **THEN** the system SHALL surface a structured-output failure onto the existing recovery path (manual estimate, or breakdown-failed review)
 - **AND** it SHALL NOT fabricate a result or fall back to a heuristic estimate or deterministic split
 
-### Requirement: Jobs run on curated context and escalate deep reading to a Scout
+### Requirement: Jobs run on curated context and escalate deep reading to Planning Chat
 The system SHALL run estimation and task breakdown on curated lightweight project context and SHALL NOT let a job crawl arbitrary repository source inline. When a job cannot produce a confident result from that context, it SHALL surface an explicit investigation-recommended signal that routes to the planning conversation, where the Orchestrator reads the repository under its read-only allowlist, rather than reading the repository inline as hidden orchestration spend or dispatching an investigation Task.
 
 #### Scenario: A confident job produces a result without crawling the repository
@@ -59,4 +59,3 @@ Migrating estimation and task breakdown onto the Orchestrator runtime SHALL NOT 
 - **WHEN** a task-breakdown agent turn submits its result
 - **THEN** the submitted arguments SHALL carry the Proposed Task Breakdown contract
 - **AND** Task Breakdown Review SHALL consume that contract without change
-

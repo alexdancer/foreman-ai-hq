@@ -4,7 +4,7 @@
 TBD - created by archiving change react-planning-chat-ui. Update Purpose after archive.
 ## Requirements
 ### Requirement: The Portal serves a Planning Chat surface for a project
-The system SHALL serve a Planning Chat view at the canonical Portal route `/projects/{project_id}/plan`, rendered by the React shell and reachable from the project's Portal navigation. The page route SHALL require portal authentication and SHALL serve the React shell or the missing-build recovery response, mirroring the existing project page routes. The view SHALL consume only the existing `planning-conversation` endpoints and SHALL NOT add or alter any backend planning behavior, metering, persona, tool policy, or conversation lifecycle.
+The system SHALL serve Planning Chat at the canonical Portal route `/projects/{project_id}/plan`, rendered inside the project's Pipeline surface and reachable from project workflows. The page route SHALL require portal authentication and SHALL serve the React shell or the missing-build recovery response, mirroring the existing project page routes. The view SHALL consume only the existing `planning-conversation` endpoints and SHALL NOT add or alter any backend planning behavior, metering, persona, tool policy, or conversation lifecycle.
 
 #### Scenario: The plan route serves the Portal shell under auth
 - **WHEN** an authenticated operator opens `/projects/{project_id}/plan`
@@ -16,12 +16,30 @@ The system SHALL serve a Planning Chat view at the canonical Portal route `/proj
 - **THEN** the system SHALL reject it rather than serving the planning surface
 
 ### Requirement: The Planning Chat view drives a governed conversation
-The Planning Chat view SHALL, on load, start (or attach to) the project's planning conversation and load the existing transcript, then let the operator send a message that drives exactly one governed turn and appends the returned turn to the transcript. The composer SHALL be disabled while a turn is in flight so the view never issues two concurrent turns against one conversation. The view SHALL render the transcript in the monospace live-feed idiom on the shared UI primitives rather than a chat-app bubble layout.
+The Planning Chat view SHALL, on load, start (or attach to) the project's planning conversation and load the existing transcript, then let the operator use **Send** to drive exactly one governed conversational turn through `/planning/message` and append the returned turn to the transcript. Conversational Send SHALL NOT create a Task or Proposed Task Breakdown. The composer SHALL be disabled while a turn is in flight so the view never issues two concurrent turns against one conversation. The view SHALL render the transcript in the monospace live-feed idiom on the shared UI primitives rather than a chat-app bubble layout.
 
 #### Scenario: Sending a message appends the governed turn
 - **WHEN** the operator submits a message in a started conversation
 - **THEN** the view SHALL send exactly one turn and append the returned response to the transcript
 - **AND** the composer SHALL be disabled from submitting another message until that turn completes
+
+#### Scenario: Investigation link opens shaped conversational context
+- **WHEN** the operator follows an `investigate_task` link from Needs You
+- **THEN** the Pipeline SHALL open Planning Chat with the bounded Task identity and summary in the composer
+- **AND** **Send** SHALL continue the active planning conversation rather than submit Task intake
+
+### Requirement: Governed Task intake is an explicit transition
+The composer SHALL provide a separate **Create governed work** action that submits the shaped text or Markdown attachment through `/planning/intake`. That action SHALL record a structured `single_task` or `needs_breakdown` decision and reason before any public Task creation. The cancel control SHALL apply only to an in-flight conversational turn and SHALL NOT target the idle conversation while a structured intake job is running.
+
+#### Scenario: Operator explicitly creates governed work
+- **WHEN** the operator selects **Create governed work** after shaping the source
+- **THEN** the view SHALL submit exactly one intake request
+- **AND** the returned structured decision and reason SHALL be appended to the transcript
+
+#### Scenario: Send remains non-creating
+- **WHEN** the operator selects **Send**
+- **THEN** the view SHALL submit exactly one conversational message request
+- **AND** it SHALL NOT call the intake endpoint
 
 #### Scenario: The transcript is loaded on open
 - **WHEN** the Planning Chat view opens for a project with an active conversation
@@ -88,7 +106,7 @@ When a planning turn completes, the system SHALL refresh the Orchestration Board
 The Planning Chat composer SHALL accept a Markdown file attachment in addition to typed and pasted text, because Markdown intake requires the file's bytes. Attached file content SHALL take precedence over pasted text when both are supplied, matching existing Markdown intake precedence, and unsupported file types and empty content SHALL be rejected with a clear validation message rather than sent as a turn.
 
 #### Scenario: Operator attaches a Markdown file
-- **WHEN** the operator attaches a `.md` file in the composer and submits
+- **WHEN** the operator attaches a `.md` file and selects **Create governed work**
 - **THEN** the system SHALL decode its content as Markdown intake
 - **AND** it SHALL route to Task Breakdown Review before any Task is created
 
@@ -100,4 +118,3 @@ The Planning Chat composer SHALL accept a Markdown file attachment in addition t
 - **WHEN** the operator attaches an unsupported file type or empty content
 - **THEN** the system SHALL show a clear validation message
 - **AND** it SHALL NOT start a model turn or record spend
-

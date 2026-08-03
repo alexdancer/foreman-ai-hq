@@ -8,7 +8,7 @@ Use it when you want a coding agent workflow that is easier to inspect:
 
 - estimate work before launch
 - break larger plans into smaller governed slices
-- investigate bounded repository uncertainty with visible, read-only Scout tasks
+- investigate bounded repository uncertainty in Planning Chat before creating work
 - plan work in a project Pipeline and run coding agents from its Execution Floor
 - keep long-running agent work from turning into one polluted mega-thread: each slice gets its own scoped Worker run, while the Harness preserves the plan, budget, evidence, and review state
 - record Worker Run evidence, stdout/stderr, token usage, and review state
@@ -82,7 +82,7 @@ This updates the global `foremanctl` CLI and preserves repo-local `.foreman/` st
 4. Run `pi /login` to authenticate with your provider, then choose an Orchestrator Model from pi's inventory and verify it.
 5. Connect a local repository from `/projects`.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify token tracking.
-7. Open the project's Pipeline at `/projects/{project_id}`, estimate a tiny implementation task, and launch it.
+7. Open the project's Pipeline at `/projects/{project_id}`, shape a tiny task in Planning Chat, select **Create governed work**, and launch the resulting Estimated Task.
 8. Follow the run on `/projects/{project_id}/floor`; open its Evidence Drawer before marking the task done.
 
 Default loopback `foremanctl serve` opens the local Portal without a login token. If you bind the Portal to `0.0.0.0`, run it behind a proxy, or use Docker/shared access, keep the portal token from ignored `.foreman/secrets.env` and sign in through `/login`.
@@ -108,7 +108,7 @@ Representative local Portal screens using synthetic/public-safe data:
 
 ## How the workflow works
 
-1. **Create a task** in the project Pipeline. Short intake can create an implementation Task or a read-only Scout.
+1. **Shape work** in Planning Chat, then explicitly submit it as governed intake. The recorded `single_task` or `needs_breakdown` decision and reason determine the next step.
 2. **Estimate** with the Orchestrator Model.
 3. **Launch** through a verified Worker Adapter.
 4. **Run async** on the Execution Floor while the Portal stays responsive.
@@ -123,7 +123,7 @@ Estimated -> Running -> Review -> Done
 
 Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while Needs You explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, budget overrides, and advisory low-confidence estimates at the top of the Pipeline.
 
-Task kind is explicit: `implementation`, `scout`, or `acceptance_verification`. An implementation Task delivers a change, a Scout produces bounded findings without changing the repository, and Acceptance Verification proves an integrated result against its source contract.
+Task kind is explicit: `implementation` or `acceptance_verification`. An implementation Task delivers a change, while Acceptance Verification proves an integrated result against its source contract.
 
 ### When an estimate is uncertain
 
@@ -131,15 +131,13 @@ An automatic estimate below `0.60` confidence creates an advisory Needs You item
 
 - acknowledge the current estimate;
 - enter a manual estimate; or
-- create one linked Scout for the current estimate revision.
+- open Planning Chat to investigate the repository facts needed for an honest estimate.
 
-A Scout is a normal visible Task with its own estimate, budget, Worker Run, actual usage, Review step, and Session Report. Launch forces read-only mode server-side and requires both authoritative usage tracking and a separately verified adapter-enforced read-only profile. The current built-in Scout launch proof is Codex with `--sandbox read-only`; an adapter that is launchable for implementation work is not automatically Scout-compatible.
-
-Running or completing a Scout never changes the target Task's estimate. After the Scout report is ready, the operator may request a Scout-informed re-estimate, review the pending result, and explicitly apply or dismiss it. Scout actuals remain Worker spend on the Scout and are excluded from implementation accuracy calibration.
+Planning Chat investigation is orchestration work, not a separate Task. After refining the contract, use **Create governed work** to record a fresh structured intake decision and reason.
 
 ### With a Markdown file
 
-For a larger `.md` plan, paste the Markdown into the Pipeline or upload the file instead of turning every bullet into a task yourself:
+For a larger `.md` plan, paste the Markdown into Planning Chat or upload the file, then select **Create governed work** instead of turning every bullet into a task yourself:
 
 ```text
 .md plan
@@ -161,7 +159,7 @@ Foreman AI HQ has four main pieces:
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Portal / Control Plane**   | Browser UI and API for setup, estimates, project boards, launch, reports, budgets, and review.                                                                                           |
 | **Local Runner**             | Runs near your local repository so Worker CLIs can see local files, git state, and their own credentials. In local mode it runs inside the same app process.                             |
-| **Worker Adapter**           | Integration for a coding CLI such as OpenCode, Claude Code, or Codex. Adapter verification proves the CLI can run and produce trustworthy usage evidence for the selected model; Scout launch additionally requires a verified read-only profile. |
+| **Worker Adapter**           | Integration for a coding CLI such as OpenCode, Claude Code, or Codex. Adapter verification proves the CLI can run and produce trustworthy usage evidence for the selected model. |
 | **Token ledger and reports** | SQLite-backed records for estimates, Worker Runs, token evidence, alarms, checkpoints, and session artifacts.                                                                            |
 
 
@@ -174,7 +172,7 @@ There are two model layers:
 | **Worker model**        | the actual coding task                                        | configured by the native Worker CLI                             |
 
 
-Optional direct-provider credentials do not configure pi or a native Worker CLI.
+Optional direct-provider credentials configure only Harness Proxy upstream traffic for `proxy_governed` Workers. They do not configure pi or a native Worker CLI.
 
 ## Local files and configuration
 
@@ -185,7 +183,7 @@ Run it from the repository you want Foreman AI HQ to govern. If you run it from 
 | File                   | Purpose                                                        |
 | ---------------------- | -------------------------------------------------------------- |
 | `.foreman/config.toml`     | non-secret local config                                        |
-| `.foreman/secrets.env`     | ignored portal token and optional provider key storage         |
+| `.foreman/secrets.env`     | ignored portal token and optional Harness Proxy upstream key storage |
 | `.foreman/guardrails.yaml` | ignored default guardrail config                               |
 | `.foreman/harness.db`      | default SQLite database, created or migrated by `foremanctl init`     |
 
@@ -199,18 +197,17 @@ Common environment variables:
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `TOKEN_TRACKER_PORTAL_TOKEN`    | Portal login token for shared/non-loopback access                             |
 | `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model chosen from pi's inventory                                 |
-| `FOREMAN_AI_HQ_CONTROL_PROVIDER`   | Optional direct-provider compatibility setting                               |
-| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Optional direct-provider compatibility base URL                              |
-| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Optional direct-provider API key; not pi or native Worker CLI auth            |
+| `FOREMAN_AI_HQ_CONTROL_PROVIDER`   | Optional Harness Proxy upstream provider for `proxy_governed` Workers         |
+| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Optional Harness Proxy upstream base URL                                      |
+| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Optional Harness Proxy upstream API key; never pi or native Worker CLI auth    |
 
 
-Optional direct-provider keys belong in ignored local secret storage or the shell environment; the Orchestrator settings page does not collect them. The Orchestrator Model is selected from pi's discovered inventory, and its provider authentication belongs to pi.
+Optional Harness Proxy upstream keys belong in ignored local secret storage or the shell environment; the Orchestrator settings page does not collect them. The Orchestrator Model is selected from pi's discovered inventory, and its provider authentication belongs to pi.
 
 ## Current limits
 
 - The main supported path is local all-in-one mode.
 - Worker launch readiness depends on local repo access, git state, installed Worker CLIs, and native CLI auth/config.
-- Scout launch currently requires the verified Codex read-only sandbox profile; tracking verification alone is insufficient.
 - Hosted workspaces, a fuller CLI, MCP access, and Homebrew install are future work.
 
 ## More docs

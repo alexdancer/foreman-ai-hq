@@ -157,7 +157,7 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 with page.expect_response(
                     lambda response: "/planning/intake" in response.url and response.status == 200
                 ) as response_info:
-                    page.locator('form.planning-chat-form button[type="submit"]').click()
+                    page.get_by_role("button", name="Create governed work").click()
                 outcome = response_info.value.json()["outcome"]
                 task_id = outcome["task_id"]
                 assert task_id

@@ -25,6 +25,7 @@ export function PlanningChatState({
   onMessageChange,
   onFileChange,
   onSend,
+  onIntake,
   onCancel,
   compact,
 }) {
@@ -43,8 +44,13 @@ export function PlanningChatState({
 
   const handleSubmit = (event) => {
     event.preventDefault();
+    if (!message.trim() || sending || !started) return;
+    onSend(message.trim());
+  };
+
+  const handleIntake = () => {
     if ((!message.trim() && !attachment) || sending || !started) return;
-    onSend(message.trim(), attachment);
+    onIntake(message.trim(), attachment);
   };
 
   const noticeVariant = error?.status === 503 ? "warning" : "danger";
@@ -99,23 +105,31 @@ export function PlanningChatState({
                 value={message}
                 onChange={(event) => onMessageChange(event.target.value)}
                 placeholder="Describe the task or goal…"
-                disabled={!started || sending}
+                disabled={!started || Boolean(sending)}
               />
             </label>
             <label>
-              <span>Markdown file <em>(optional)</em></span>
+              <span>Markdown intake <em>(optional)</em></span>
               <input
                 className="board-file"
                 type="file"
                 accept=".md,text/markdown,text/plain"
-                disabled={!started || sending}
+                disabled={!started || Boolean(sending)}
                 onChange={(event) => onFileChange(event.target.files?.[0] || null)}
               />
             </label>
-            <Button type="submit" disabled={!started || sending || (!message.trim() && !attachment)}>
-              {sending ? "Sending…" : "Send"}
+            <Button type="submit" disabled={!started || Boolean(sending) || !message.trim()}>
+              {sending === "message" ? "Sending…" : "Send"}
             </Button>
-            {sending && (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!started || Boolean(sending) || (!message.trim() && !attachment)}
+              onClick={handleIntake}
+            >
+              {sending === "intake" ? "Creating…" : "Create governed work"}
+            </Button>
+            {sending === "message" && (
               <Button type="button" variant="danger" size="small" onClick={onCancel}>
                 Cancel
               </Button>
@@ -127,15 +141,15 @@ export function PlanningChatState({
   );
 }
 
-export default function PlanningChat({ projectId, onTurnComplete, compact }) {
+export default function PlanningChat({ projectId, onTurnComplete, compact, initialMessage = "" }) {
   const [state, setState] = useState({
     loading: true,
     error: null,
     started: false,
     transcript: [],
-    message: "",
+    message: initialMessage,
     attachment: null,
-    sending: false,
+    sending: null,
   });
 
   const base = `/api/projects/${projectId}/planning`;
@@ -150,7 +164,7 @@ export default function PlanningChat({ projectId, onTurnComplete, compact }) {
 
   useEffect(() => {
     let active = true;
-    setState((s) => ({ ...s, loading: true, error: null, started: false, transcript: [], message: "", attachment: null }));
+    setState((s) => ({ ...s, loading: true, error: null, started: false, transcript: [], message: initialMessage, attachment: null }));
 
     async function start() {
       try {
@@ -180,13 +194,46 @@ export default function PlanningChat({ projectId, onTurnComplete, compact }) {
     return () => {
       active = false;
     };
-  }, [projectId, base]);
+  }, [projectId, base, initialMessage]);
 
   const handleMessageChange = (value) => setState((s) => ({ ...s, message: value }));
   const handleFileChange = (file) => setState((s) => ({ ...s, attachment: file }));
 
-  const handleSend = async (text, file) => {
-    setState((s) => ({ ...s, message: text, attachment: file, sending: true, error: null }));
+  const appendTurn = (text, turn) => {
+    setState((s) => ({
+      ...s,
+      message: "",
+      attachment: null,
+      sending: null,
+      transcript: [
+        ...s.transcript,
+        {
+          id: `turn-${Date.now()}`,
+          operator: text,
+          content: turn.content,
+          stopReason: turn.stop_reason || null,
+          createdAt: new Date().toISOString(),
+          outcome: turn.outcome || null,
+        },
+      ],
+    }));
+    onTurnComplete?.(turn);
+  };
+
+  const handleSend = async (text) => {
+    setState((s) => ({ ...s, message: text, sending: "message", error: null }));
+    try {
+      const turn = await postJSON(`${base}/message`, { message: text });
+      if (!mounted.current) return;
+      appendTurn(text, turn);
+    } catch (error) {
+      if (!mounted.current) return;
+      setState((s) => ({ ...s, sending: null, error }));
+    }
+  };
+
+  const handleIntake = async (text, file) => {
+    setState((s) => ({ ...s, message: text, attachment: file, sending: "intake", error: null }));
     try {
       const body = new FormData();
       body.append("message", text || "");
@@ -195,27 +242,10 @@ export default function PlanningChat({ projectId, onTurnComplete, compact }) {
       }
       const turn = await postForm(`${base}/intake`, body);
       if (!mounted.current) return;
-      setState((s) => ({
-        ...s,
-        message: "",
-        attachment: null,
-        sending: false,
-        transcript: [
-          ...s.transcript,
-          {
-            id: `turn-${Date.now()}`,
-            operator: text || (file ? `Attached ${file.name}` : ""),
-            content: turn.content,
-            stopReason: turn.stop_reason || null,
-            createdAt: new Date().toISOString(),
-            outcome: turn.outcome || null,
-          },
-        ],
-      }));
-      onTurnComplete?.(turn);
+      appendTurn(text || (file ? `Attached ${file.name}` : ""), turn);
     } catch (error) {
       if (!mounted.current) return;
-      setState((s) => ({ ...s, sending: false, error }));
+      setState((s) => ({ ...s, sending: null, error }));
     }
   };
 
@@ -240,6 +270,7 @@ export default function PlanningChat({ projectId, onTurnComplete, compact }) {
       onMessageChange={handleMessageChange}
       onFileChange={handleFileChange}
       onSend={handleSend}
+      onIntake={handleIntake}
       onCancel={handleCancel}
       compact={compact}
     />

@@ -467,9 +467,11 @@ function ReviewSummary({ data }) {
       <dl className="detail-grid">
         <dt>Review</dt><dd>{review.id}</dd>
         <dt>Decision</dt><dd>{review.decision}</dd>
+        {review.intake_decision && <><dt>Intake decision</dt><dd>{review.intake_decision}</dd></>}
         <dt>Model</dt><dd>{review.model.preview || "Unavailable"}</dd>
         {review.session_href && <><dt>Token session</dt><dd><AppLink to={review.session_href}>{review.session_id}</AppLink></dd></>}
       </dl>
+      {review.intake_decision_reason?.preview && <BoundedEvidence label="Intake reason" value={review.intake_decision_reason} />}
       <BoundedEvidence label="Rationale" value={review.rationale} />
       <details><summary>Original source</summary><BoundedEvidence value={review.source_text} /></details>
       {review.failure_type && <BoundedEvidence label="Failure type" value={review.failure_type} />}

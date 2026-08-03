@@ -3620,11 +3620,15 @@ def test_chat_front_door_has_no_legacy_intake_form_and_pane_state_matches_surfac
     assert "estimate-form" not in board_source
     assert '"/tasks/estimate-form"' not in board_source
     assert "PlanningChat" in board_source
-    # PipelineSurface renders the pane unconditionally; FloorSurface controls it.
     assert "function PipelineSurface(" in board_source
     assert "function FloorSurface(" in board_source
-    assert "const [chatExpanded, setChatExpanded] = useState(false)" in board_source
-    assert "{chatExpanded ? \"Collapse\" : \"Expand\"}" in board_source
+    assert "function PlanningPane(" in board_source
+    assert "defaultExpanded" in board_source
+    assert "aria-expanded={expanded}" in board_source
+    assert "is-collapsed" in board_source
+    app_source = Path("frontend/src/App.jsx").read_text(encoding="utf-8")
+    assert 'route.view === "planningChat"' in app_source
+    assert 'surface="pipeline"' in app_source
 
 
 def test_floor_evidence_drawer_retains_fixed_width_beside_collapsed_pane():
