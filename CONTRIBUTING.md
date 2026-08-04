@@ -9,7 +9,7 @@ Foreman AI HQ is a local, Portal-first Harness for governed coding agents. Keep 
 - Keep product behavior, demo behavior, and internal architecture separate.
 - Do not blur Control Plane model config with Worker Adapter model/auth config.
 - Do not document unproven governance modes as operator-ready.
-- Treat test, OpenSpec, and docs warnings as work to fix, not noise.
+- Treat test, specification, and docs warnings as work to fix, not noise.
 
 ## Issues, branches, and labels
 
@@ -27,25 +27,15 @@ Use a short-lived branch with a focused name. Do not mix feature work, refactors
 
 ## Before changing code or product docs
 
-1. Read `CONTEXT.md` before changing Harness behavior, Portal copy, workflow, OpenSpec artifacts, tests, demo data, or product docs.
-2. Check whether the change needs an OpenSpec proposal. Behavior, workflow, architecture, and terminology changes usually do.
+1. Read `CONTEXT.md` before changing Harness behavior, Portal copy, workflow, specification artifacts, tests, demo data, or product docs.
+2. Check `docs/specs/` and `docs/migration/specification-workflow-migration.md` before changing behavior, workflow, architecture, or terminology.
 3. Read nearby code and tests before editing. Follow the local style.
 4. Add a dependency only when it is needed and belongs in `pyproject.toml`.
 
-## OpenSpec
+## Specifications
 
-This repo uses OpenSpec under `openspec/`. Use the CLI instead of guessing paths.
+Use `docs/specs/product-spec.md`, `docs/specs/technical-spec.md`, `docs/specs/test-contract.md`, and `docs/specs/implementation-tasks.md` as the active source of truth. Keep task status current only after implementation and relevant checks pass.
 
-```bash
-openspec list --json
-openspec status --change "<change-name>" --json
-openspec instructions <artifact-id> --change "<change-name>" --json
-openspec instructions apply --change "<change-name>" --json
-openspec validate <change-name> --strict
-openspec validate --all --strict
-```
-
-When implementing an OpenSpec change, mark a task complete only after the code and relevant checks pass.
 
 ## Local setup
 
@@ -156,13 +146,13 @@ For agent-ready tasks, put the objective, acceptance criteria, constraints, proo
 
 Before opening or merging a PR, confirm:
 
-- [ ] The issue or OpenSpec change is linked when applicable.
+- [ ] The issue or specification reference is linked when applicable.
 - [ ] `CONTEXT.md` terminology is followed.
 - [ ] The diff is focused.
 - [ ] Tests were added or updated for behavior changes.
 - [ ] Targeted checks passed.
 - [ ] `uv run --extra test pytest -q` passed, or the blocker is documented.
-- [ ] Relevant OpenSpec validation passed for spec-driven changes.
+- [ ] Relevant targeted checks passed for specification-driven changes.
 - [ ] README, docs, or changelog were updated if user-facing behavior changed.
 - [ ] No secrets or local `.foreman/` state are included.
 - [ ] Generated files are intentional.

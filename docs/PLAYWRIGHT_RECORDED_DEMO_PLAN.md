@@ -1,7 +1,7 @@
 # Synthetic Playwright Recorded Demo Plan
 
 **Status: shipped 2026-07-19**, archived as
-`openspec/changes/archive/2026-07-19-playwright-recorded-demo/`. The demo drives
+the historical recorded-demo specification record. The demo drives
 a synthetic Claude-shaped stream — no real CLI, key, or network. Kept below as
 the design record.
 
@@ -37,7 +37,7 @@ synthetic state and monkeypatches only its in-process app before uvicorn starts.
 - Create: `tests/e2e/test_recorded_demo.py` — browser scenario.
 - Modify: `CONTEXT.md` only if first implementation changes the existing
   Recorded Demo contract; otherwise this plan already follows it.
-- Modify: `openspec/changes/live-worker-run-streaming/tasks.md` only after test
+- Modify: the live-worker-run-streaming task catalog only after test
   passes; mark 5.6 then 5.7 after gates rerun.
 
 ## Architecture
@@ -227,15 +227,14 @@ The project has no existing Playwright fixture or provider fake. First browser
 slice starts from test-seeded accepted task, because it directly proves 5.6.
 If product requires the entire Context-defined Markdown intake → Task Breakdown
 Review → accepted estimation path in this same recording, add it as a separate
-OpenSpec change. It needs a synthetic Control Plane response fixture and is not
+specification change. It needs a synthetic Control Plane response fixture and is not
 required to prove live streaming.
 
-### 6. Reconcile the existing OpenSpec change directory
+### 6. Keep the recorded-demo plan aligned
 
-`openspec/changes/playwright-recorded-demo/` currently holds only
-`.openspec.yaml` and reports zero tasks, so `openspec list` shows a phantom
-change. Either adopt that directory as the home for this proposal or remove it
-before proposing; do not leave both.
+The recorded-demo behavior is covered by `CONTEXT.md`, `docs/specs/product-spec.md`,
+`docs/specs/test-contract.md`, and the implementation/task catalog. Update those
+artifacts when the scenario changes; do not create a parallel planning tree.
 
 ### 7. Gates and task bookkeeping
 
@@ -245,7 +244,7 @@ Run:
 uv run pytest -q tests/e2e/test_recorded_demo.py
 uv run pytest -q
 npm --prefix frontend run check
-openspec validate live-worker-run-streaming --strict --no-interactive
+# See docs/specs/test-contract.md for the behavior contract
 ```
 
 Only after all pass: mark 5.6 and 5.7 complete, rerun the final two commands,

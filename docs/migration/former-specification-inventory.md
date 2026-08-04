@@ -1,0 +1,175 @@
+# Former specification inventory (pre-removal evidence)
+
+This compact inventory records the tracked files inspected before removal. Full file contents remain available in Git history; current requirements are mapped in `docs/migration/specification-workflow-migration.md`.
+
+## Inventory totals
+
+- Former capability tree: 734 tracked files, including the root configuration, 51 canonical capabilities, one active design change, and 100 archived changes.
+- Former agent integrations: 22 Cursor command/skill files and 22 OpenCode command/skill files; all were workflow-specific and removed.
+- Former active design handoff: `DESIGN.md` and `docs/design/portal-operator-workbench.md`; both are retained.
+
+## Canonical capabilities
+- `adapter-aware-model-routing` — 67 lines; sha256 `f6b329e0e1c071ff1f98225c7dac0af843fdfd76efe580e4cde3955d00a5eb0e`
+- `adapter-configuration-ui` — 85 lines; sha256 `887018c5f2a484905158f46c5a4f170879920a36873998efc6f5ffb6a64f9bec`
+- `alarm-inbox` — 105 lines; sha256 `61df79ef4c1f8b842653dabe510c6d2b7649f76e28dd0acd3b4cfcef67771bf2`
+- `board-card-readability` — 101 lines; sha256 `20ebf012feb9284edaca55b8f3549db003d10af51c3c6e94d60fd6cd5d181f99`
+- `board-filtering` — 42 lines; sha256 `52216fdc8ff45332fcd422752226d956542c56e3cef8560a22fdeee6a56fc10d`
+- `board-launch-selection` — 285 lines; sha256 `b5eb967c2d2ba7d825dbac64ff0f2bc580d2fd2c4db01bb84c8d7b3b94b5aa06`
+- `budget-alarm-behavior-evals` — 31 lines; sha256 `51052946c05855beb7073c73a7fb44061fb9dbcd8a05707aa453345821083cba`
+- `budgeted-launch-control` — 86 lines; sha256 `775df4b260aec3ca9d31e3199c898c8fc8b5a37726fdf34369a30fc615b3c42c`
+- `checkpoint-results-display` — 31 lines; sha256 `221fa9496efa10a6ed42bef05f6fde08a92501eb09f92a2303519db68e19b9c5`
+- `cli-distribution-install` — 60 lines; sha256 `c3d56ccffe08455e5df544cc9c2bf16d414738f71db24d958dba8412245746f1`
+- `control-plane-model-connection` — 357 lines; sha256 `d7661c9b19b5ce51c60e0497389ac5526f0cc1546efcdb102e1c8eb934cd40b1`
+- `dashboard-next-actions` — 70 lines; sha256 `2789fb8cf89ec6f90d25b7cab0dae38a044cb39460e46a1ff798aac61c59c53b`
+- `direct-provider-model-clients` — 77 lines; sha256 `743890a986b1c99f003a4281d0b6bc01466b6571f7421f1b6962951eb7824e76`
+- `docker-local-run` — 89 lines; sha256 `4b284d180137d064a27e9b9d8789cb8cb346953832717fdcd00a0793d56f4f6c`
+- `driver-based-estimation` — 58 lines; sha256 `7a751175493aa4e549cc847ec32cc789983186b21212e22897142699b8b9a115`
+- `estimation-accuracy-tracking` — 115 lines; sha256 `ccf4043130b147e20b606a5851579eec8e07dfc5dde904700000b29211307e59`
+- `estimation-calibration-catalog` — 95 lines; sha256 `3229dad9b9824e4379399242c9be4be7b4a715810a761b72b39ccc8f5b9ab0d3`
+- `estimator-project-context` — 117 lines; sha256 `6891c9e848f51851334b3e74370de0ac50edd31650820d6fe492523518cf2bbf`
+- `estimator-task-decomposition-evals` — 42 lines; sha256 `7746126e7dee33a8a5710bff9d3d5a9f9687f5d6c21435a3f1d0611bc4518d8b`
+- `execution-floor` — 42 lines; sha256 `1d29498c147cb84f11eccb2c9baf8c84372a3a9dcc94a1af38419e6ac35f1ad3`
+- `governance-integration-smoke` — 29 lines; sha256 `df09b5814b5be36ca2e237af57f7fc021aacf2abc6e0912639979ad10969987d`
+- `governed-worker-launch` — 350 lines; sha256 `f8070aa6674c74de4c87c997c5d4f0e008dd0385bb027cdc585ea3564c9f87a0`
+- `guided-worker-setup` — 220 lines; sha256 `361a2a936d83d67d16cd2a2f677035a237b33a793c655f2ed64be889699293ca`
+- `local-execution-backend` — 100 lines; sha256 `125f302a1649b31d6b423bbef3a0192d9c313e89a937ba0648c96526462ff311`
+- `long-opencode-comparison-demo` — 81 lines; sha256 `36abaf9f1dd91435e4e2b206b79b0b8b67788a52ff153458ced9ea45166f73f3`
+- `markdown-task-intake` — 73 lines; sha256 `ca30c3fe1920608bfb0ee8e1aa31b5c712290fb8a3b5cf84d1194b5a68e62d22`
+- `native-worker-model-discovery` — 145 lines; sha256 `14570ebbed4077b6c462378a800fa7caccf1076eabe80bf2c1107b4e1fe8d050`
+- `needs-you-queue` — 110 lines; sha256 `da5cef2bc7fea2e11fa2f5584077147f7f84c74f9600d5f61774315b881bfcb2`
+- `operator-setup` — 182 lines; sha256 `8785c1d9a171667b93c1453488567ef90143907ac3e5a79b0110fa9129a2615b`
+- `portal-evidence-readability` — 228 lines; sha256 `eed2060ad53e8052e3261baa7dae19a2eeff1cf0b3b2313000481618e8d599eb`
+- `portal-local-access` — 94 lines; sha256 `ede0ef12e9454b6bff6b5b99a3c7a723e2a209fbf9008bc2d7f03a17738db032`
+- `portal-quality-system` — 75 lines; sha256 `1fd476c7c543bace0f55faecb66bb52401535cd7f7fae6432e1f68350adb8dfd`
+- `portal-test-harness` — 32 lines; sha256 `9f0f55cac5d3be8fec7ddeadc4aa98dd986c9776d2b48495713885eba15030fd`
+- `project-archive-visibility` — 82 lines; sha256 `28820d8eacea4168240404e2e8a05498e241cac3b0645a4e3114ebf08b25702b`
+- `project-board-run-automation` — 134 lines; sha256 `f049172201ca078f28876529ac90ce6fb88effa5db2b087bcf0d2a2620075fcb`
+- `project-scoped-board` — 162 lines; sha256 `c88712e2b8d4bbac64b97b140f1c943993a81ac8c8c220b7605a0060f08d1646`
+- `project-task-history` — 116 lines; sha256 `cea8a3e961a49c121b07aed9fa668cf11451e32c7db5dc67af7d03afb220f335`
+- `project-workspace` — 139 lines; sha256 `435f34fa31f9ad2b6b6b8711f27e10423cad0df6fd908960127a7e23d9307c7a`
+- `public-release-onboarding` — 69 lines; sha256 `58fe1592fb2fd426e571f27de4f8dc965f21456239c9c2e6b8a4b365241ae55a`
+- `react-board-workflow` — 192 lines; sha256 `024456c993c4f59669c4412747e0ff614c0e8b36dae5c5c1ce5988f65b336c56`
+- `react-portal-shell` — 1304 lines; sha256 `53ffcc3601b5704bf05084a50a1a94f67068083692158991d91e7cf5612bfb3c`
+- `recorded-demo-run` — 228 lines; sha256 `4869f7aed58fc390913432db7fab9bdf742f23a05d8f0aab571100f2062f15b3`
+- `repo-context-awareness` — 38 lines; sha256 `527aa88cc109cf2caed1cc909f2f6bb88d5ec0e5ce1c0cc33d405ea815a7357c`
+- `scout-tasks` — 193 lines; sha256 `9a92854cf64bc28963d09e4f8dd3ff3769b9bd911a713d75d147a39e2eff98c4`
+- `task-breakdown-review` — 460 lines; sha256 `6f51cd183359b737f0dd76e0dd4d0ffcadbe339f99d5dff19cda82a838a9d776`
+- `task-review-disposition` — 130 lines; sha256 `507e7fed21c2e7497ad3e86fda8ed1d95d7fdcf570a39dfbe79eb7b0270b354c`
+- `token-budget-setup` — 223 lines; sha256 `487a8a6b42f609ee204fa63f8b398d5ed3a5dd1ee4725c7ed07f328d5b03e7d1`
+- `worker-adapter-verification` — 221 lines; sha256 `b52454d76c5612fd738e4f6b4dbf1a1fc8d7505f3d6c319db131a4f5d899f9a4`
+- `worker-run-lifecycle` — 136 lines; sha256 `b8937b21f05fa7dbc965fa039ecedcb53395744671ceb135dd25266c794b8efc`
+- `worker-run-transparency` — 108 lines; sha256 `8faaa9a2611a37ffa6ebd378ae09946e91dba3015e4036e91098bf68f85dca8e`
+- `worker-workdir-enforcement` — 48 lines; sha256 `d7217a41f634f8bd877cb8b45a1d75635b90a6e39eb6bb32db676cc978cf705d`
+
+## Active design change
+- `design.md` — 43 lines; sha256 `b87d11b2849b35f882cfb77c836c7f3c2aee979708c141d187b4f99c090b8839`
+- `proposal.md` — 44 lines; sha256 `b19ab2ad9d881c97b07646e6d535ebeefea92c8a4148cc805771b3561b98c597`
+- `specs/markdown-task-intake/spec.md` — 20 lines; sha256 `c5eea010fd23f7b3dfe30807d62babe3fe478b0a99434bb89501674e8dce47f1`
+- `specs/needs-you-queue/spec.md` — 31 lines; sha256 `9769badc8fd2697d1b647b333349dd3b049243abcf1568beeed32a8bff7b8a91`
+- `specs/portal-quality-system/spec.md` — 50 lines; sha256 `47e1ec21f0e0b6424495c1d2235fa5868c91fd3fe56961f5278d40ad35624bb5`
+- `specs/react-board-workflow/spec.md` — 81 lines; sha256 `e26bf953b6c034e0a63153af8140b656cea367ee3654438531fc52d10b8bda51`
+- `specs/react-portal-shell/spec.md` — 104 lines; sha256 `353012cf93d1f894f1b661afbf99e4b78e5929feae8b77a9a70f18f5a6733785`
+- `specs/task-breakdown-review/spec.md` — 81 lines; sha256 `5702ec3e488c3029b1312dbf21464ebca0843f9df104acfc3b13e6a162a63f13`
+- `tasks.md` — 72 lines; sha256 `60503f27c847702b4bc66353461871c2a78c5755f4916b713ba4f9ac4277f82d`
+
+## Archived changes
+- `2026-06-16-fix-adapter-config-workflow` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-16-local-execution-runner` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-16-separate-control-plane-and-worker-models` — 10 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-17-remove-litellm-direct-provider-clients` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-17-simplify-worker-setup-ui` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-19-fix-local-demo-launch-and-task-intake-evals` — 11 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-20-add-review-disposition-actions` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-22-add-long-opencode-comparison-demo-task` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-22-align-worker-adapter-tracking-modes` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-22-async-worker-run-lifecycle` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-22-fix-markdown-task-decomposition-worker-launch` — 9 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-22-fix-opencode-workdir-launch` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-23-add-acceptance-verification-slices` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-23-limit-worker-adapter-models` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-23-replace-markdown-splitting-with-breakdown-review` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-24-active-project-worker-workdir` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-24-add-worker-run-timeline-and-repo-context` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-24-improve-dashboard-next-actions` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-24-project-workspace-entry` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-24-streamline-operator-setup` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-25-clean-project-repo-switcher` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-25-improve-board-task-card-readability` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-25-improve-portal-quality` — 11 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-25-improve-worker-model-filter-selection` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-25-live-control-plane-model-selection` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-25-project-board-run-automation` — 9 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-25-scope-board-to-active-project` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-25-support-claude-code-native-usage-budget-tracking` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-26-agile-board-card-readability-parity` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-26-board-filtering-search` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-26-checkpoint-results-ui` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-26-compact-session-reports` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-26-e2e-smoke-test-pytest` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-26-enrich-estimator-context-and-track-calibration` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-26-improve-board-card-launch-and-actual-tokens` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-27-extract-portal-test-harness` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-27-fix-control-plane-model-dropdown` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-27-make-docker-local-run-reliable` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-27-portal-managed-control-plane-api-key` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-27-prepare-public-release-onboarding` — 9 files; workflow metadata file, design.md, proposal.md, .gitkeep, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-28-add-project-task-history-archive` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-28-agent-review-feedback-accounting` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-28-ground-task-breakdown-with-repo-context` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-28-improve-board-session-review-readability` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-28-support-bare-htb-install` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-29-count-orchestration-tokens-in-budget` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-30-add-estimation-calibration-catalog` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-30-archive-blocked-tasks` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-30-archive-project-visibility` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-06-30-complete-repo-local-htb-init` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-30-explain-worker-token-cache-breakdown` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-30-filter-control-plane-models-by-provider` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-30-fix-claude-code-model-discovery` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-30-normalize-worker-token-actuals` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-06-30-raise-task-breakdown-output-cap` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-30-refresh-control-plane-anthropic-models` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-30-show-control-plane-test-result-in-ui` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-06-30-stabilize-claude-task-breakdown-json` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-01-fix-hermes-worker-model-discovery` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-02-fix-codex-native-usage-verification` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-02-strengthen-task-slicing-policy` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-03-dismiss-alarms-from-ui` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-03-dismiss-estimated-task-cards` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-03-fix-codex-project-trust-launch` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-03-skip-local-portal-login` — 9 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-03-soft-reset-daily-budget-counter` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-03-stabilize-anthropic-task-breakdown` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-03-surface-worker-adapter-cli-diagnostics` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-09-adapter-aware-model-routing` — 8 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-09-introduce-react-portal-shell` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-09-react-dashboard-parity` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-09-react-portal-default-rollback` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-09-react-portal-front-door` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-09-react-portal-shell-chrome-parity` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-10-react-board-functional-parity` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-10-react-portal-default-enable` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-10-react-project-workspace-parity` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-10-require-launch-ready-project-setup` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-13-react-alarms-inbox` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-13-react-sessions-report-parity` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-13-react-task-breakdown-review-parity` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-14-react-budget-settings-parity` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-14-react-control-plane-settings-parity` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-14-react-project-task-history` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-14-react-worker-settings-parity` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-15-react-canonical-dashboard-projects` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-15-react-canonical-project-workspace-board` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-15-react-project-settings-parity` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-15-react-sanitized-load-errors` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-15-react-setup-overview-parity` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-15-standalone-portal-recovery-login` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-16-final-jinja-retirement` — 12 files; workflow metadata file, design.md, proposal.md, provenance.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-17-openrouter-control-plane-provider` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-17-react-owned-link-nav-seam` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-17-usd-spend-breakdown` — 6 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, tasks.md
+- `2026-07-19-live-worker-run-streaming` — 6 files; design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-19-playwright-recorded-demo` — 5 files; workflow metadata file, design.md, proposal.md, spec.md, tasks.md
+- `2026-07-22-driver-based-token-estimation` — 7 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-22-scout-tasks` — 11 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md
+- `2026-07-22-two-surface-orchestration-board` — 18 files; workflow metadata file, design.md, proposal.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, spec.md, tasks.md

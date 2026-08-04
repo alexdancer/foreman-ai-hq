@@ -71,7 +71,7 @@ Non-goals:
 **Verification:**
 
 ```bash
-openspec validate <change-name> --strict
+the frontend check and the active test contract
 npm --prefix frontend run check
 uv run pytest tests/portal/test_react_shell.py -q
 uv run pytest -q
@@ -241,9 +241,9 @@ Candidate order:
 
 ### Slice ledger
 
-Live record of each Phase 5 slice, the OpenSpec change that delivers it, and its status. `Proposed`/`Implementing` changes live in `openspec/changes/`; `Archived` ones in `openspec/changes/archive/`. Update the row when a change is proposed, and again when it archives. This table is the source of truth for status; the ✅ marks above mirror it.
+Live record of each Phase 5 slice, the specification workflow change that delivers it, and its status. `Proposed`/`Implementing` changes live in the active implementation task catalog; `Archived` ones in historical specification records. Update the row when a change is proposed, and again when it archives. This table is the source of truth for status; the ✅ marks above mirror it.
 
-| # | Slice | OpenSpec change | Status |
+| # | Slice | specification workflow change | Status |
 |---|-------|-----------------|--------|
 | 0 | Setup readiness fix | `require-launch-ready-project-setup` | Archived |
 | 1 | Sessions list + Session Report | `react-sessions-report-parity` | Archived |
@@ -333,7 +333,7 @@ When the React app has loaded, it owns branded not-found pages and recoverable d
 
 React owns every normal operator-facing canonical route. The Jinja templates that served as missing-build fallbacks and parity oracles have been deleted; the only server-rendered Portal pages are the login page and the missing-build recovery response. The test suite includes an invariant that the templates directory contains only `login.html`.
 
-Each numbered remaining migration slice is its own OpenSpec change and verification gate. Sessions list/report remain paired by explicit decision; no other slices are bundled by default. Sync and archive each completed change before proposing the next one.
+Each numbered remaining migration slice is its own specification workflow change and verification gate. Sessions list/report remain paired by explicit decision; no other slices are bundled by default. Sync and archive each completed change before proposing the next one.
 
 Remaining migration targets desktop operator use only. Narrow-screen/mobile behavior is not an acceptance requirement and should not expand slice scope. Desktop pages must still avoid regressions against the existing Portal's table, form, and evidence readability.
 
@@ -360,7 +360,7 @@ Default landing requirements:
 **Verification gate:**
 
 ```bash
-openspec validate <change-name> --strict
+the frontend check and the active test contract
 npm --prefix frontend run check
 uv run pytest tests/portal/test_react_shell.py -q
 uv run pytest -q
@@ -378,7 +378,7 @@ Add browser/manual smoke evidence before declaring the UI replacement complete:
 
 ---
 
-## Proposed OpenSpec Changes
+## Proposed specification workflow Changes
 
 > **Historical.** This captured the original Phase 1–6 landing sequence. Live per-slice change names and status now live in the [Slice ledger](#slice-ledger) under Phase 5; update that table, not this list.
 
@@ -464,7 +464,7 @@ git diff --check
 - React owns normal not-found and recoverable page errors; minimal server rendering handles only frontend boot failure and fallback login.
 - Migrated Jinja pages freeze as temporary fallbacks; one separate final retirement change deletes all duplicated frontend surfaces after full parity proof.
 - Canonical URL inversion runs before Login, split into Dashboard + Projects (11a) then project workspace + Board (11b), so Login targets its final landing URL once and retirement unblocks earlier.
-- Every numbered remaining migration slice uses a separate OpenSpec change, verification gate, and archive boundary.
+- Every numbered remaining migration slice uses a separate specification workflow change, verification gate, and archive boundary.
 - Remaining React migration is desktop-only; mobile/narrow-screen redesign is outside scope.
 - Each desktop slice requires practical keyboard, labeling, focus, semantic, and status-announcement accessibility; formal certification is outside scope.
 - Remaining slices preserve the current React design system and prioritize functional parity over visual redesign.

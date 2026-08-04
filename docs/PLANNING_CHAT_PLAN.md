@@ -99,6 +99,6 @@ logic or UI.
   denied/escalated, memory persists, Spec drafted + committed, every turn metered.
 - M3: portal test with synthetic pi stream (no real secrets per CONTEXT rules):
   chat renders, finalize commits `spec.md`, user lands in Task Breakdown Review.
-- Full: `uv run pytest`, `npm run check`, `openspec validate --strict`, recorded
+- Full: `uv run pytest`, `npm run check`, the repository test contract, recorded
   demo E2E. Consult the `claude-api` skill for the tool-use loop; default to the
   latest capable Claude control-plane model behind the proxy.
