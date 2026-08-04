@@ -2,8 +2,8 @@
 
 ## Repository Agent Context
 **Definition**: The repo-level operating guidance for coding agents working on Foreman AI HQ.
-**Properties**: `AGENTS.md` is the entrypoint for agent workflow instructions, OpenSpec usage, issue-tracker assumptions, triage label vocabulary, and verification commands. `CONTEXT.md` is the single domain glossary for product, architecture, workflow, and terminology changes. Agents should read `CONTEXT.md` before changing Harness behavior, Portal copy, OpenSpec artifacts, tests, demo data, or docs that use product language.
-**Relationships**: Guides Worker and human-assisted implementation work. Complements OpenSpec artifacts under `openspec/`; OpenSpec change instructions still control planning and task artifact paths, while this glossary controls canonical domain language.
+**Properties**: `AGENTS.md` is the entrypoint for agent workflow instructions, Matt Pocock workflow guidance, issue-tracker assumptions, triage label vocabulary, and verification commands. `CONTEXT.md` is the single domain glossary for product, architecture, workflow, and terminology changes. Agents should read `CONTEXT.md` before changing Harness behavior, Portal copy, specifications, tests, demo data, or docs that use product language.
+**Relationships**: Guides Worker and human-assisted implementation work. Complements the accepted Portal workbench specification at `docs/design/portal-operator-workbench-spec.md`; this glossary controls canonical domain language.
 
 ## Harness
 **Definition**: The governing framework that wraps a coding agent, providing guardrails, checkpoints, material handling, and alarms.

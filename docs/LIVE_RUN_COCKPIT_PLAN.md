@@ -41,7 +41,7 @@ discarded, so there is no live view of the agent working.
 ## Phase 1 — Live Run Cockpit (shipped 2026-07-19)
 
 Shipped and archived as
-`openspec/changes/archive/2026-07-19-live-worker-run-streaming/`, with the
+the live-worker-run-streaming historical specification record, with the
 browser proof in `.../2026-07-19-playwright-recorded-demo/`. The rest of this
 section is kept as the design record.
 
