@@ -1,6 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
+import { StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { drainLiveEvents } from "../live-events.js";
 import { LiveEventFeed } from "../components/LiveEventFeed.jsx";
@@ -101,14 +102,14 @@ export function SessionReportState({
         {refreshError && <span className="danger-text">{refreshError}</span>}
       </div>
       <section className="panel report-summary" key={`summary-${version}`}>
-        <div className="panel-header"><h3>Governance summary</h3><span>{session.status}{session.active ? " · active" : ""}</span></div>
+        <div className="panel-header"><h3>Governance summary</h3><StatusPill tone={sessionTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div>
         <div className="panel-body summary-grid">
           <Summary label="Task / project"><BoundedText value={session.task} /><BoundedText value={summary.selected_project} /></Summary>
           <Summary label={session.kind === "Agent Review" ? "Review source" : "Worker launch"}>
             <span>{summary.adapter_id} · {summary.worker_model} · {summary.tracking_mode}</span>
             <BoundedText value={summary.launch_target} />
           </Summary>
-          <Summary label="Status / result"><span>{summary.status} · {summary.requires_review ? "review needed" : "clear"}</span><BoundedText value={summary.result} /></Summary>
+          <Summary label="Status / result"><StatusPill tone={sessionTone(summary.status, session.active)} label={`${summary.status || "unknown"} · ${summary.requires_review ? "review needed" : "clear"}`} /><BoundedText value={summary.result} /></Summary>
           <Summary label="Evidence coverage">
             <span>{summary.evidence_counts.worker_runs} runs · {summary.evidence_counts.worker_events} events · {summary.evidence_counts.error_events} errors · {summary.evidence_counts.alarms} alarms · {summary.evidence_counts.failed_checkpoints} failed checks</span>
             {summary.missing_labels.map((label) => <div key={label}>{label}</div>)}
@@ -260,4 +261,11 @@ export function BoundedText({ value }) {
       {error && <span className="danger-text" role="alert">{error}</span>}
     </div>
   );
+}
+
+function sessionTone(status, active) {
+  if (active || String(status).toLowerCase() === "running") return "running";
+  if (["failed", "error", "blocked"].includes(String(status).toLowerCase())) return "danger";
+  if (["complete", "completed", "done"].includes(String(status).toLowerCase())) return "success";
+  return "neutral";
 }

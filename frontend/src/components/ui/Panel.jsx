@@ -6,7 +6,10 @@ function containsNestedPanel(children) {
   let found = false;
   React.Children.forEach(children, (child) => {
     if (found || !React.isValidElement(child)) return;
-    if (child.type === Panel) {
+    const classNames = typeof child.props?.className === "string"
+      ? child.props.className.split(/\s+/)
+      : [];
+    if (child.type === Panel || classNames.includes("panel")) {
       found = true;
       return;
     }

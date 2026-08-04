@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
+import { Button, Fieldset } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -153,9 +154,9 @@ export function BudgetSettingsState({ data, error, loading, onRefresh }) {
               </p>
             </div>
             <div className="toolbar" style={{ gridColumn: "1 / -1" }}>
-              <button type="submit" className="btn" disabled={busy}>
+              <Button type="submit" disabled={busy} disabledReason="A budget update is already in progress.">
                 Save budget
-              </button>
+              </Button>
               <a href="/setup" className="btn secondary">Back to setup</a>
             </div>
           </form>
@@ -176,21 +177,19 @@ export function BudgetSettingsState({ data, error, loading, onRefresh }) {
               <div className="value mono">{remaining !== null ? formatTokens(remaining) : "—"}</div>
               <div className="sub">based on the saved daily cap</div>
             </article>
-            <article className="panel" style={{ marginBottom: 0 }}>
-              <div className="panel-body">
-                <h3 style={{ margin: "0 0 10px", fontSize: 13 }}>Reset daily guardrail usage</h3>
+            <Fieldset className="budget-action-group" legend="Reset daily guardrail usage">
                 <p className="muted">Start a new daily budget window from now. Token ledger evidence, session reports, and task actuals are preserved.</p>
                 {resetAt && <p className="mono muted">last reset: {resetAt}</p>}
-                <button
+                <Button
                   type="button"
-                  className="btn danger"
+                  variant="danger"
                   onClick={() => setConfirming(true)}
                   disabled={busy}
+                  disabledReason="A budget update is already in progress."
                 >
                   Reset today’s budget counter
-                </button>
-              </div>
-            </article>
+                </Button>
+            </Fieldset>
           </div>
         </div>
       </section>
@@ -199,9 +198,7 @@ export function BudgetSettingsState({ data, error, loading, onRefresh }) {
         <div className="panel-header"><h3>Spend authority</h3></div>
         <div className="panel-body">
           <div className="dashboard-grid">
-            <section className="panel" style={{ marginBottom: 0 }}>
-              <div className="panel-body">
-                <h3 style={{ margin: "0 0 10px", fontSize: 13 }}>Daily budgeted spend</h3>
+            <Fieldset className="budget-authority-group" legend="Daily budgeted spend">
                 <p>
                   <span className="pill green">worker_execution</span>{" "}
                   <span className="pill green">control_plane</span>{" "}
@@ -211,18 +208,14 @@ export function BudgetSettingsState({ data, error, loading, onRefresh }) {
                   <span className="pill green">other</span>
                 </p>
                 <p className="muted">Daily guardrails and alarms count all governed token-ledger rows, including Agent Review and setup/orchestration spend.</p>
-              </div>
-            </section>
-            <section className="panel" style={{ marginBottom: 0 }}>
-              <div className="panel-body">
-                <h3 style={{ margin: "0 0 10px", fontSize: 13 }}>Worker-only evidence</h3>
+            </Fieldset>
+            <Fieldset className="budget-authority-group" legend="Worker-only evidence">
                 <p>
                   <span className="pill blue">per-session Worker cap</span>{" "}
                   <span className="pill blue">task actual_tokens</span>
                 </p>
                 <p className="muted">Per-session Worker execution caps and task actuals remain based on Worker execution evidence, not Agent Review/reporting tokens.</p>
-              </div>
-            </section>
+            </Fieldset>
           </div>
         </div>
       </section>

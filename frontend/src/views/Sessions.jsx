@@ -1,6 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
+import { Button, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 
 const safeError = (error) => error?.status === 401
@@ -67,7 +68,7 @@ export function SessionsState({ data, error, loading, retry = () => {}, page = (
                 <tr key={session.id}>
                   <td className="mono"><AppLink to={session.report_href}>{session.id}</AppLink></td>
                   <td><strong>{session.kind}</strong><div className="compact-text">{session.task_preview || "Missing task evidence"}</div></td>
-                  <td><span className="mono">{session.model || "Unknown model"}</span><div>{session.status}{session.active ? " · active" : ""}</div></td>
+                  <td><span className="mono">{session.model || "Unknown model"}</span><div><StatusPill tone={sessionTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div></td>
                   <td className="mono">{session.token_totals.prompt_tokens} prompt · {session.token_totals.completion_tokens} completion · {session.token_totals.total_tokens} total</td>
                   <td className="mono">{session.evidence_counts.worker_runs} runs · {session.evidence_counts.worker_events} events · {session.evidence_counts.failed_checkpoints} failed checks</td>
                   <td>{session.current_zone || "unknown"} zone · {session.alarm_count} alarms</td>
@@ -79,11 +80,18 @@ export function SessionsState({ data, error, loading, retry = () => {}, page = (
       )}
       {pagination && (
         <nav className="pagination" aria-label="Sessions pages">
-          <button type="button" disabled={!previous} onClick={() => page(previous)}>Previous sessions</button>
+          <Button size="small" variant="secondary" type="button" disabled={!previous} disabledReason="There are no previous sessions." onClick={() => page(previous)}>Previous sessions</Button>
           <span className="mono">{pagination.offset + 1}–{Math.min(pagination.total, pagination.offset + pagination.limit)} of {pagination.total}</span>
-          <button type="button" disabled={!next} onClick={() => page(next)}>Next sessions</button>
+          <Button size="small" variant="secondary" type="button" disabled={!next} disabledReason="There are no more sessions." onClick={() => page(next)}>Next sessions</Button>
         </nav>
       )}
     </>
   );
+}
+
+function sessionTone(status, active) {
+  if (active || String(status).toLowerCase() === "running") return "running";
+  if (["failed", "error", "blocked"].includes(String(status).toLowerCase())) return "danger";
+  if (["complete", "completed", "done"].includes(String(status).toLowerCase())) return "success";
+  return "neutral";
 }

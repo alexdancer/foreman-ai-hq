@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
+import { Button, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 
 const FILTER_OPTIONS = {
@@ -206,7 +207,7 @@ function AlarmCard({ alarm, busy, onContinue, onRaise }) {
       style={{ marginBottom: 12 }}
     >
       <div className="dashboard-alarm-head">
-        <span className={`pill ${severityClass(alarm.severity)}`}>{alarm.severity}</span>
+        <StatusPill tone={severityClass(alarm.severity)} label={alarm.severity || "unknown"} />
         <span className="mono">{alarm.type}</span>
         <span className="mono" style={{ marginLeft: "auto", color: "var(--fg-3)" }}>{alarm.id}</span>
       </div>
@@ -233,23 +234,26 @@ function AlarmCard({ alarm, busy, onContinue, onRaise }) {
 
       {!alarm.resolved_at && (
         <div className="toolbar" style={{ marginTop: 12 }}>
-          <button
+          <Button
+            size="small"
             type="button"
-            className="btn small"
             disabled={busy}
+            disabledReason="An alarm resolution is already in progress."
             onClick={onContinue}
           >
             Continue
-          </button>
+          </Button>
           {raiseAction && (
-            <button
+            <Button
+              size="small"
+              variant="secondary"
               type="button"
-              className="btn small secondary"
               disabled={busy}
+              disabledReason="An alarm resolution is already in progress."
               onClick={() => setConfirming(true)}
             >
               Raise Budget
-            </button>
+            </Button>
           )}
           {!raiseAction && (
             <a href="/settings/budget" className="btn small secondary">
@@ -300,7 +304,7 @@ function RaiseBudgetDialog({
     <form
       ref={dialogRef}
       onSubmit={submit}
-      className="panel"
+      className="alarm-action-group"
       style={{ marginTop: 12, padding: 12, background: "var(--bg-1)" }}
       onClick={(e) => e.stopPropagation()}
     >

@@ -349,6 +349,19 @@ code,
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.budget-action-group,
+.budget-authority-group,
+.alarm-action-group {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.alarm-action-group {
+  margin-top: 12px;
+}
 .fieldset-description {
   max-width: 104ch;
   margin: 0 0 12px;

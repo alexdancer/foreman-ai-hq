@@ -1,5 +1,6 @@
 import React from "react";
 
+import { StatusPill } from "../components/ui/index.js";
 import { AppLink, OwnedLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -182,7 +183,7 @@ export function DashboardContent({ data }) {
                     <td className="mono muted"><OwnedLink to={`/sessions/${session.id}`}>{session.id}</OwnedLink></td>
                     <td>{session.task_description}</td>
                     <td className="mono">{session.model}</td>
-                    <td><span className="pill blue">{session.status}</span></td>
+                    <td><StatusPill tone={session.status === "running" ? "running" : "neutral"} label={session.status || "unknown"} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -200,7 +201,7 @@ export function DashboardContent({ data }) {
           {alarms.recent && alarms.recent.length > 0 ? alarms.recent.map((alarm) => (
             <article className={`dashboard-alarm ${String(alarm.severity || "info").toLowerCase()}`} key={alarm.id}>
               <div className="dashboard-alarm-head">
-                <span className={`pill ${alarmTone(alarm.severity)}`}>{alarm.severity}</span>
+                <StatusPill tone={alarmTone(alarm.severity)} label={alarm.severity || "unknown"} />
                 <span className="mono">{alarm.type}</span>
                 <span className="mono muted">{alarm.id}</span>
               </div>

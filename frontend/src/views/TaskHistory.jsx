@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 
+import { StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -177,8 +178,8 @@ function TaskRow({ task, onUnarchive }) {
         <div className="mono muted">{task.id}</div>
       </td>
       <td>
-        <span className={`pill ${tone}`}>{task.status}</span>
-        {task.archived && <span className="pill muted">Archived</span>}
+        <StatusPill tone={tone === "muted" ? "neutral" : tone} label={task.status || "Unknown"} />
+        {task.archived && <StatusPill tone="neutral" label="Archived" />}
       </td>
       <td>
         <div className="mono muted">

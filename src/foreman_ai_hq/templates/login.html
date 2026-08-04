@@ -6,19 +6,35 @@
   <title>Login | Foreman AI HQ</title>
   <style>
     :root {
-      --bg-0: #0b0f12;
-      --bg-1: #11171c;
-      --bg-2: #161e25;
-      --bg-3: #1d2730;
-      --line: #243038;
-      --line-2: #2d3b46;
-      --fg-0: #e6edf3;
-      --fg-1: #b3bec8;
-      --fg-2: #7d8a96;
-      --fg-3: #4f5b66;
-      --accent: #5cf2c4;
-      --accent-dim: #2a8d72;
+      --surface-canvas: #0a0e11;
+      --surface-sunken: #0b1013;
+      --surface-panel: #10161a;
+      --surface-raised: #161d23;
+      --surface-hover: #131a20;
+      --line: #1e262d;
+      --line-faint: #131a20;
+      --line-strong: #2b353e;
+      --text-primary: #e8eef3;
+      --text-secondary: #a8b4be;
+      --text-tertiary: #6f7c88;
+      --text-quiet: #4a555f;
+      --mint: #5cf2c4;
+      --mint-edge: #2a8d72;
+      --mint-ink: #04120e;
+      --info: #5cb8f2;
+      --warn: #f2c45c;
       --danger: #f25c5c;
+      --purple: #b58cf2;
+      --bg-0: var(--surface-canvas);
+      --bg-1: var(--surface-panel);
+      --bg-2: var(--surface-raised);
+      --line-2: var(--line-strong);
+      --fg-0: var(--text-primary);
+      --fg-1: var(--text-secondary);
+      --fg-2: var(--text-tertiary);
+      --fg-3: var(--text-quiet);
+      --accent: var(--mint);
+      --accent-dim: var(--mint-edge);
       --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
       --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
@@ -40,9 +56,10 @@
     .error { border-left: 3px solid var(--danger); background: rgba(242,92,92,0.08); padding: 10px 12px; border-radius: 4px; margin: 0 0 16px; color: var(--fg-0); }
     label { display: block; font-size: 12px; color: var(--fg-2); margin-bottom: 6px; }
     input { width: 100%; background: var(--bg-0); border: 1px solid var(--line-2); border-radius: 4px; color: var(--fg-0); font-family: var(--mono); font-size: 13px; padding: 8px 10px; }
-    input:focus { outline: none; border-color: var(--accent); }
-    button { display: inline-block; background: var(--accent-dim); border: 1px solid var(--accent); color: var(--bg-0); padding: 8px 14px; border-radius: 4px; font-family: var(--mono); font-size: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-    button:hover { background: var(--accent); }
+    :where(a, button, input):focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+    input:focus-visible { border-color: var(--mint-edge); }
+    button { display: inline-block; background: var(--mint); border: 1px solid var(--mint); color: var(--mint-ink); padding: 8px 14px; border-radius: 4px; font-family: var(--mono); font-size: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+    button:hover { background: color-mix(in srgb, var(--mint) 88%, white); }
     .mt-12 { margin-top: 12px; }
   </style>
 </head>

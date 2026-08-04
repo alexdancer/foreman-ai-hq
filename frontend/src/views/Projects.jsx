@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
+import { StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -34,6 +35,7 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
   const [inlineError, setInlineError] = useState(null);
   const [activeAction, setActiveAction] = useState(null);
   const busy = activeAction !== null;
+  const busyReasonId = busy ? "projects-busy-reason" : undefined;
   const isBusy = (projectId, kind) =>
     activeAction?.projectId === projectId && activeAction?.kind === kind;
 
@@ -131,13 +133,14 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
           <p className="notice">{status}</p>
         ) : null}
       </div>
+      {busy && <p className="disabled-reason" id={busyReasonId} role="status">Another project action is already in progress.</p>}
 
       <section className="panel project-browser-panel">
         <div className="panel-header"><h3>Open local repo</h3></div>
         <div className="panel-body">
           {!localRunnerEnabled && (
             <div className="project-runner-status">
-              <span className="pill yellow">Local Runner disabled</span>
+              <StatusPill tone="warning" label="Local Runner disabled" />
               <p className="project-runner-help muted mono">
                 Run <code>foremanctl init</code>, enable Local Runner in{" "}
                 <code>.foreman/config.toml</code> or with{" "}
@@ -157,12 +160,14 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
                 placeholder="/path/to/local/repo"
                 required
                 disabled={busy}
+                aria-describedby={busyReasonId}
               />
             </div>
             <button
               type="submit"
               className="project-settings-primary"
               disabled={busy}
+              aria-describedby={busyReasonId}
             >
               {isBusy(null, "connect") ? "Connecting…" : "Open project"}
             </button>
@@ -199,6 +204,7 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
                       className="project-settings-secondary"
                       onClick={() => archive(project.id)}
                       disabled={busy}
+                      aria-describedby={busyReasonId}
                     >
                       {isBusy(project.id, "archive") ? "Archiving…" : "Archive project"}
                     </button>
@@ -219,7 +225,7 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
             <div className="project-browser-grid">
               {archivedProjects.map((project) => (
                 <article className="project-browser-card" key={project.id}>
-                  <span className="pill muted">archived</span>
+                  <StatusPill tone="neutral" label="archived" />
                   <h2 className="project-browser-name">
                     <AppLink to={`/projects/${project.id}`}>{project.name}</AppLink>
                   </h2>
@@ -235,6 +241,7 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
                       className="project-settings-primary"
                       onClick={() => restore(project.id)}
                       disabled={busy}
+                      aria-describedby={busyReasonId}
                     >
                       {isBusy(project.id, "restore") ? "Restoring…" : "Restore project"}
                     </button>
@@ -250,7 +257,7 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
 }
 
 function CapabilityPill({ state, label }) {
-  if (state === "launch_ready") return <span className="pill green">{label || "Launch-ready"}</span>;
-  if (state === "analysis_ready") return <span className="pill blue">{label || "Analysis-ready"}</span>;
-  return <span className="pill red">{label || "Blocked"}</span>;
+  if (state === "launch_ready") return <StatusPill tone="success" label={label || "Launch-ready"} />;
+  if (state === "analysis_ready") return <StatusPill tone="info" label={label || "Analysis-ready"} />;
+  return <StatusPill tone="danger" label={label || "Blocked"} />;
 }

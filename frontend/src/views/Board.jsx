@@ -573,6 +573,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
       <span className="task-id">{task.id}</span>
       <h4 className="task-title" title={fullSummary}>{displayName}</h4>
       {task.task_kind && task.task_kind !== "implementation" && <span className="pill scout" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
+      <StatusPill tone={taskStatusTone(task.status)} label={task.status || "Unknown status"} />
       {task.status === "Running" && <span className="live-pulse-dot" aria-label="Running live" title="Running live" />}
     </header>
     {task.blocked_condition && <div className="blocked-condition" role="status"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
@@ -611,6 +612,14 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
       {task.session_href && <Button size="small" variant={actionVariant} type="button" onClick={() => openEvidence(task)}>View evidence</Button>}
     </div>}
   </article>;
+}
+
+function taskStatusTone(status) {
+  if (status === "Done") return "success";
+  if (status === "Running") return "running";
+  if (status === "Review") return "warning";
+  if (status === "Blocked") return "danger";
+  return "neutral";
 }
 
 /**

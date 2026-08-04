@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import { postJSON } from "../api.js";
+import { StatusPill } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -56,6 +57,7 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
   // Which action is in flight, so only that button shows its busy label.
   const [activeAction, setActiveAction] = useState(null);
   const busy = activeAction !== null;
+  const busyReasonId = busy ? "project-settings-busy-reason" : undefined;
   const isBusy = (projectId, kind) =>
     activeAction?.projectId === projectId && activeAction?.kind === kind;
 
@@ -192,19 +194,20 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
           <p className="notice">{status}</p>
         ) : null}
       </div>
+      {busy && <p className="disabled-reason" id={busyReasonId} role="status">Another project settings action is already in progress.</p>}
 
       <section className="panel project-settings-panel">
         <div className="panel-header"><h3>Local Runner</h3></div>
         <div className="panel-body">
           {localRunnerEnabled ? (
             <div className="project-runner-status">
-              <span className={`pill ${backendStatus?.online ? "green" : "yellow"}`}>enabled</span>
-              {backendStatus?.online && <span className="pill green">online</span>}
+              <StatusPill tone={backendStatus?.online ? "success" : "warning"} label="enabled" />
+              {backendStatus?.online && <StatusPill tone="success" label="online" />}
               {backendStatus?.name && <span className="pill muted">{backendStatus.name}</span>}
             </div>
           ) : (
             <div className="project-runner-status">
-              <span className="pill yellow">disabled</span>
+              <StatusPill tone="warning" label="disabled" />
               <p className="project-runner-help muted mono">
                 Run <code>foremanctl init</code>, enable Local Runner in{" "}
                 <code>.foreman/config.toml</code> or with{" "}
@@ -229,9 +232,10 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                 placeholder="/path/to/local/repo"
                 required
                 disabled={busy}
+                aria-describedby={busyReasonId}
               />
             </div>
-            <button type="submit" className="project-settings-primary" disabled={busy}>
+            <button type="submit" className="project-settings-primary" disabled={busy} aria-describedby={busyReasonId}>
               {isBusy(null, "connect") ? "Connecting…" : "Open project"}
             </button>
           </form>
@@ -275,6 +279,7 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                       className="project-settings-primary"
                       onClick={() => runReadOnlyProof(project.id)}
                       disabled={busy}
+                      aria-describedby={busyReasonId}
                     >
                       {isBusy(project.id, "proof") ? "Running proof…" : "Run read-only proof"}
                     </button>
@@ -284,6 +289,7 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                     className="project-settings-secondary"
                     onClick={() => archive(project.id)}
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   >
                     {isBusy(project.id, "archive") ? "Archiving…" : "Archive project"}
                   </button>
@@ -311,7 +317,7 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                   <h2 className="project-profile-name">
                     {project.name}
                   </h2>
-                  <span className="pill muted">archived</span>
+                  <StatusPill tone="neutral" label="archived" />
                 </div>
                 <dl className="project-profile-details">
                   <ProfileRow label="Root" value={project.root_path} />
@@ -322,6 +328,7 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
                     className="project-settings-primary"
                     onClick={() => restore(project.id)}
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   >
                     {isBusy(project.id, "restore") ? "Restoring…" : "Restore project"}
                   </button>
@@ -337,9 +344,9 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
 }
 
 function CapabilityPill({ state }) {
-  if (state === "launch_ready") return <span className="pill green">Launch-ready via Local Runner</span>;
-  if (state === "analysis_ready") return <span className="pill blue">Analysis-ready</span>;
-  return <span className="pill red">Blocked</span>;
+  if (state === "launch_ready") return <StatusPill tone="success" label="Launch-ready via Local Runner" />;
+  if (state === "analysis_ready") return <StatusPill tone="info" label="Analysis-ready" />;
+  return <StatusPill tone="danger" label="Blocked" />;
 }
 
 function ProofOutcome({ outcome, passed }) {

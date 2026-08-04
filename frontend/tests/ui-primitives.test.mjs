@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +33,17 @@ let TokenComparison;
 let EventRow;
 let EvidenceDisclosure;
 let tokensCss;
+let loginTemplate;
+let portalSources;
+
+async function readSourceTree(root) {
+  const entries = await readdir(root, { withFileTypes: true });
+  const contents = await Promise.all(entries.map(async (entry) => {
+    const path = join(root, entry.name);
+    return entry.isDirectory() ? readSourceTree(path) : readFile(path, "utf8");
+  }));
+  return contents.flat(Infinity).join("\n");
+}
 
 before(async () => {
   server = await createServer({
@@ -65,6 +77,11 @@ before(async () => {
     EvidenceDisclosure,
   } = await server.ssrLoadModule("/src/components/ui/index.js"));
   tokensCss = await readFile(new URL("../src/tokens.css", import.meta.url), "utf8");
+  loginTemplate = await readFile(new URL("../../src/foreman_ai_hq/templates/login.html", import.meta.url), "utf8");
+  portalSources = [
+    await readSourceTree(fileURLToPath(new URL("../src", import.meta.url))),
+    await readSourceTree(fileURLToPath(new URL("../../src/foreman_ai_hq/templates", import.meta.url))),
+  ].join("\n");
 });
 
 after(async () => {
@@ -158,6 +175,10 @@ test("Fieldset and disclosures provide semantic grouping without nested panels",
   assert.doesNotMatch(grouping, /class="panel[^>]*>[\s\S]*class="panel/);
   assert.throws(
     () => html(React.createElement(Panel, {}, React.createElement(Panel, {}, "nested"))),
+    /Panel cannot contain another Panel/,
+  );
+  assert.throws(
+    () => html(React.createElement(Panel, {}, React.createElement("section", { className: "panel raw-panel" }, "nested"))),
     /Panel cannot contain another Panel/,
   );
   assert.throws(
@@ -311,7 +332,7 @@ test("Ledger CSS publishes role tokens and removes only the retired alias", () =
     "--accent: var(--mint);",
     "--accent-dim: var(--mint-edge);",
   ]) assert.ok(tokensCss.includes(contract), `missing token contract: ${contract}`);
-  assert.doesNotMatch(tokensCss, /--bg-3\b|var\(--bg-3\)/);
+  assert.doesNotMatch(portalSources, /--bg-3\b|var\(--bg-3\)/);
 });
 
 test("Ledger CSS preserves focus, reduced-motion, and select sizing contracts", () => {
@@ -321,4 +342,6 @@ test("Ledger CSS preserves focus, reduced-motion, and select sizing contracts", 
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.skeleton-bar::after\s*\{[^}]*animation: none;[^}]*transform: none;/);
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.live-pulse-dot\s*\{[^}]*animation: none;[^}]*opacity: 1;/);
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.board-intake-progress-bar\s*\{[^}]*animation: none;/);
+  assert.match(loginTemplate, /:where\(a, button, input\):focus-visible\s*\{[^}]*outline: 2px solid var\(--mint\)/);
+  assert.doesNotMatch(`${tokensCss}\n${loginTemplate}`, /:focus(?:-visible)?[^\{]*\{[^}]*outline:\s*(?:none|0(?:\D|$))/s);
 });

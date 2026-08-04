@@ -1,6 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
+import { Button, Fieldset, StatusPill } from "../components/ui/index.js";
 import { AppLink, isReactOwnedPath, NavContext, NavigationGuardContext, OwnedLink } from "../nav.jsx";
 
 const NOOP = () => {};
@@ -400,6 +401,13 @@ export function TaskBreakdownReviewState({
   const allCandidatesLoaded = !draft.candidatePagination?.has_more;
   const selected = draft.candidates.filter((candidate) => candidate.selected).length;
   const canAccept = canEdit && allCandidatesLoaded && selected > 0;
+  const acceptDisabledReason = pending
+    ? "Acceptance is already in progress."
+    : !allCandidatesLoaded
+      ? "Load every candidate before acceptance."
+      : selected === 0
+        ? "Select at least one candidate before acceptance."
+        : undefined;
 
   return <>
     <h1 className="page-title">Task Breakdown Review</h1>
@@ -444,7 +452,7 @@ export function TaskBreakdownReviewState({
       </div>
       {!allCandidatesLoaded && <div className="notice warning" role="status">Load every candidate before acceptance.</div>}
       <div className="toolbar review-actions">
-        <button className="btn" type="button" disabled={!canAccept || pending} onClick={accept}>{pending ? "Working…" : "Accept selected and estimate"}</button>
+        <Button type="button" disabled={!canAccept || pending} disabledReason={acceptDisabledReason} onClick={accept}>{pending ? "Working…" : "Accept selected and estimate"}</Button>
         <OwnedLink className="btn secondary" to={data.links.board_href}>Cancel</OwnedLink>
       </div>
     </>}
@@ -454,7 +462,7 @@ export function TaskBreakdownReviewState({
 function ReviewSummary({ data }) {
   const review = data.review;
   return <section className="panel">
-    <div className="panel-header"><h3>Source</h3><span className={`pill ${review.status}`}>{review.status}</span></div>
+    <div className="panel-header"><h3>Source</h3><StatusPill tone={review.status} label={review.status} /></div>
     <div className="panel-body">
       <dl className="detail-grid">
         <dt>Review</dt><dd>{review.id}</dd>
@@ -496,12 +504,13 @@ function CandidateEditor({ candidate, update, updateField, loadField }) {
 function EditableField({ field, label, rows, state, onChange, onLoad }) {
   const id = React.useId();
   const textarea = rows > 1;
+  const reasonId = !state.loaded ? `${field}-${id}-disabled-reason` : undefined;
   return <div className="review-field">
     <label htmlFor={`${field}-${id}`}>{label}</label>
     {textarea
-      ? <textarea id={`${field}-${id}`} rows={rows} value={state.value} disabled={!state.loaded} onChange={(event) => onChange(event.target.value)} />
-      : <input id={`${field}-${id}`} value={state.value} disabled={!state.loaded} onChange={(event) => onChange(event.target.value)} />}
-    {!state.loaded && <button className="btn small secondary" type="button" onClick={onLoad}>Load full text before editing</button>}
+      ? <textarea id={`${field}-${id}`} rows={rows} value={state.value} disabled={!state.loaded} aria-describedby={reasonId} onChange={(event) => onChange(event.target.value)} />
+      : <input id={`${field}-${id}`} value={state.value} disabled={!state.loaded} aria-describedby={reasonId} onChange={(event) => onChange(event.target.value)} />}
+    {!state.loaded && <><span className="disabled-reason" id={reasonId}>Complete text must load before this field can be edited.</span><Button size="small" variant="secondary" type="button" onClick={onLoad}>Load full text before editing</Button></>}
     {state.error && <span className="danger-text" role="alert">{state.error}</span>}
   </div>;
 }
@@ -519,16 +528,22 @@ function PreservedContext({ data, draft, updateGlobalField, loadGlobalField }) {
 }
 
 function FailedRecovery({ data, manual, pending, setManual, loadManualPrompt, retry, createManual }) {
+  const manualPromptBlocked = manual.promptLoaded === false;
+  const createDisabledReason = pending
+    ? "A recovery action is already in progress."
+    : manualPromptBlocked
+      ? "Load the complete source before creating a manual candidate."
+      : undefined;
   return <section className="panel">
     <div className="panel-header"><h3>Breakdown failed</h3></div>
     <div className="panel-body review-stack">
-      <div className="toolbar"><button className="btn" type="button" disabled={pending} onClick={retry}>Retry breakdown</button><OwnedLink className="btn secondary" to={data.links.board_href}>Cancel</OwnedLink></div>
+      <div className="toolbar"><Button type="button" disabled={pending} disabledReason="A recovery action is already in progress." onClick={retry}>Retry breakdown</Button><OwnedLink className="btn secondary" to={data.links.board_href}>Cancel</OwnedLink></div>
       <label>Manual candidate title<input value={manual.title} onChange={(event) => setManual({ ...manual, title: event.target.value, titleTouched: true })} /></label>
-      <label>Manual candidate prompt<textarea rows="5" value={manual.prompt} disabled={manual.promptLoaded === false} onChange={(event) => setManual({ ...manual, prompt: event.target.value, promptTouched: true })} /></label>
-      {manual.promptLoaded === false && <button className="btn small secondary" type="button" onClick={loadManualPrompt}>Load complete source before editing</button>}
+      <label>Manual candidate prompt<textarea rows="5" value={manual.prompt} disabled={manualPromptBlocked} aria-describedby={manualPromptBlocked ? "manual-prompt-disabled-reason" : undefined} onChange={(event) => setManual({ ...manual, prompt: event.target.value, promptTouched: true })} /></label>
+      {manualPromptBlocked && <><span className="disabled-reason" id="manual-prompt-disabled-reason">Complete source text must load before this prompt can be edited.</span><Button size="small" variant="secondary" type="button" onClick={loadManualPrompt}>Load complete source before editing</Button></>}
       {manual.promptError && <span className="danger-text" role="alert">{manual.promptError}</span>}
       <label>Acceptance criteria<textarea rows="3" value={manual.acceptance_criteria} onChange={(event) => setManual({ ...manual, acceptance_criteria: event.target.value, acceptanceCriteriaTouched: true })} /></label>
-      <button className="btn" type="button" disabled={pending || manual.promptLoaded === false} onClick={createManual}>{pending ? "Working…" : "Create manual candidate"}</button>
+      <Button type="button" disabled={pending || manualPromptBlocked} disabledReason={createDisabledReason} onClick={createManual}>{pending ? "Working…" : "Create manual candidate"}</Button>
     </div>
   </section>;
 }
@@ -540,7 +555,7 @@ function AcceptedReview({ data }) {
       <p>This review is read-only. {data.review.created_task_ids.pagination.total.toLocaleString()} Tasks were created.</p>
       <PagedEvidence title="Created Task IDs" page={data.review.created_task_ids} />
       <PagedEvidence title="Accepted candidates" page={data.candidates} renderItem={(candidate) => <CandidateEvidence candidate={candidate} />} />
-      <PreservedReadOnly data={data} />
+      <PreservedReadOnly data={data} nested />
       <OwnedLink className="btn" to={data.links.board_href}>Open board</OwnedLink>
     </div>
   </section>;
@@ -553,7 +568,7 @@ function AcceptanceClaim({ data }) {
       <p>This review is read-only while acceptance is in progress or requires controlled operator repair.</p>
       <PagedEvidence title="Created Task IDs" page={data.review.created_task_ids} />
       <PagedEvidence title="Claimed candidates" page={data.candidates} renderItem={(candidate) => <CandidateEvidence candidate={candidate} />} />
-      <PreservedReadOnly data={data} />
+      <PreservedReadOnly data={data} nested />
       <OwnedLink className="btn" to={data.links.board_href}>Open board</OwnedLink>
     </div>
   </section>;
@@ -566,15 +581,17 @@ function CandidateEvidence({ candidate }) {
   </article>;
 }
 
-function PreservedReadOnly({ data }) {
-  return <section className="panel">
-    <div className="panel-header"><h3>Preserved context</h3></div>
-    <div className="panel-body review-stack">
+function PreservedReadOnly({ data, nested = false }) {
+  const content = <div className="review-stack">
       <BoundedEvidence label="Global contract summary" value={data.context.global_contract_summary} />
       <PagedEvidence title="Global constraints" page={data.context.global_constraints} />
       <PagedEvidence title="Verification" page={data.context.verification} />
       <SecondaryEvidence data={data} />
-    </div>
+    </div>;
+  if (nested) return <Fieldset legend="Preserved context">{content}</Fieldset>;
+  return <section className="panel">
+    <div className="panel-header"><h3>Preserved context</h3></div>
+    <div className="panel-body">{content}</div>
   </section>;
 }
 
@@ -640,5 +657,4 @@ function BoundedEvidence({ label, value }) {
   };
   return <div className="bounded-text">{label && <h4>{label}</h4>}<pre className="raw-evidence">{full ?? value.preview}</pre>{value.truncated && full === null && <button className="btn small secondary" type="button" onClick={load}>Load full text</button>}{error && <span className="danger-text" role="alert">{error}</span>}</div>;
 }
-
 

@@ -9,6 +9,7 @@ import { act, create } from "react-test-renderer";
 import { createServer } from "vite";
 
 const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
+const tokensCss = readFileSync(new URL("../src/tokens.css", import.meta.url), "utf8");
 let server;
 let Sidebar;
 let DashboardState;
@@ -102,6 +103,45 @@ function renderSidebar(overrides = {}) {
     ...overrides,
   };
   return renderToStaticMarkup(React.createElement(Sidebar, props));
+}
+
+function assertStatusPillsHaveGlyphs(markup) {
+  const statuses = (markup.match(/class="status-pill status-pill-/g) || []).length;
+  assert.ok(statuses > 0, "expected at least one rendered status pill");
+  assert.equal((markup.match(/class="status-pill-glyph"/g) || []).length, statuses);
+  assert.equal((markup.match(/class="status-pill-label"/g) || []).length, statuses);
+}
+
+function assertNoNestedPanels(markup) {
+  const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+  const stack = [];
+  for (const match of markup.matchAll(/<(\/)?([a-z][\w:-]*)([^>]*)>/gi)) {
+    const [, closing, rawTag, attributes] = match;
+    const tag = rawTag.toLowerCase();
+    if (closing) {
+      while (stack.length) {
+        const open = stack.pop();
+        if (open.tag === tag) break;
+      }
+      continue;
+    }
+    const classes = attributes.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/) || [];
+    const isPanel = classes.includes("panel");
+    assert.ok(!isPanel || !stack.some((open) => open.isPanel), `rendered nested panel at <${tag}>`);
+    if (!voidTags.has(tag) && !attributes.trimEnd().endsWith("/")) stack.push({ tag, isPanel });
+  }
+}
+
+function assertDisabledControlsHaveReasons(markup) {
+  const controls = [...markup.matchAll(/<(button|input|select|textarea|fieldset)\b[^>]*disabled=""[^>]*>/g)];
+  assert.ok(controls.length > 0, "expected at least one disabled control");
+  for (const [control] of controls) {
+    const describedBy = control.match(/aria-describedby="([^"]+)"/)?.[1];
+    assert.ok(describedBy, `disabled control has no associated reason: ${control}`);
+    for (const id of describedBy.split(/\s+/)) {
+      assert.ok(markup.includes(`id="${id}"`), `disabled reason ${id} is not rendered`);
+    }
+  }
 }
 
 function dashboardData(overrides = {}) {
@@ -665,6 +705,8 @@ test("Alarms sidebar and list render from available_actions and bookmarkable fil
     assert.match(populated, new RegExp(text));
   }
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /class="status-pill-label">HIGH<\/span>/);
   assert.doesNotMatch(populated, /Abort/);
   assert.doesNotMatch(populated, /adjust_guardrail/);
 });
@@ -1189,6 +1231,7 @@ test("board intake shows progress while task estimation is running", () => {
   assert.equal((busy.match(/aria-describedby="board-estimating-reason"/g) || []).length, 3);
   assert.match(busy, /Task estimation is already in progress\./);
   assert.match(busy, /disabled=""/);
+  assertDisabledControlsHaveReasons(busy);
 });
 
 test("board cards derive short names from long task descriptions", () => {
@@ -1240,6 +1283,8 @@ test("React task history renders a visible Scout label", () => {
     notice: null,
   }));
   assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
+  assertStatusPillsHaveGlyphs(markup);
+  assert.match(markup, /class="status-pill-label">Done<\/span>/);
 });
 
 test("board action controller negotiates JSON, reloads, reports failures, and navigates", async () => {
@@ -1543,6 +1588,11 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
   ]) assert.match(markup, new RegExp(text));
   assert.match(markup, /Load full text before editing/);
   assert.match(markup, /disabled=""/);
+  assert.match(markup, /aria-describedby="[^"]+-disabled-reason"/);
+  assert.match(markup, /Complete text must load before this field can be edited\./);
+  assertDisabledControlsHaveReasons(markup);
+  assertStatusPillsHaveGlyphs(markup);
+  assert.match(markup, /class="status-pill-label">proposed<\/span>/);
 });
 
 test("Task Breakdown Review renders failed recovery, accepted evidence, and overflow gate", () => {
@@ -1562,11 +1612,14 @@ test("Task Breakdown Review renders failed recovery, accepted evidence, and over
   assert.match(accepted, /Global contract summary/);
   assert.match(accepted, /Repo Context Brief/);
   assert.doesNotMatch(accepted, /Accept selected and estimate/);
+  assertNoNestedPanels(accepted);
 
   const overflow = renderBreakdown("proposed", { overflow: true });
   assert.match(overflow, /Load remaining candidates/);
   assert.match(overflow, /Load every candidate before acceptance/);
   assert.match(overflow, /Accept selected and estimate<\/button>/);
+  assert.match(overflow, /class="disabled-reason"[^>]*>Load every candidate before acceptance\.<\/span>/);
+  assertDisabledControlsHaveReasons(overflow);
 });
 
 test("Task Breakdown Review renders a proposed acceptance claim read-only", () => {
@@ -1575,6 +1628,51 @@ test("Task Breakdown Review renders a proposed acceptance claim read-only", () =
   assert.match(markup, /controlled operator repair/);
   assert.match(markup, /DEMO title 999/);
   assert.doesNotMatch(markup, /Accept selected and estimate|Candidate kind|Execution mode/);
+});
+
+test("rendered Portal surfaces preserve focus, motion, select, and panel contracts", () => {
+  const board = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    data: boardData(),
+    error: null,
+    loading: false,
+    action: () => {},
+    estimating: true,
+  }));
+  const review = renderBreakdown("proposed");
+  const accepted = renderBreakdown("accepted");
+  const floor = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    surface: "floor",
+    data: boardData(),
+    error: null,
+    loading: false,
+    action: () => {},
+  }));
+  const budget = renderToStaticMarkup(React.createElement(BudgetSettingsState, {
+    data: {
+      daily_cap_tokens: 1000,
+      session_cap_tokens: 250,
+      current_window_used_tokens: 125,
+      current_window_remaining_tokens: 875,
+      daily_usage_reset_at: "2099-01-01T00:00:00Z",
+      budget_since: "2099-01-01T00:00:00Z",
+    },
+    error: null,
+    loading: false,
+    onRefresh: () => {},
+  }));
+
+  assert.match(board, /<select[^>]*name="task_kind"/);
+  assert.match(review, /<select[^>]*>.*?<option value="implementation"[^>]*>/s);
+  assert.match(board, /class="board-intake-progress-bar"/);
+  assert.match(floor, /class="live-pulse-dot"/);
+  assert.match(tokensCss, /:where\(a, area\[href\], button, input, select, textarea, summary, \[contenteditable="true"\], \[tabindex\]:not\(\[tabindex="-1"\]\)\):focus-visible\s*\{[^}]*outline: 2px solid var\(--mint\)/s);
+  assert.doesNotMatch(tokensCss, /:focus(?:-visible)?[^\{]*\{[^}]*outline:\s*(?:none|0(?:\D|$))/s);
+  assert.match(tokensCss, /select\s*\{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/s);
+  assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.live-pulse-dot\s*\{[^}]*animation: none;[^}]*opacity: 1;/);
+  assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.board-intake-progress-bar\s*\{[^}]*transform: none;[^}]*animation: none;/);
+  for (const markup of [board, floor, review, accepted, budget]) assertNoNestedPanels(markup);
 });
 
 function reviewButton(root, label) {
@@ -1633,7 +1731,7 @@ test("Task Breakdown controller pages, loads full text, and installs dirty guard
   await act(async () => { renderer = create(mountedReview(data.review.id, (value) => { guard = value; })); });
   assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, true);
   await act(async () => { await reviewButton(renderer.root, "Load remaining candidates").props.onClick(); });
-  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, false);
+  assert.notEqual(reviewButton(renderer.root, "Accept selected").props.disabled, true);
   assert.equal(reviewButton(renderer.root, "Load remaining candidates"), undefined);
   await act(async () => { await reviewButton(renderer.root, "Load full text before editing").props.onClick(); });
   assert(renderer.root.findAllByType("textarea").some((field) => field.props.value === "Complete DEMO prompt 999"));
