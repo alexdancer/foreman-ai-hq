@@ -10,4 +10,4 @@ The Matt Pocock skills use these five canonical triage roles. Foreman uses the s
 | `ready-for-human` | `ready-for-human` | Requires human implementation or decision |
 | `wontfix` | `wontfix` | Will not be actioned |
 
-The labels are created in `alexdancer/foreman-ai-hq` only when absent. Use `gh-axi` for label operations.
+All five labels already exist in `alexdancer/foreman-ai-hq`. Verify with `gh-axi label list -R alexdancer/foreman-ai-hq`; do not create duplicate labels.

@@ -232,9 +232,9 @@ required to prove live streaming.
 
 ### 6. Keep the recorded-demo plan aligned
 
-The recorded-demo behavior is covered by `CONTEXT.md`, `docs/specs/product-spec.md`,
-`docs/specs/test-contract.md`, and the implementation/task catalog. Update those
-artifacts when the scenario changes; do not create a parallel planning tree.
+The recorded-demo behavior is covered by `CONTEXT.md` and the accepted Portal
+workbench specification. Update the relevant focused documentation when the
+scenario changes; do not create a parallel planning tree.
 
 ### 7. Gates and task bookkeeping
 
@@ -244,7 +244,7 @@ Run:
 uv run pytest -q tests/e2e/test_recorded_demo.py
 uv run pytest -q
 npm --prefix frontend run check
-# See docs/specs/test-contract.md for the behavior contract
+# See docs/design/portal-operator-workbench-spec.md for the focused behavior contract
 ```
 
 Only after all pass: mark 5.6 and 5.7 complete, rerun the final two commands,

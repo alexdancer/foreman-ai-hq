@@ -15,6 +15,6 @@ Issues and specifications for this repository live in GitHub Issues at [`alexdan
 
 **PRs as a request surface: no.** Pull requests are reviewed and merged through the normal repository workflow; they are not triage requests.
 
-## When a skill says “publish to the issue tracker”
+## When the optional Matt Pocock workflow says “publish to the issue tracker”
 
-Create a GitHub Issue and apply the appropriate triage label. Specifications and task catalogs remain versioned in this repository as the durable source of truth; the issue is the tracker-facing publication and discussion surface.
+Create a GitHub Issue and apply the appropriate triage label. The accepted Portal workbench specification remains versioned in this repository; the issue is the tracker-facing publication and discussion surface.

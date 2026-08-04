@@ -7,8 +7,8 @@ record and supersede conflicting wording in the original ZIP handoff.
 
 ## Where things are
 
-- **Proposal, design decisions, tasks, and spec deltas** —
-  `docs/specs/` and `docs/migration/specification-workflow-migration.md`
+- **Implementation-ready specification, decisions, tests, and task intent** —
+  `docs/design/portal-operator-workbench-spec.md`
 - **Token, type, measurement, component, and interaction reference** —
   `DESIGN.md` (updated in the same change)
 - **Design artifacts** — the baseline recreation, the three compared directions,

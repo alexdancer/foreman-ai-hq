@@ -4,19 +4,17 @@
 
 ### Issue tracker
 
-This repo tracks work in GitHub Issues for `alexdancer/foreman-ai-hq`; use `gh-axi` for all GitHub operations. See `docs/agents/issue-tracker.md`.
+This repo tracks work in GitHub Issues for `alexdancer/foreman-ai-hq`; use `gh-axi` for GitHub operations. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. They already exist in the repository; verify with `gh-axi label list -R alexdancer/foreman-ai-hq` before creating anything. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
 This is a single-context repo. Read `CONTEXT.md` and applicable `docs/adr/` decisions before product, architecture, workflow, terminology, or test changes. See `docs/agents/domain.md`.
 
-The official Matt Pocock workflow is installed project-locally with exactly nine skills under `.agents/skills`: `setup-matt-pocock-skills`, `to-spec`, `to-tickets`, `implement`, `tdd`, `prototype`, `grill-with-docs`, `domain-modeling`, and `triage`. Codex discovers the canonical bodies there; Pi and Claude Code use the relative links under `.pi/skills/` and `.claude/skills/`. No other agent integration is supported.
-
-Use `docs/specs/` as the active product, technical, test-contract, and implementation/task source of truth. Use `docs/migration/specification-workflow-migration.md` to trace the former specification inventory and the accepted Claude Design paths into those artifacts.
+Matt Pocock's engineering workflow may be available in an operator's environment; this repository does not vendor or install those skills. Use the compact accepted Portal workbench specification at `docs/design/portal-operator-workbench-spec.md` when planning implementation.
 
 ## Project verification
 

@@ -28,13 +28,13 @@ Use a short-lived branch with a focused name. Do not mix feature work, refactors
 ## Before changing code or product docs
 
 1. Read `CONTEXT.md` before changing Harness behavior, Portal copy, workflow, specification artifacts, tests, demo data, or product docs.
-2. Check `docs/specs/` and `docs/migration/specification-workflow-migration.md` before changing behavior, workflow, architecture, or terminology.
+2. Check `docs/design/portal-operator-workbench-spec.md` and nearby domain docs before changing behavior, workflow, architecture, or terminology.
 3. Read nearby code and tests before editing. Follow the local style.
 4. Add a dependency only when it is needed and belongs in `pyproject.toml`.
 
 ## Specifications
 
-Use `docs/specs/product-spec.md`, `docs/specs/technical-spec.md`, `docs/specs/test-contract.md`, and `docs/specs/implementation-tasks.md` as the active source of truth. Keep task status current only after implementation and relevant checks pass.
+Use the compact accepted design specification at `docs/design/portal-operator-workbench-spec.md` as the active source for the Portal workbench. If the Matt Pocock skills are available in the operator environment, follow their normal spec and ticket workflow; no skill bundle is committed here.
 
 
 ## Local setup
