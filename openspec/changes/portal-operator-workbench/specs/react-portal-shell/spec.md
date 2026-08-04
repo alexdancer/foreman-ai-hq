@@ -89,3 +89,16 @@ The shell SHALL own `/projects/{project_id}/needs-you` as a React-owned canonica
 - **WHEN** the operator loads the Needs You route directly
 - **THEN** the shell renders the queue for that project
 - **AND** in-shell navigation to and from it uses client-side routing
+
+### Requirement: Needs You direct loads preserve the authenticated shell boundary
+FastAPI SHALL register `/projects/{project_id}/needs-you` through the existing authenticated project-shell and build-recovery boundary. A known project SHALL serve the completed React shell or the bounded missing-build recovery response, and an unknown project SHALL return the existing not-found result before either response. No `/app/.../needs-you` alias SHALL be added.
+
+#### Scenario: Direct load for a known project
+- **WHEN** an authenticated operator directly loads `/projects/{project_id}/needs-you` for a known project
+- **THEN** FastAPI serves the completed React shell when the build is complete
+- **AND** it serves the bounded recovery response when the build is missing or partial
+
+#### Scenario: Direct load for an unknown project
+- **WHEN** an authenticated operator directly loads `/projects/{project_id}/needs-you` for an unknown project
+- **THEN** FastAPI returns not found before serving a React shell or recovery response
+- **AND** no `/app/.../needs-you` route exists

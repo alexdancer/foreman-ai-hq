@@ -36,14 +36,14 @@
 
 ## 6. Needs You Route and Next Action
 
-- [ ] 6.1 Add `/projects/{project_id}/needs-you` to `routes.js` and `App.jsx` with route-parsing tests; add `views/NeedsYou.jsx` over the existing `/api/projects/{id}/needs-you` projection, preserving `NeedsYouItem`'s inline manual-estimate form behaviour.
+- [ ] 6.1 Register `/projects/{project_id}/needs-you` through the authenticated FastAPI shell/recovery boundary in `src/foreman_ai_hq/routes/react_shell.py`; add direct-load tests in `tests/portal/test_react_shell.py` for a known project with complete and missing/partial builds and for an unknown-project 404, without adding an `/app/.../needs-you` alias. Add the route to `routes.js` and `App.jsx` with route-parsing tests; add `views/NeedsYou.jsx` over the existing `/api/projects/{id}/needs-you` projection, preserving `NeedsYouItem`'s inline manual-estimate form behaviour.
 - [ ] 6.2 Implement `NextActionBanner` from `needs_you.items[0]` plus an overflow count, as the visually dominant element on Pipeline.
 - [ ] 6.3 Delete the Planning Inbox panel and its `breakdown_review` filter of `needs_you.items` in the same commit; assert a breakdown review appears exactly once per project view.
 
 ## 7. Pipeline Ledger
 
-- [ ] 7.1 Add tests for stage counts, stage filtering, ledger rows across all four `tasks_by_status` buckets, blocked and launch-failure annotations, and evidence opening from any row.
-- [ ] 7.2 Implement `StageRail` reporting Intake / Review / Estimated / Running / Accept counts and filtering the ledger on select; derive Intake from `needs_you.items` with kind `breakdown_review`, and map Review / Estimated / Running / Accept to the authoritative `Review` / `Estimated` / `Running` / `Done` buckets respectively.
+- [ ] 7.1 Add tests for stage counts and mappings: Intake planning records and Review Task Breakdown decisions route to the canonical Needs You queue without filtering the ledger; Estimated, Running, and Acceptance filter the authoritative `Estimated`, `Running`, and `Review` buckets; Done remains visible in the unfiltered ledger. Also cover ledger rows across all four `tasks_by_status` buckets, blocked and launch-failure annotations, and evidence opening from any row.
+- [ ] 7.2 Implement `StageRail` reporting Intake / Review / Estimated / Running / Acceptance counts. Selecting Intake or Review opens Needs You with the matching planning record or breakdown decision emphasized and leaves the task ledger unfiltered; map Estimated / Running / Acceptance to the authoritative `Estimated` / `Running` / `Review` buckets, respectively, without creating a lifecycle state or a Done stage bucket.
 - [ ] 7.3 Implement the ledger as a `DataTable` over all four buckets with a horizontal-scroll wrapper and `minmax()` tracks so the slice title cannot collapse and the row action cannot clip.
 - [ ] 7.4 Move adapter, model, and `.card-guardrails` launch controls into a popover on the Launch button; keep the guardrail fields, their help text, and their required-field behaviour.
 - [ ] 7.5 Keep Planning Chat available on Pipeline as a collapsed, visually secondary panel using the existing `compact` prop.

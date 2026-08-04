@@ -1,7 +1,9 @@
 # Portal operator workbench — design record
 
 The desktop Portal redesign accepted on 2026-08-03. This note is the index; the
-normative material lives in the change proposal.
+normative material lives in the change proposal. Captain-approved consistency
+corrections made during handoff review are part of this authoritative design
+record and supersede conflicting wording in the original ZIP handoff.
 
 ## Where things are
 
