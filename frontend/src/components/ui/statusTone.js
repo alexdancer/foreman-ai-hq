@@ -44,9 +44,9 @@ export function budgetZoneStatusTone(zone) {
   return "neutral";
 }
 
-export function trackingStatusTone(mode) {
+export function trackingStatusTone(mode, launchReady = false) {
   const value = normalize(mode);
-  if (["proxy_governed", "native_usage"].includes(value)) return "success";
+  if (["proxy_governed", "native_usage"].includes(value)) return launchReady ? "success" : "info";
   if (["", "observed_only", "unverified"].includes(value)) return "warning";
   return "neutral";
 }

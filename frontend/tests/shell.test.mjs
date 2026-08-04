@@ -51,6 +51,7 @@ let BudgetSettingsState;
 let WorkerSettingsState;
 let ControlPlaneSettingsState;
 let ProjectSettingsState;
+let ProofOutcome;
 
 const browserNames = new Set(["chrome", "chrome-headless-shell", "headless_shell", "Chromium"]);
 
@@ -142,7 +143,7 @@ before(async () => {
   ({ BudgetSettingsState } = await server.ssrLoadModule("/src/views/BudgetSettings.jsx"));
   ({ WorkerSettingsState } = await server.ssrLoadModule("/src/views/WorkerSettings.jsx"));
   ({ ControlPlaneSettingsState } = await server.ssrLoadModule("/src/views/ControlPlaneSettings.jsx"));
-  ({ ProjectSettingsState } = await server.ssrLoadModule("/src/views/ProjectSettings.jsx"));
+  ({ ProjectSettingsState, ProofOutcome } = await server.ssrLoadModule("/src/views/ProjectSettings.jsx"));
 });
 
 after(async () => {
@@ -725,6 +726,24 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   const failed = renderToStaticMarkup(React.createElement(SetupState, { data: null, error: new Error("secret"), loading: false }));
   assert.match(failed, /Could not load setup state/);
   assert.doesNotMatch(failed, /secret/);
+});
+
+test("Project proof outcomes use one semantic hue boundary", () => {
+  const passed = renderToStaticMarkup(React.createElement(ProofOutcome, {
+    passed: true,
+    outcome: { launch_guardrails: { reasons: [] } },
+  }));
+  const blocked = renderToStaticMarkup(React.createElement(ProofOutcome, {
+    passed: false,
+    outcome: { launch_guardrails: { reasons: ["Complete project setup."] } },
+  }));
+
+  assert.match(passed, /class="status-pill status-pill-success"[^>]*>.*Read-only proof launched/s);
+  assert.match(blocked, /class="status-pill status-pill-warning"[^>]*>.*Read-only proof blocked/s);
+  assert.match(blocked, /Complete project setup\./);
+  assert.doesNotMatch(passed + blocked, /class="notice/);
+  assertStatusPillsHaveGlyphs(passed);
+  assertStatusPillsHaveGlyphs(blocked);
 });
 
 test("Alarms sidebar and list render from available_actions and bookmarkable filters", () => {

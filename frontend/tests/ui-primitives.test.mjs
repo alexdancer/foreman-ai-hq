@@ -220,8 +220,10 @@ test("StatusPill always renders a glyph and a text label", () => {
     () => html(React.createElement(StatusPill, { tone: "danger" })),
     /requires a visible text label/,
   );
-  assert.equal(trackingStatusTone("native_usage"), "success");
-  assert.equal(trackingStatusTone("proxy_governed"), "success");
+  assert.equal(trackingStatusTone("native_usage"), "info");
+  assert.equal(trackingStatusTone("proxy_governed"), "info");
+  assert.equal(trackingStatusTone("native_usage", true), "success");
+  assert.equal(trackingStatusTone("proxy_governed", true), "success");
   assert.equal(trackingStatusTone("observed_only"), "warning");
   assert.equal(trackingStatusTone("unverified"), "warning");
 });

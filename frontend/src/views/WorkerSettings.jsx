@@ -408,7 +408,7 @@ export function WorkerSettingsState({
                 <StatusPill tone={activeAdapter.configured ? "success" : "warning"} label={activeAdapter.configured ? "configured" : "unconfigured"} />
               </p>
               <p>
-                <StatusPill tone={trackingStatusTone(activeAdapter.tracking?.mode)} label={activeAdapter.tracking?.label || "Unverified"} />
+                <StatusPill tone={trackingStatusTone(activeAdapter.tracking?.mode, activeAdapter.launchable)} label={activeAdapter.tracking?.label || "Unverified"} />
               </p>
               <p className="muted">
                 Runtime request guardrails: {activeAdapter.tracking?.runtime_request_guardrails} · Accounting: {activeAdapter.tracking?.accounting}

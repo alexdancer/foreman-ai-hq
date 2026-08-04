@@ -126,7 +126,7 @@ export function SetupState({ data, error, loading }) {
               <dt>launchable</dt>
               <dd><StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "true" : "false"} /></dd>
               <dt>tracking</dt>
-              <dd><StatusPill tone={trackingStatusTone(activeAdapter.tracking_mode)} label={trackingLabel} /></dd>
+              <dd><StatusPill tone={trackingStatusTone(activeAdapter.tracking_mode, activeAdapter.launchable)} label={trackingLabel} /></dd>
             </dl>
           </div>
         </section>

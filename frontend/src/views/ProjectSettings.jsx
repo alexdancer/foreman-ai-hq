@@ -349,10 +349,10 @@ function CapabilityPill({ state }) {
   return <StatusPill tone="danger" label="Blocked" />;
 }
 
-function ProofOutcome({ outcome, passed }) {
+export function ProofOutcome({ outcome, passed }) {
   const reasons = outcome?.launch_guardrails?.reasons;
   return (
-    <p className={`notice ${passed ? "success" : "warning"}`}>
+    <p>
       <StatusPill tone={passed ? "success" : "warning"} label={passed ? "Read-only proof launched" : "Read-only proof blocked"} />
       {reasons?.length ? `: ${reasons.join(" ")}` : ""}
     </p>
