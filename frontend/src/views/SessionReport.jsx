@@ -1,7 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
-import { StatusPill } from "../components/ui/index.js";
+import { checkpointStatusTone, sessionStatusTone, severityStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { drainLiveEvents } from "../live-events.js";
 import { LiveEventFeed } from "../components/LiveEventFeed.jsx";
@@ -102,14 +102,14 @@ export function SessionReportState({
         {refreshError && <span className="danger-text">{refreshError}</span>}
       </div>
       <section className="panel report-summary" key={`summary-${version}`}>
-        <div className="panel-header"><h3>Governance summary</h3><StatusPill tone={sessionTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div>
+        <div className="panel-header"><h3>Governance summary</h3><StatusPill tone={sessionStatusTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div>
         <div className="panel-body summary-grid">
           <Summary label="Task / project"><BoundedText value={session.task} /><BoundedText value={summary.selected_project} /></Summary>
           <Summary label={session.kind === "Agent Review" ? "Review source" : "Worker launch"}>
             <span>{summary.adapter_id} · {summary.worker_model} · {summary.tracking_mode}</span>
             <BoundedText value={summary.launch_target} />
           </Summary>
-          <Summary label="Status / result"><StatusPill tone={sessionTone(summary.status, session.active)} label={`${summary.status || "unknown"} · ${summary.requires_review ? "review needed" : "clear"}`} /><BoundedText value={summary.result} /></Summary>
+          <Summary label="Status / result"><StatusPill tone={sessionStatusTone(summary.status, session.active)} label={`${summary.status || "unknown"} · ${summary.requires_review ? "review needed" : "clear"}`} /><BoundedText value={summary.result} /></Summary>
           <Summary label="Evidence coverage">
             <span>{summary.evidence_counts.worker_runs} runs · {summary.evidence_counts.worker_events} events · {summary.evidence_counts.error_events} errors · {summary.evidence_counts.alarms} alarms · {summary.evidence_counts.failed_checkpoints} failed checks</span>
             {summary.missing_labels.map((label) => <div key={label}>{label}</div>)}
@@ -130,8 +130,8 @@ export function SessionReportState({
       )}
       <EvidenceSection key={`worker-${version}`} title="Worker Run timeline" page={data.worker_timeline} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.level} · ${item.layer} · ${item.kind} · ${item.title}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary}`} detail={item.detail} />} />
       <RepoContext key={`repo-${version}`} page={data.repo_context_briefs} />
-      <EvidenceSection key={`alarms-${version}`} title="Alarms" page={data.alarms} renderItem={(item) => <EvidenceItem key={item.id} title={`${item.severity} · ${item.type}`} meta={`${item.id} · ${item.created_at || "time unavailable"}`} body={item.recommended_action} />} />
-      <EvidenceSection key={`checkpoints-${version}`} title="Checkpoint results" page={data.checkpoints} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.passed ? "PASS" : "FAIL"} · ${item.name}`} detail={item.details} />} />
+      <EvidenceSection key={`alarms-${version}`} title="Alarms" page={data.alarms} renderItem={(item) => <EvidenceItem key={item.id} status={<StatusPill tone={severityStatusTone(item.severity)} label={item.severity || "unknown"} />} title={item.type || "Alarm"} meta={`${item.id} · ${item.created_at || "time unavailable"}`} body={item.recommended_action} />} />
+      <EvidenceSection key={`checkpoints-${version}`} title="Checkpoint results" page={data.checkpoints} renderItem={(item, index) => <EvidenceItem key={index} status={<StatusPill tone={checkpointStatusTone(item.passed)} label={item.passed ? "PASS" : "FAIL"} />} title={item.name || "Checkpoint"} detail={item.details} />} />
     </>
   );
 }
@@ -167,7 +167,7 @@ export function AgentReview({ review, isReviewSession = false }) {
     <section className="panel">
       <div className="panel-header"><h3>{isReviewSession ? "Agent Review outcome" : "Related Agent Review"}</h3><span>review/control-plane evidence</span></div>
       <div className="panel-body">
-        <p>{review.status || "unknown"} · {review.recommendation || "no recommendation"} · {review.model || "unknown model"}</p>
+        <p><StatusPill tone={statusTone(review.status)} label={review.status || "unknown"} /> · {review.recommendation || "no recommendation"} · {review.model || "unknown model"}</p>
         <p>{review.review_total_tokens ?? "unavailable"} review/control-plane tokens · {review.reviewed_at || "time unavailable"}</p>
         {review.review_session_href && <AppLink to={review.review_session_href}>Review Session Report</AppLink>}
         {review.summary && <BoundedText value={review.summary} />}
@@ -231,10 +231,10 @@ export function EvidenceSection({ title, page, renderItem, nested = false }) {
   );
 }
 
-export function EvidenceItem({ title, meta = null, body = null, detail = null }) {
+export function EvidenceItem({ title, status = null, meta = null, body = null, detail = null }) {
   return (
     <article className="evidence-item">
-      <h3>{title}</h3>{meta && <p className="mono muted">{meta}</p>}{body && <p>{body}</p>}
+      <div className="evidence-item-heading">{status}<h3>{title}</h3></div>{meta && <p className="mono muted">{meta}</p>}{body && <p>{body}</p>}
       {detail && <details><summary>Evidence detail</summary><BoundedText value={detail} /></details>}
     </article>
   );
@@ -261,11 +261,4 @@ export function BoundedText({ value }) {
       {error && <span className="danger-text" role="alert">{error}</span>}
     </div>
   );
-}
-
-function sessionTone(status, active) {
-  if (active || String(status).toLowerCase() === "running") return "running";
-  if (["failed", "error", "blocked"].includes(String(status).toLowerCase())) return "danger";
-  if (["complete", "completed", "done"].includes(String(status).toLowerCase())) return "success";
-  return "neutral";
 }

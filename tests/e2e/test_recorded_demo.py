@@ -109,6 +109,47 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 )
                 page.locator("h1.page-title").wait_for(timeout=30000)
 
+                task_kind = page.locator('select[name="task_kind"]')
+                expect(task_kind).to_be_visible()
+                select_layout = task_kind.evaluate(
+                    """element => {
+                        const control = element.getBoundingClientRect();
+                        const track = element.parentElement.getBoundingClientRect();
+                        const style = getComputedStyle(element);
+                        return {
+                            controlLeft: control.left,
+                            controlRight: control.right,
+                            trackLeft: track.left,
+                            trackRight: track.right,
+                            minWidth: style.minWidth,
+                            maxWidth: style.maxWidth,
+                        };
+                    }"""
+                )
+                assert select_layout["controlLeft"] >= select_layout["trackLeft"] - 0.5
+                assert select_layout["controlRight"] <= select_layout["trackRight"] + 0.5
+                assert select_layout["minWidth"] == "0px"
+                assert select_layout["maxWidth"] == "100%"
+
+                task_kind.focus()
+                assert task_kind.evaluate("element => element.matches(':focus-visible')")
+                focus_style = task_kind.evaluate(
+                    """element => {
+                        const style = getComputedStyle(element);
+                        return {
+                            color: style.outlineColor,
+                            style: style.outlineStyle,
+                            width: style.outlineWidth,
+                        };
+                    }"""
+                )
+                assert focus_style == {
+                    "color": "rgb(92, 242, 196)",
+                    "style": "solid",
+                    "width": "2px",
+                }
+                assert page.locator(".panel .panel").count() == 0
+
                 card = page.locator("article.task").filter(has_text=demo.task_id)
                 card.locator("button:has-text('Launch')").click()
 
@@ -133,6 +174,18 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                     "section.floor-section:has(h3:has-text('Active Worker Runs')) article.task"
                 ).filter(has_text=demo.task_id)
                 running_card.wait_for(timeout=30000)
+
+                page.emulate_media(reduced_motion="reduce")
+                live_indicator = running_card.locator(".live-pulse-dot")
+                expect(live_indicator).to_have_attribute("aria-label", "Running live")
+                reduced_style = live_indicator.evaluate(
+                    """element => {
+                        const style = getComputedStyle(element);
+                        return { animationName: style.animationName, opacity: style.opacity };
+                    }"""
+                )
+                assert reduced_style == {"animationName": "none", "opacity": "1"}
+                assert page.locator(".panel .panel").count() == 0
 
                 # Live evidence lands in the always-visible Live runs dock above
                 # the columns, so no disclosure has to be opened to see it.

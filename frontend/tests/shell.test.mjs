@@ -648,6 +648,8 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   for (const text of ["First-run setup", "Control plane model", "Token budget", "Worker adapter", "Projects", "No launch-ready project", "setup needed", "OpenCode", "unverified"]) {
     assert.match(populated, new RegExp(text));
   }
+  assert.match(populated, /class="status-pill-label">false<\/span>/);
+  assert.doesNotMatch(populated, />not launchable</);
   // The forwarded adapter context reaches the destination link.
   assert.match(populated, /href="\/settings\/workers\?adapter_id=opencode"/);
   assert.doesNotMatch(populated, /Open task board/);
@@ -726,6 +728,8 @@ test("Session Report renders compact governance plus every bounded evidence path
   ]) assert.match(markup, new RegExp(text));
   assert.match(markup, /href="\/sessions\/review-demo-999"/);
   assert.match(markup, /aria-live="polite"/);
+  assertStatusPillsHaveGlyphs(markup);
+  for (const label of ["MEDIUM", "FAIL", "completed"]) assert.match(markup, new RegExp(`class="status-pill-label">${label}<\\/span>`));
   assert.ok(markup.indexOf("Governance summary") < markup.indexOf("Token log"));
 });
 
@@ -757,6 +761,20 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(populated, /href="\/projects\/demo-999"/);
   assert.match(populated, /href="\/projects\/demo-999\/floor"/);
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+
+  const aborted = renderDashboard({
+    data: dashboardData({
+      active_sessions: [{
+        id: "sess-aborted-999",
+        task_description: "DEMO aborted task",
+        model: "opencode/gpt-5.1",
+        status: "aborted",
+      }],
+    }),
+    error: null,
+    loading: false,
+  });
+  assert.match(aborted, /status-pill-danger[^>]*>.*status-pill-label">aborted<\/span>/s);
 
   const empty = renderDashboard({
     data: dashboardData({
@@ -1065,7 +1083,7 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     "launch ready",
     "Needs You",
     "Review proposed Task Breakdown",
-    "DEMO_INTAKE_2099_999.md · 1 candidate · proposed · 2099-01-01T00:00:00Z",
+    "DEMO_INTAKE_2099_999.md · 1 candidate",
     "Planning Inbox",
     "Short task intake",
     "Filter loaded tasks",
@@ -1081,6 +1099,7 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     assert.match(pipeline, new RegExp(text));
   }
   assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">✓<\/span><span class="status-pill-label">launch ready<\/span>/);
+  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">▲<\/span><span class="status-pill-label">proposed<\/span>/);
   assert.match(pipeline, /type="file"/);
   assert.match(pipeline, /type="number"/);
   assert.match(pipeline, /type="checkbox"/);

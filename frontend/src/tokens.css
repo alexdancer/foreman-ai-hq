@@ -2209,6 +2209,8 @@ textarea.board-input {
 .evidence-item { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-2); margin-bottom: 10px; }
 .summary-item h2,
 .evidence-item h3 { margin: 0 0 8px; font-size: 12px; color: var(--fg-1); }
+.evidence-item-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.evidence-item-heading h3 { margin: 0; }
 .raw-evidence { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-1); }
 .bounded-text { min-width: 0; }
 .truncation,

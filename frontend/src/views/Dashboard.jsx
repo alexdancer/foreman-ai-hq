@@ -1,6 +1,6 @@
 import React from "react";
 
-import { StatusPill } from "../components/ui/index.js";
+import { sessionStatusTone, severityStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink, OwnedLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -183,7 +183,7 @@ export function DashboardContent({ data }) {
                     <td className="mono muted"><OwnedLink to={`/sessions/${session.id}`}>{session.id}</OwnedLink></td>
                     <td>{session.task_description}</td>
                     <td className="mono">{session.model}</td>
-                    <td><StatusPill tone={session.status === "running" ? "running" : "neutral"} label={session.status || "unknown"} /></td>
+                    <td><StatusPill tone={sessionStatusTone(session.status)} label={session.status || "unknown"} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -201,7 +201,7 @@ export function DashboardContent({ data }) {
           {alarms.recent && alarms.recent.length > 0 ? alarms.recent.map((alarm) => (
             <article className={`dashboard-alarm ${String(alarm.severity || "info").toLowerCase()}`} key={alarm.id}>
               <div className="dashboard-alarm-head">
-                <StatusPill tone={alarmTone(alarm.severity)} label={alarm.severity || "unknown"} />
+                <StatusPill tone={severityStatusTone(alarm.severity)} label={alarm.severity || "unknown"} />
                 <span className="mono">{alarm.type}</span>
                 <span className="mono muted">{alarm.id}</span>
               </div>
@@ -292,13 +292,6 @@ function formatTokens(value) {
 
 function formatCost(value) {
   return value == null ? "unpriced" : `$${Number(value).toFixed(4)}`;
-}
-
-function alarmTone(severity) {
-  const normalized = String(severity || "info").toLowerCase();
-  if (["critical", "high"].includes(normalized)) return "red";
-  if (["warning", "medium"].includes(normalized)) return "yellow";
-  return "blue";
 }
 
 function accuracyDetail(ratio) {

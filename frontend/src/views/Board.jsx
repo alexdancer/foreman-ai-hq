@@ -6,7 +6,7 @@ import { drainLiveEvents, runSingleFlight } from "../live-events.js";
 import { LiveRunDock, liveRunsFromTasks } from "../components/LiveRunDock.jsx";
 import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
 import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, TokenComparison } from "../components/ui/index.js";
+import { Button, checkpointStatusTone, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, severityStatusTone, statusTone, TokenComparison } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -436,7 +436,7 @@ function PipelineSurface({
     <Panel className="planning-inbox">
       <PanelHeader title="Planning Inbox" count={planning.length} />
       <PanelBody className="needs-you-list">
-        {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · {item.status} · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
+        {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="planning-inbox-meta mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · <StatusPill tone={statusTone(item.status)} label={item.status || "unknown"} /> · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
         {planning.length === 0 && <EmptyState>No proposed Task Breakdowns await review.</EmptyState>}
       </PanelBody>
     </Panel>
@@ -763,8 +763,8 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
           {(data.worker_timeline?.items?.length > 0 || data.freshness?.active) && <Panel className="evidence-section live-feed-panel"><PanelHeader title="Live Worker Run feed" badge={<span>system evidence</span>} /><PanelBody aria-live="polite"><LiveEventFeed events={(data.worker_timeline?.items || []).map((item, index) => ({ ...item, id: item.id ?? index }))} active={Boolean(data.freshness?.active)} /></PanelBody></Panel>}
           <EvidenceSection key={`${task.id}:timeline`} title="Worker Run timeline" page={safeEvidencePage(data.worker_timeline)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.level || "event"} · ${item.layer || "worker"} · ${item.kind || "event"} · ${item.title || "Worker output"}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary || ""}`} detail={item.detail} />} />
           <RepoContext key={`${task.id}:repo`} page={safeEvidencePage(data.repo_context_briefs)} />
-          <EvidenceSection key={`${task.id}:alarms`} title="Alarms" page={safeEvidencePage(data.alarms)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.severity || "unknown"} · ${item.type || "Alarm"}`} meta={`${item.id || "alarm"} · ${item.created_at || "time unavailable"}`} body={item.recommended_action || "No recommended action."} />} />
-          <EvidenceSection key={`${task.id}:checkpoints`} title="Checkpoint results" page={safeEvidencePage(data.checkpoints)} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.passed ? "PASS" : "FAIL"} · ${item.name || "Checkpoint"}`} detail={item.details} />} />
+          <EvidenceSection key={`${task.id}:alarms`} title="Alarms" page={safeEvidencePage(data.alarms)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} status={<StatusPill tone={severityStatusTone(item.severity)} label={item.severity || "unknown"} />} title={item.type || "Alarm"} meta={`${item.id || "alarm"} · ${item.created_at || "time unavailable"}`} body={item.recommended_action || "No recommended action."} />} />
+          <EvidenceSection key={`${task.id}:checkpoints`} title="Checkpoint results" page={safeEvidencePage(data.checkpoints)} renderItem={(item, index) => <EvidenceItem key={index} status={<StatusPill tone={checkpointStatusTone(item.passed)} label={item.passed ? "PASS" : "FAIL"} />} title={item.name || "Checkpoint"} detail={item.details} />} />
           {data.related_agent_review && <AgentReview review={data.related_agent_review} />}
         </>}
       </div>

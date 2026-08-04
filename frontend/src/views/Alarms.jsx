@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
-import { Button, StatusPill } from "../components/ui/index.js";
+import { Button, severityStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 
 const FILTER_OPTIONS = {
@@ -207,7 +207,7 @@ function AlarmCard({ alarm, busy, onContinue, onRaise }) {
       style={{ marginBottom: 12 }}
     >
       <div className="dashboard-alarm-head">
-        <StatusPill tone={severityClass(alarm.severity)} label={alarm.severity || "unknown"} />
+        <StatusPill tone={severityStatusTone(alarm.severity)} label={alarm.severity || "unknown"} />
         <span className="mono">{alarm.type}</span>
         <span className="mono" style={{ marginLeft: "auto", color: "var(--fg-3)" }}>{alarm.id}</span>
       </div>
@@ -352,12 +352,4 @@ function BoundedText({ value }) {
       {value.truncated && <span className="truncation"> (truncated)</span>}
     </span>
   );
-}
-
-function severityClass(severity) {
-  const s = String(severity || "").toLowerCase();
-  if (["critical", "high"].includes(s)) return "red";
-  if (["warning", "medium"].includes(s)) return "yellow";
-  if (["info", "low"].includes(s)) return "blue";
-  return "";
 }

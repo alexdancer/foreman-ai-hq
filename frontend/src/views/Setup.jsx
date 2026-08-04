@@ -124,7 +124,7 @@ export function SetupState({ data, error, loading }) {
               <dt>status</dt>
               <dd><StatusPill tone={setupTone(activeAdapter.verification_status)} label={activeAdapter.verification_status || "unknown"} /></dd>
               <dt>launchable</dt>
-              <dd><StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "launchable" : "not launchable"} /></dd>
+              <dd><StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "true" : "false"} /></dd>
               <dt>tracking</dt>
               <dd>{trackingLabel}</dd>
             </dl>

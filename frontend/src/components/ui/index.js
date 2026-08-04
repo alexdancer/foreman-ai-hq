@@ -15,6 +15,7 @@ export { Fieldset } from "./Fieldset.jsx";
 export { Disclosure, EvidenceDisclosure } from "./Disclosure.jsx";
 export { DataTable, Row, ColumnHead, DataCell } from "./DataTable.jsx";
 export { StatusPill } from "./StatusPill.jsx";
+export { checkpointStatusTone, sessionStatusTone, severityStatusTone, statusTone } from "./statusTone.js";
 export { Skeleton } from "./Skeleton.jsx";
 export { StickyActionBar } from "./StickyActionBar.jsx";
 export { ConfirmSheet } from "./ConfirmSheet.jsx";
