@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-import { Button, StatusPill } from "../components/ui/index.js";
+import { Button, capabilityStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -143,7 +143,7 @@ export function WorkspaceState({
         label={archived ? "archived" : summary.launch_ready ? "launch ready" : "setup needed"}
       />
       <span className="status-item">{summary.total_tasks ?? 0} tasks</span>
-      <StatusPill tone={capabilityTone(capability.state, archived)} label={capabilityLabel} />
+      <StatusPill tone={capabilityStatusTone(capability.state, archived)} label={capabilityLabel} />
       {Array.isArray(capability.reasons) && capability.reasons.length > 0 && (
         <span className="status-item muted">{capability.reasons.join(" · ")}</span>
       )}
@@ -216,13 +216,6 @@ function ProfileRow({ label, value }) {
 
 function formatList(value, empty = "not detected") {
   return Array.isArray(value) && value.length > 0 ? value.join(", ") : empty;
-}
-
-function capabilityTone(state, archived) {
-  if (archived) return "neutral";
-  if (state === "launch_ready") return "success";
-  if (state === "analysis_ready") return "info";
-  return "danger";
 }
 
 function toneClass(tone) {

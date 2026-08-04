@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
-import { StatusPill } from "../components/ui/index.js";
+import { StatusPill, statusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -446,7 +446,7 @@ export function WorkerSettingsState({
                 <strong>{activeAdapter.kind} diagnostics</strong>
               </p>
               {Object.keys(activeAdapter.diagnostics || {}).length > 0 ? (
-                <span className="mono">{activeAdapter.diagnostics.status || "cached"}</span>
+                <StatusPill tone={statusTone(activeAdapter.diagnostics.status)} label={activeAdapter.diagnostics.status || "cached"} />
               ) : (
                 <span className="muted">No cached diagnostics. Refresh to check PATH.</span>
               )}

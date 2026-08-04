@@ -6,7 +6,7 @@ import { drainLiveEvents, runSingleFlight } from "../live-events.js";
 import { LiveRunDock, liveRunsFromTasks } from "../components/LiveRunDock.jsx";
 import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
 import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, checkpointStatusTone, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, severityStatusTone, statusTone, TokenComparison } from "../components/ui/index.js";
+import { budgetZoneStatusTone, Button, checkpointStatusTone, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, severityStatusTone, statusTone, TokenComparison } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -759,7 +759,7 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
         {!loading && !error && !data && <EmptyState>No session evidence is available.</EmptyState>}
         {data && <>
           <EvidenceSection key={`${task.id}:tokens`} title="Token log" page={safeEvidencePage(data.tokens?.log)} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
-          <EvidenceSection key={`${task.id}:zones`} title="Budget-zone timeline" page={safeEvidencePage(data.zone_timeline)} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.zone || "unknown"} zone`} meta={`${item.created_at || "time unavailable"} · max tokens ${item.max_tokens ?? "unavailable"}`} />} />
+          <EvidenceSection key={`${task.id}:zones`} title="Budget-zone timeline" page={safeEvidencePage(data.zone_timeline)} renderItem={(item, index) => <EvidenceItem key={index} status={<StatusPill tone={budgetZoneStatusTone(item.zone)} label={`${item.zone || "unknown"} zone`} />} title="Budget zone" meta={`${item.created_at || "time unavailable"} · max tokens ${item.max_tokens ?? "unavailable"}`} />} />
           {(data.worker_timeline?.items?.length > 0 || data.freshness?.active) && <Panel className="evidence-section live-feed-panel"><PanelHeader title="Live Worker Run feed" badge={<span>system evidence</span>} /><PanelBody aria-live="polite"><LiveEventFeed events={(data.worker_timeline?.items || []).map((item, index) => ({ ...item, id: item.id ?? index }))} active={Boolean(data.freshness?.active)} /></PanelBody></Panel>}
           <EvidenceSection key={`${task.id}:timeline`} title="Worker Run timeline" page={safeEvidencePage(data.worker_timeline)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.level || "event"} · ${item.layer || "worker"} · ${item.kind || "event"} · ${item.title || "Worker output"}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary || ""}`} detail={item.detail} />} />
           <RepoContext key={`${task.id}:repo`} page={safeEvidencePage(data.repo_context_briefs)} />

@@ -1,7 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
-import { Button, sessionStatusTone, StatusPill } from "../components/ui/index.js";
+import { budgetZoneStatusTone, Button, sessionStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 
 const safeError = (error) => error?.status === 401
@@ -71,7 +71,7 @@ export function SessionsState({ data, error, loading, retry = () => {}, page = (
                   <td><span className="mono">{session.model || "Unknown model"}</span><div><StatusPill tone={sessionStatusTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div></td>
                   <td className="mono">{session.token_totals.prompt_tokens} prompt · {session.token_totals.completion_tokens} completion · {session.token_totals.total_tokens} total</td>
                   <td className="mono">{session.evidence_counts.worker_runs} runs · {session.evidence_counts.worker_events} events · {session.evidence_counts.failed_checkpoints} failed checks</td>
-                  <td>{session.current_zone || "unknown"} zone · {session.alarm_count} alarms</td>
+                  <td><StatusPill tone={budgetZoneStatusTone(session.current_zone)} label={`${session.current_zone || "unknown"} zone`} /> · {session.alarm_count} alarms</td>
                 </tr>
               ))}</tbody>
             </table>

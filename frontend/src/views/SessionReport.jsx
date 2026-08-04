@@ -1,7 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
-import { checkpointStatusTone, sessionStatusTone, severityStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
+import { budgetZoneStatusTone, checkpointStatusTone, sessionStatusTone, severityStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { drainLiveEvents } from "../live-events.js";
 import { LiveEventFeed } from "../components/LiveEventFeed.jsx";
@@ -119,7 +119,7 @@ export function SessionReportState({
       <TokenSummary tokens={tokens} />
       {data.related_agent_review && <AgentReview key={`review-${version}`} review={data.related_agent_review} isReviewSession={session.kind === "Agent Review"} />}
       <EvidenceSection key={`tokens-${version}`} title="Token log" page={tokens.log} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
-      <EvidenceSection key={`zones-${version}`} title="Budget-zone timeline" page={data.zone_timeline} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.zone || "unknown"} zone`} meta={`${item.created_at || "time unavailable"} · max tokens ${item.max_tokens ?? "unavailable"}`} />} />
+      <EvidenceSection key={`zones-${version}`} title="Budget-zone timeline" page={data.zone_timeline} renderItem={(item, index) => <EvidenceItem key={index} status={<StatusPill tone={budgetZoneStatusTone(item.zone)} label={`${item.zone || "unknown"} zone`} />} title="Budget zone" meta={`${item.created_at || "time unavailable"} · max tokens ${item.max_tokens ?? "unavailable"}`} />} />
       {(liveEvents.length > 0 || data.freshness.active) && (
         <section className="panel evidence-section live-feed-panel">
           <div className="panel-header"><h3>Live Worker Run feed</h3><span>system evidence</span></div>

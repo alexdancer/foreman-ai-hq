@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { homedir, tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { promisify } from "node:util";
 
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,7 +14,9 @@ import { createServer } from "vite";
 
 const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
 const tokensCss = readFileSync(new URL("../src/tokens.css", import.meta.url), "utf8");
+const execFileAsync = promisify(execFile);
 let server;
+let browserBaseUrl;
 let Sidebar;
 let DashboardState;
 let BoardState;
@@ -46,13 +52,63 @@ let WorkerSettingsState;
 let ControlPlaneSettingsState;
 let ProjectSettingsState;
 
+const browserNames = new Set(["chrome", "chrome-headless-shell", "headless_shell", "Chromium"]);
+
+function executable(path) {
+  if (!path || !existsSync(path)) return false;
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function browserUnder(root, depth = 0) {
+  if (!root || !existsSync(root) || depth > 4) return null;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = browserUnder(path, depth + 1);
+      if (nested) return nested;
+    } else if (browserNames.has(basename(path)) && executable(path)) {
+      return path;
+    }
+  }
+  return null;
+}
+
+function browserExecutable() {
+  const direct = [
+    process.env.CHROME_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ];
+  for (const directory of String(process.env.PATH || "").split(":")) {
+    for (const name of ["google-chrome", "chromium", "chromium-browser"]) direct.push(join(directory, name));
+  }
+  for (const root of [join(homedir(), ".cache", "ms-playwright"), join(homedir(), "Library", "Caches", "ms-playwright")]) {
+    if (!existsSync(root)) continue;
+    const shells = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("chromium_headless_shell-"))
+      .sort((left, right) => right.name.localeCompare(left.name));
+    for (const shell of shells) {
+      const cached = browserUnder(join(root, shell.name));
+      if (cached) return cached;
+    }
+  }
+  return direct.find(executable) || null;
+}
+
 before(async () => {
   server = await createServer({
     root: frontendRoot,
-    appType: "custom",
+    appType: "mpa",
     logLevel: "silent",
-    server: { middlewareMode: true },
+    server: { host: "127.0.0.1", port: 0 },
   });
+  await server.listen();
+  browserBaseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
   ({ Sidebar } = await server.ssrLoadModule("/src/components/Shell.jsx"));
   ({ DashboardState } = await server.ssrLoadModule("/src/views/Dashboard.jsx"));
   ({ ProjectsState } = await server.ssrLoadModule("/src/views/Projects.jsx"));
@@ -624,6 +680,8 @@ test("Sessions sidebar and list preserve compact scan, states, and pagination", 
   const populated = renderToStaticMarkup(React.createElement(SessionsState, { data, error: null, loading: false }));
   for (const text of ["Agent Review", "DEMO review task", "claude-demo-999", "10 prompt", "5 completion", "15 total", "1 runs", "2 events", "1 failed checks", "yellow zone", "1 alarms", "Active sessions refresh every 5 seconds", "Next sessions"]) assert.match(populated, new RegExp(text));
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /status-pill-warning[^>]*>.*status-pill-label">yellow zone<\/span>/s);
 });
 
 test("Setup sidebar highlighting is exclusive and cards render backend readiness", () => {
@@ -761,6 +819,8 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(populated, /href="\/projects\/demo-999"/);
   assert.match(populated, /href="\/projects\/demo-999\/floor"/);
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /status-pill-success[^>]*>.*status-pill-label">launch_ready<\/span>/s);
 
   const aborted = renderDashboard({
     data: dashboardData({
@@ -1692,6 +1752,29 @@ test("rendered Portal surfaces preserve focus, motion, select, and panel contrac
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.live-pulse-dot\s*\{[^}]*animation: none;[^}]*opacity: 1;/);
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.board-intake-progress-bar\s*\{[^}]*transform: none;[^}]*animation: none;/);
   for (const markup of [board, floor, review, accepted, budget]) assertNoNestedPanels(markup);
+});
+
+test("Vite browser computes focus, motion, select, and panel contracts", { timeout: 30000 }, async () => {
+  const browser = browserExecutable();
+  assert.ok(browser, "Chromium or Chrome is required for the rendered Ledger contract");
+  const profile = mkdtempSync(join(tmpdir(), "foreman-ledger-browser-"));
+  try {
+    const { stdout } = await execFileAsync(browser, [
+      "--headless",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      `--user-data-dir=${profile}`,
+      "--force-prefers-reduced-motion=reduce",
+      "--virtual-time-budget=5000",
+      "--dump-dom",
+      `${browserBaseUrl}/static/react/tests/ledger-browser-contract.html`,
+    ], { encoding: "utf8", maxBuffer: 2 * 1024 * 1024, timeout: 20000, killSignal: "SIGKILL" });
+    assert.match(stdout, /data-ledger-contract="passed"/);
+    assert.doesNotMatch(stdout, /data-ledger-contract="failed"|data-contract-error=/);
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
 });
 
 function reviewButton(root, label) {

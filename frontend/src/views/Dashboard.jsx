@@ -1,6 +1,6 @@
 import React from "react";
 
-import { sessionStatusTone, severityStatusTone, StatusPill } from "../components/ui/index.js";
+import { budgetZoneStatusTone, capabilityStatusTone, sessionStatusTone, severityStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink, OwnedLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -86,7 +86,7 @@ export function DashboardContent({ data }) {
           value={budget.daily_cap
             ? `${formatTokens(budget.total_tokens)} / ${formatTokens(budget.daily_cap)}`
             : formatTokens(budget.total_tokens)}
-          detail={`zone: ${budget.current_zone || "unknown"} · normalized governed model spend since ${budget.since || "unknown"}`}
+          detail={<><StatusPill tone={budgetZoneStatusTone(budget.current_zone)} label={`zone: ${budget.current_zone || "unknown"}`} /> · normalized governed model spend since {budget.since || "unknown"}</>}
           progress={budgetPercent}
         />
         <Metric
@@ -256,9 +256,7 @@ export function DashboardContent({ data }) {
           ) : projects.map((project) => (
             <article className="dashboard-project" key={project.id}>
               <h3>{project.name}</h3>
-              <p className="muted mono">
-                {formatTokens(project.task_count)} tasks · {(project.capability || {}).state || "unknown"}
-              </p>
+              <p className="muted mono">{formatTokens(project.task_count)} tasks · <StatusPill tone={capabilityStatusTone(project.capability?.state)} label={project.capability?.state || "unknown"} /></p>
               <div className="toolbar">
                 <AppLink className="btn" to={`/projects/${project.id}`}>
                   Open Pipeline

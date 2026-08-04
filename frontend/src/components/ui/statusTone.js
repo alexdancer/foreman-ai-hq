@@ -27,3 +27,19 @@ export function severityStatusTone(severity) {
 export function checkpointStatusTone(passed) {
   return passed ? "success" : "danger";
 }
+
+export function capabilityStatusTone(state, archived = false) {
+  if (archived) return "neutral";
+  const value = normalize(state);
+  if (value === "launch_ready") return "success";
+  if (value === "analysis_ready") return "info";
+  return "danger";
+}
+
+export function budgetZoneStatusTone(zone) {
+  const value = normalize(zone);
+  if (value === "green") return "success";
+  if (value === "yellow") return "warning";
+  if (value === "red") return "danger";
+  return "neutral";
+}
