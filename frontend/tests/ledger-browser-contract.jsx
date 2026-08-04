@@ -104,8 +104,8 @@ async function inspect() {
 
   const progressStyle = getComputedStyle(document.querySelector(".board-intake-progress-bar"));
   requireContract(progressStyle.animationName === "none" && progressStyle.transform === "none", "progress fallback still moves");
-  const skeletonStyle = getComputedStyle(document.querySelector(".skeleton-bar"), "::after");
-  requireContract(skeletonStyle.animationName === "none" && skeletonStyle.transform === "none", "skeleton fallback still moves");
+  const skeletonStyle = getComputedStyle(document.querySelector(".skeleton-bar"));
+  requireContract(skeletonStyle.animationName === "none" && skeletonStyle.transform === "none", "skeleton is not static");
   requireContract(document.querySelectorAll(".panel .panel").length === 0, "panels are nested");
   document.documentElement.dataset.ledgerContract = "passed";
 }

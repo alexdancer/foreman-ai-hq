@@ -81,7 +81,7 @@ default `<section>`); `id` and extra classes pass through.
 - `Disclosure` renders a native disclosure with a label, visible quantity, and chevron. `EvidenceDisclosure` is the evidence-specific class variant.
 - `DataTable`, `Row`, `ColumnHead`, and `DataCell` render ARIA table semantics over grid rows. Set `columns` on `DataTable`; the wrapper scrolls horizontally before columns collapse.
 - `StatusPill` always renders both a glyph and a text `label`. `Pill` remains the legacy compatibility primitive for existing views.
-- `Skeleton` exposes a loading label and becomes a static bar under reduced motion.
+- `Skeleton` exposes a loading label through static placeholder bars.
 - `StickyActionBar` keeps consequence and any blocking reason visible beside its actions.
 - `ConfirmSheet` owns dialog markup, modal focus, Escape dismissal, and opener focus restoration. Callers provide `open` and `onClose`, own the existing mutation callback, and the sheet never submits by itself.
 - `Toast` uses a polite status region by default and an assertive alert for danger/error messages.

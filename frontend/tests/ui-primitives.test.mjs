@@ -25,6 +25,8 @@ let Row;
 let ColumnHead;
 let DataCell;
 let StatusPill;
+let capabilityStatusTone;
+let statusTone;
 let trackingStatusTone;
 let Skeleton;
 let StickyActionBar;
@@ -69,6 +71,8 @@ before(async () => {
     ColumnHead,
     DataCell,
     StatusPill,
+    capabilityStatusTone,
+    statusTone,
     trackingStatusTone,
     Skeleton,
     StickyActionBar,
@@ -226,6 +230,9 @@ test("StatusPill always renders a glyph and a text label", () => {
   assert.equal(trackingStatusTone("proxy_governed", true), "success");
   assert.equal(trackingStatusTone("observed_only"), "warning");
   assert.equal(trackingStatusTone("unverified"), "warning");
+  assert.equal(statusTone("blocked"), "warning");
+  assert.equal(statusTone("failed"), "danger");
+  assert.equal(capabilityStatusTone("blocked"), "warning");
 });
 
 test("loading, action, confirmation, and toast primitives expose accessible semantics", () => {
@@ -353,7 +360,9 @@ test("Ledger CSS preserves focus, reduced-motion, and select sizing contracts", 
   assert.match(tokensCss, /:where\(a, area\[href\], button, input, select, textarea, summary, \[contenteditable="true"\], \[tabindex\]:not\(\[tabindex="-1"\]\)\):focus-visible/);
   assert.match(tokensCss, /outline: 2px solid var\(--mint\)/);
   assert.match(tokensCss, /select\s*\{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*min-width: 0;/s);
-  assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.skeleton-bar::after\s*\{[^}]*animation: none;[^}]*transform: none;/);
+  assert.doesNotMatch(tokensCss, /skeleton-sweep|\.skeleton-bar::after/);
+  assert.doesNotMatch(tokensCss, /\.disclosure-chevron\s*\{[^}]*transition:/s);
+  assert.equal((tokensCss.match(/animation:[^;{}]*infinite/g) || []).length, 2);
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.live-pulse-dot\s*\{[^}]*animation: none;[^}]*opacity: 1;/);
   assert.match(tokensCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.board-intake-progress-bar\s*\{[^}]*animation: none;/);
   assert.match(loginTemplate, /:where\(a, button, input\):focus-visible\s*\{[^}]*outline: 2px solid var\(--mint\)/);

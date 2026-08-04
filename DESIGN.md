@@ -166,7 +166,7 @@ there.
 
 The register is terminal-native and utilitarian. Chrome is minimal: thin 1px dividers,
 flat tonal surfaces, small monospace micro-labels. Color is semantic, never decorative —
-mint means live/accepted, amber means conserve/attention, red means alarm/blocked, blue
+mint means live/accepted, amber means conserve/attention/blocked, red means alarm/failure, blue
 means informational, violet means orchestration spend. The feel is a precision
 instrument at rest: the operator is at ease not because the tool is soft, but because
 the readouts never lie and escalations only surface what genuinely needs a human.

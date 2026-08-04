@@ -397,7 +397,6 @@ code,
 }
 .disclosure-chevron {
   color: var(--text-tertiary);
-  transition: transform 150ms cubic-bezier(.4, 0, .2, 1);
 }
 .disclosure[open] .disclosure-chevron {
   transform: rotate(90deg);
@@ -511,24 +510,10 @@ code,
   min-width: 0;
 }
 .skeleton-bar {
-  position: relative;
   display: block;
   height: 12px;
-  overflow: hidden;
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
-}
-.skeleton-bar::after {
-  position: absolute;
-  inset: 0;
-  content: "";
-  background: var(--line-strong);
-  opacity: 0.55;
-  transform: translateX(-110%);
-  animation: skeleton-sweep 1.4s cubic-bezier(.4, 0, .2, 1) infinite;
-}
-@keyframes skeleton-sweep {
-  to { transform: translateX(110%); }
 }
 .sticky-action-bar {
   position: sticky;
@@ -678,16 +663,6 @@ code,
   color: var(--warn);
   font: 12px/1.45 var(--sans);
 }
-@media (prefers-reduced-motion: reduce) {
-  .disclosure-chevron {
-    transition: none;
-  }
-  .skeleton-bar::after {
-    animation: none;
-    transform: none;
-  }
-}
-
 /* Control-plane settings: make the configuration surface readable without
    relying on unstyled generic utility classes. */
 .control-plane-layout {

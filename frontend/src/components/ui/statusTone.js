@@ -5,8 +5,8 @@ function normalize(value) {
 export function statusTone(status) {
   const value = normalize(status);
   if (["running", "active"].includes(value)) return "running";
-  if (["failed", "fail", "error", "blocked", "aborted", "canceled", "cancelled"].includes(value)) return "danger";
-  if (["proposed", "pending", "warning", "warn"].includes(value)) return "warning";
+  if (["failed", "fail", "error", "aborted", "canceled", "cancelled"].includes(value)) return "danger";
+  if (["blocked", "proposed", "pending", "review", "warning", "warn"].includes(value)) return "warning";
   if (["accepted", "complete", "completed", "done", "pass", "passed", "ready", "success", "succeeded", "verified"].includes(value)) return "success";
   if (["info", "low"].includes(value)) return "info";
   return "neutral";
@@ -33,7 +33,7 @@ export function capabilityStatusTone(state, archived = false) {
   const value = normalize(state);
   if (value === "launch_ready") return "success";
   if (value === "analysis_ready") return "info";
-  return "danger";
+  return statusTone(value);
 }
 
 export function budgetZoneStatusTone(zone) {

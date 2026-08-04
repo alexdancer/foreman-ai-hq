@@ -616,11 +616,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
 }
 
 function taskStatusTone(status) {
-  if (status === "Done") return "success";
-  if (status === "Running") return "running";
-  if (status === "Review") return "warning";
-  if (status === "Blocked") return "danger";
-  return "neutral";
+  return statusTone(status);
 }
 
 /**

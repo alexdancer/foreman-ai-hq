@@ -51,7 +51,6 @@ let BudgetSettingsState;
 let WorkerSettingsState;
 let ControlPlaneSettingsState;
 let ProjectSettingsState;
-let ProofOutcome;
 
 const browserNames = new Set(["chrome", "chrome-headless-shell", "headless_shell", "Chromium"]);
 
@@ -143,7 +142,7 @@ before(async () => {
   ({ BudgetSettingsState } = await server.ssrLoadModule("/src/views/BudgetSettings.jsx"));
   ({ WorkerSettingsState } = await server.ssrLoadModule("/src/views/WorkerSettings.jsx"));
   ({ ControlPlaneSettingsState } = await server.ssrLoadModule("/src/views/ControlPlaneSettings.jsx"));
-  ({ ProjectSettingsState, ProofOutcome } = await server.ssrLoadModule("/src/views/ProjectSettings.jsx"));
+  ({ ProjectSettingsState } = await server.ssrLoadModule("/src/views/ProjectSettings.jsx"));
 });
 
 after(async () => {
@@ -641,6 +640,7 @@ test("Projects view renders empty, active, archived, and disabled runner states"
     data: {
       projects: [
         { id: "active-999", name: "Active Repo", root_path: "/active", capability: { state: "launch_ready", label: "Launch-ready", reasons: [] } },
+        { id: "blocked-999", name: "Blocked Repo", root_path: "/blocked", capability: { state: "blocked", label: "Blocked", reasons: ["Setup required"] } },
       ],
       archived_projects: [
         { id: "archived-999", name: "Archived Repo", root_path: "/archived", archived_at: "2099-01-01T00:00:00Z", capability: { state: "blocked", label: "Blocked", reasons: [] } },
@@ -652,6 +652,8 @@ test("Projects view renders empty, active, archived, and disabled runner states"
     onRefresh: () => {},
   }));
   assert.match(populated, /Active Repo/);
+  assert.match(populated, /Blocked Repo/);
+  assert.match(populated, /class="status-pill status-pill-warning"[^>]*>.*class="status-pill-label">Blocked<\/span>/s);
   assert.match(populated, /Archived Repo/);
   assert.match(populated, /Archived 2099-01-01T00:00:00Z/);
   assert.match(populated, /href="\/projects\/active-999"/);
@@ -728,22 +730,54 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   assert.doesNotMatch(failed, /secret/);
 });
 
-test("Project proof outcomes use one semantic hue boundary", () => {
-  const passed = renderToStaticMarkup(React.createElement(ProofOutcome, {
-    passed: true,
-    outcome: { launch_guardrails: { reasons: [] } },
-  }));
-  const blocked = renderToStaticMarkup(React.createElement(ProofOutcome, {
-    passed: false,
-    outcome: { launch_guardrails: { reasons: ["Complete project setup."] } },
-  }));
+test("Project Settings renders proof outcomes through its public interaction", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const data = {
+    local_runner_enabled: true,
+    backend_status: { online: true, name: "Local Runner" },
+    connected_projects: [{
+      id: "project-demo-999",
+      name: "DEMO project 999",
+      root_path: "/demo/project",
+      capability: { state: "launch_ready", reasons: [] },
+    }],
+    archived_projects: [],
+  };
 
-  assert.match(passed, /class="status-pill status-pill-success"[^>]*>.*Read-only proof launched/s);
-  assert.match(blocked, /class="status-pill status-pill-warning"[^>]*>.*Read-only proof blocked/s);
-  assert.match(blocked, /Complete project setup\./);
-  assert.doesNotMatch(passed + blocked, /class="notice/);
-  assertStatusPillsHaveGlyphs(passed);
-  assertStatusPillsHaveGlyphs(blocked);
+  for (const testCase of [
+    { passed: true, tone: "success", label: "Read-only proof launched", reasons: [] },
+    { passed: false, tone: "warning", label: "Read-only proof blocked", reasons: ["Complete project setup."] },
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: testCase.passed,
+      status: testCase.passed ? 200 : 409,
+      json: async () => ({ launch_guardrails: { reasons: testCase.reasons } }),
+    });
+    let renderer;
+    await act(async () => {
+      renderer = create(React.createElement(ProjectSettingsState, {
+        data,
+        error: null,
+        loading: false,
+        onRefresh: () => {},
+      }));
+    });
+    const proofButton = renderer.root.findAllByType("button")
+      .find((button) => button.children.join("") === "Run read-only proof");
+    await act(async () => { await proofButton.props.onClick(); });
+
+    const label = renderer.root.findAllByProps({ className: "status-pill-label" })
+      .find((node) => node.children.join("") === testCase.label);
+    assert.ok(label);
+    const pill = label.parent;
+    assert.equal(pill.props.className, `status-pill status-pill-${testCase.tone}`);
+    assert.ok(pill.findByProps({ className: "status-pill-glyph" }).children.join(""));
+    assert.equal(pill.parent.parent.type, "p");
+    assert.equal(pill.parent.parent.props.className, undefined);
+    if (testCase.reasons.length) assert.match(JSON.stringify(renderer.toJSON()), /Complete project setup\./);
+    await act(async () => { renderer.unmount(); });
+  }
 });
 
 test("Alarms sidebar and list render from available_actions and bookmarkable filters", () => {

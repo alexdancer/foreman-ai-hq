@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
-import { StatusPill } from "../components/ui/index.js";
+import { capabilityStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -257,7 +257,6 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
 }
 
 function CapabilityPill({ state, label }) {
-  if (state === "launch_ready") return <StatusPill tone="success" label={label || "Launch-ready"} />;
-  if (state === "analysis_ready") return <StatusPill tone="info" label={label || "Analysis-ready"} />;
-  return <StatusPill tone="danger" label={label || "Blocked"} />;
+  const fallbackLabel = state === "launch_ready" ? "Launch-ready" : state === "analysis_ready" ? "Analysis-ready" : "Blocked";
+  return <StatusPill tone={capabilityStatusTone(state)} label={label || fallbackLabel} />;
 }

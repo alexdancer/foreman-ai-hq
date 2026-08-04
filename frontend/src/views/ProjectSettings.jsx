@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import { postJSON } from "../api.js";
-import { StatusPill } from "../components/ui/index.js";
+import { capabilityStatusTone, StatusPill } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -344,12 +344,11 @@ export function ProjectSettingsState({ data, error, loading, onRefresh }) {
 }
 
 function CapabilityPill({ state }) {
-  if (state === "launch_ready") return <StatusPill tone="success" label="Launch-ready via Local Runner" />;
-  if (state === "analysis_ready") return <StatusPill tone="info" label="Analysis-ready" />;
-  return <StatusPill tone="danger" label="Blocked" />;
+  const label = state === "launch_ready" ? "Launch-ready via Local Runner" : state === "analysis_ready" ? "Analysis-ready" : "Blocked";
+  return <StatusPill tone={capabilityStatusTone(state)} label={label} />;
 }
 
-export function ProofOutcome({ outcome, passed }) {
+function ProofOutcome({ outcome, passed }) {
   const reasons = outcome?.launch_guardrails?.reasons;
   return (
     <p>

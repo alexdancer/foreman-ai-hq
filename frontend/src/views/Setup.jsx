@@ -138,7 +138,8 @@ export function SetupState({ data, error, loading }) {
 function setupTone(value) {
   const state = String(value || "").toLowerCase();
   if (["ready", "verified", "online", "launchable"].includes(state)) return "success";
-  if (["failed", "blocked", "offline"].includes(state)) return "danger";
+  if (["failed", "offline"].includes(state)) return "danger";
+  if (state === "blocked") return "warning";
   if (state.includes("need") || state.includes("setup") || state.includes("unverified")) return "warning";
   return "neutral";
 }
