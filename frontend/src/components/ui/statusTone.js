@@ -43,3 +43,10 @@ export function budgetZoneStatusTone(zone) {
   if (value === "red") return "danger";
   return "neutral";
 }
+
+export function trackingStatusTone(mode) {
+  const value = normalize(mode);
+  if (["proxy_governed", "native_usage"].includes(value)) return "success";
+  if (["", "observed_only", "unverified"].includes(value)) return "warning";
+  return "neutral";
+}

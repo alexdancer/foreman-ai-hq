@@ -1,12 +1,31 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 
-import { Panel, PanelBody, PanelHeader, Skeleton, StatusPill } from "../src/components/ui/index.js";
+import { ConfirmSheet, Panel, PanelBody, PanelHeader, Skeleton, StatusPill } from "../src/components/ui/index.js";
 import "../src/tokens.css";
 
+const confirmSheetRef = React.createRef();
+
 function ContractSurface() {
+  const [confirming, setConfirming] = React.useState(false);
   return (
     <main>
+      <button id="confirm-opener" type="button" onClick={() => setConfirming(true)}>Open confirmation</button>
+      <ConfirmSheet
+        ref={confirmSheetRef}
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title="Confirm contract"
+        description="Exercise modal focus ownership."
+        actions={(
+          <>
+            <button id="confirm-first" type="button" onClick={() => setConfirming(false)}>Cancel</button>
+            <button id="confirm-last" type="button">Confirm</button>
+          </>
+        )}
+      >
+        <p>Confirmation body</p>
+      </ConfirmSheet>
       <Panel>
         <PanelHeader title="Ledger contract" />
         <PanelBody>
@@ -32,8 +51,38 @@ function requireContract(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function waitForContract(condition, message) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(message);
+}
+
 async function inspect() {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const opener = document.querySelector("#confirm-opener");
+  opener.focus();
+  opener.click();
+  await waitForContract(
+    () => document.querySelector(".confirm-sheet") && document.activeElement === document.querySelector("#confirm-first"),
+    "confirmation does not receive initial focus",
+  );
+  const dialog = document.querySelector(".confirm-sheet");
+  const first = document.querySelector("#confirm-first");
+  const last = document.querySelector("#confirm-last");
+  requireContract(confirmSheetRef.current === dialog, "confirmation ref is not forwarded");
+  last.focus();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  requireContract(document.activeElement === first, "confirmation does not wrap forward focus");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+  requireContract(document.activeElement === last, "confirmation does not wrap backward focus");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await waitForContract(
+    () => !document.querySelector(".confirm-sheet") && document.activeElement === opener,
+    "Escape does not close confirmation and restore opener focus",
+  );
+
   const select = document.querySelector("#contract-select");
   const track = document.querySelector("#select-track");
   select.focus();

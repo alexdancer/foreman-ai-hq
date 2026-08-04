@@ -708,6 +708,7 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   }
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /class="status-pill-label">false<\/span>/);
+  assert.match(populated, /class="status-pill status-pill-warning"[^>]*>.*class="status-pill-label">unverified<\/span>/s);
   assert.doesNotMatch(populated, />not launchable</);
   // The forwarded adapter context reaches the destination link.
   assert.match(populated, /href="\/settings\/workers\?adapter_id=opencode"/);

@@ -1,4 +1,4 @@
-import { budgetZoneStatusTone, checkpointStatusTone, severityStatusTone } from "./ui/statusTone.js";
+import { budgetZoneStatusTone, checkpointStatusTone, severityStatusTone } from "./ui/index.js";
 
 export function budgetZoneEvidenceProps(item = {}) {
   return {

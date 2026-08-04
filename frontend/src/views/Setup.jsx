@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-import { StatusPill } from "../components/ui/index.js";
+import { StatusPill, trackingStatusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) => error?.status === 401
@@ -126,7 +126,7 @@ export function SetupState({ data, error, loading }) {
               <dt>launchable</dt>
               <dd><StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "true" : "false"} /></dd>
               <dt>tracking</dt>
-              <dd>{trackingLabel}</dd>
+              <dd><StatusPill tone={trackingStatusTone(activeAdapter.tracking_mode)} label={trackingLabel} /></dd>
             </dl>
           </div>
         </section>

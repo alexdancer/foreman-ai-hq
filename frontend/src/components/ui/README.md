@@ -83,7 +83,7 @@ default `<section>`); `id` and extra classes pass through.
 - `StatusPill` always renders both a glyph and a text `label`. `Pill` remains the legacy compatibility primitive for existing views.
 - `Skeleton` exposes a loading label and becomes a static bar under reduced motion.
 - `StickyActionBar` keeps consequence and any blocking reason visible beside its actions.
-- `ConfirmSheet` owns dialog markup only. Callers own open/close state, focus management, and the existing mutation callback; the sheet never submits by itself.
+- `ConfirmSheet` owns dialog markup, modal focus, Escape dismissal, and opener focus restoration. Callers provide `open` and `onClose`, own the existing mutation callback, and the sheet never submits by itself.
 - `Toast` uses a polite status region by default and an assertive alert for danger/error messages.
 - `TokenComparison` renders estimate versus actual with optional adjacent spend provenance.
 - `EventRow` is the presentation shell used by `LiveEventFeed`; event normalization and polling stay in the feature component.

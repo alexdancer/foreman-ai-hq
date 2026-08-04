@@ -25,6 +25,7 @@ let Row;
 let ColumnHead;
 let DataCell;
 let StatusPill;
+let trackingStatusTone;
 let Skeleton;
 let StickyActionBar;
 let ConfirmSheet;
@@ -68,6 +69,7 @@ before(async () => {
     ColumnHead,
     DataCell,
     StatusPill,
+    trackingStatusTone,
     Skeleton,
     StickyActionBar,
     ConfirmSheet,
@@ -218,6 +220,10 @@ test("StatusPill always renders a glyph and a text label", () => {
     () => html(React.createElement(StatusPill, { tone: "danger" })),
     /requires a visible text label/,
   );
+  assert.equal(trackingStatusTone("native_usage"), "success");
+  assert.equal(trackingStatusTone("proxy_governed"), "success");
+  assert.equal(trackingStatusTone("observed_only"), "warning");
+  assert.equal(trackingStatusTone("unverified"), "warning");
 });
 
 test("loading, action, confirmation, and toast primitives expose accessible semantics", () => {
@@ -236,6 +242,7 @@ test("loading, action, confirmation, and toast primitives expose accessible sema
 
   const sheet = html(React.createElement(ConfirmSheet, {
     open: true,
+    onClose: () => {},
     title: "Create Tasks?",
     description: "This confirmation does not submit on its own.",
     actions: React.createElement("button", { type: "button" }, "Confirm"),
@@ -243,7 +250,12 @@ test("loading, action, confirmation, and toast primitives expose accessible sema
   assert.match(sheet, /class="confirm-sheet" role="dialog" aria-modal="true"/);
   assert.match(sheet, /aria-labelledby=/);
   assert.match(sheet, /aria-describedby=/);
+  assert.match(sheet, /tabindex="-1"/);
   assert.match(sheet, /This confirmation does not submit on its own\./);
+  assert.throws(
+    () => html(React.createElement(ConfirmSheet, { open: true, title: "Missing close" })),
+    /requires onClose while open/,
+  );
 
   const toast = html(React.createElement(Toast, { title: "Saved" }, "Draft remains local."));
   assert.match(toast, /class="toast" role="status" aria-live="polite"/);

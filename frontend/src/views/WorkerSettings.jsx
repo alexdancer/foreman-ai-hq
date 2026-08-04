@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
-import { StatusPill, statusTone } from "../components/ui/index.js";
+import { StatusPill, statusTone, trackingStatusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -295,10 +295,7 @@ export function WorkerSettingsState({
                 Discover models
               </button>
               {discoverResult && (
-                <p className={`notice ${discoverResult.passed ? "success" : "warning"}`}>
-                  <StatusPill tone={discoverResult.passed ? "success" : "danger"} label={discoverResult.passed ? "Discovery passed" : "Discovery failed"} />
-                  {discoverResult.reasons?.length ? `: ${discoverResult.reasons.join(" ")}` : ""}
-                </p>
+                <WorkerOutcome result={discoverResult} passedLabel="Discovery passed" failedLabel="Discovery failed" />
               )}
 
               {activeAdapter.discovered_models?.length > 0 ? (
@@ -401,10 +398,7 @@ export function WorkerSettingsState({
                 {!busy && verificationSetupReason && <span className="disabled-reason" id="worker-verification-disabled-reason">{verificationSetupReason}</span>}
               </form>
               {verifyResult && (
-                <p className={`notice ${verifyResult.passed ? "success" : "warning"}`}>
-                  <StatusPill tone={verifyResult.passed ? "success" : "danger"} label={verifyResult.passed ? "Verification passed" : "Verification failed"} />
-                  {verifyResult.reasons?.length ? `: ${verifyResult.reasons.join(" ")}` : ""}
-                </p>
+                <WorkerOutcome result={verifyResult} passedLabel="Verification passed" failedLabel="Verification failed" />
               )}
             </div>
 
@@ -414,7 +408,7 @@ export function WorkerSettingsState({
                 <StatusPill tone={activeAdapter.configured ? "success" : "warning"} label={activeAdapter.configured ? "configured" : "unconfigured"} />
               </p>
               <p>
-                <span className="pill blue">{activeAdapter.tracking?.label}</span>
+                <StatusPill tone={trackingStatusTone(activeAdapter.tracking?.mode)} label={activeAdapter.tracking?.label || "Unverified"} />
               </p>
               <p className="muted">
                 Runtime request guardrails: {activeAdapter.tracking?.runtime_request_guardrails} · Accounting: {activeAdapter.tracking?.accounting}
@@ -494,6 +488,16 @@ export function WorkerSettingsState({
         </section>
       )}
     </>
+  );
+}
+
+function WorkerOutcome({ result, passedLabel, failedLabel }) {
+  const passed = Boolean(result.passed);
+  return (
+    <p>
+      <StatusPill tone={passed ? "success" : "danger"} label={passed ? passedLabel : failedLabel} />
+      {result.reasons?.length ? `: ${result.reasons.join(" ")}` : ""}
+    </p>
   );
 }
 
