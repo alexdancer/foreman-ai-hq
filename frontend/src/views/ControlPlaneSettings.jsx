@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
-import { StatusPill } from "../components/ui/index.js";
+import { StatusPill, statusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -378,9 +378,9 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
           <div className="panel-header"><h3>Last connection test</h3></div>
           <div className="panel-body">
             <p>
-              {state === "online" && <StatusPill tone="success" label="online" />}
-              {state === "needs_test" && <StatusPill tone="neutral" label="needs test" />}
-              {state === "offline" && <StatusPill tone="danger" label="offline" />}
+              {state === "online" && <StatusPill tone={statusTone(state)} label="online" />}
+              {state === "needs_test" && <StatusPill tone={statusTone(state)} label="needs test" />}
+              {state === "offline" && <StatusPill tone={statusTone(state)} label="offline" />}
               {data.connection_status.checked_at && (
                 <span className="pill muted">{data.connection_status.checked_at}</span>
               )}

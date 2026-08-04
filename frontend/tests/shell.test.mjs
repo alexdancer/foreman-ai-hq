@@ -744,6 +744,19 @@ test("Project Settings renders proof outcomes through its public interaction", a
     }],
     archived_projects: [],
   };
+  const blocked = renderToStaticMarkup(React.createElement(ProjectSettingsState, {
+    data: {
+      ...data,
+      connected_projects: data.connected_projects.map((project) => ({
+        ...project,
+        capability: { state: "unknown", reasons: ["Capability probe unavailable."] },
+      })),
+    },
+    error: null,
+    loading: false,
+    onRefresh: () => {},
+  }));
+  assert.match(blocked, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
 
   for (const testCase of [
     { passed: true, tone: "success", label: "Read-only proof launched", reasons: [] },
@@ -1285,6 +1298,7 @@ test("Execution Floor renders active runs, Review queue, and recently-finished t
     "Done DEMO task",
     "Archive",
   ]) assert.match(floor, new RegExp(text));
+  assert.match(floor, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
   assert.match(floor, /class="token-comparison finished-token-comparison" aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
   assert.match(floor, /status-pill-glyph[^>]*aria-hidden="true">▮<\/span><span class="status-pill-label">Queue idle<\/span>/);
   assert.ok(floor.indexOf("finished-token-comparison") < floor.indexOf("Done DEMO task"));
@@ -1333,6 +1347,7 @@ test("Evidence Drawer fetches its Session Report handoff and reuses bounded evid
     "Block",
   ]) assert.match(drawer, new RegExp(text));
   assert.match(drawer, /role="dialog"/);
+  assert.match(drawer, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
   assert.match(drawer, /class="live-event live-event-launch event-row"/);
   assert.match(drawer, /Preview truncated/);
 });
@@ -1408,7 +1423,10 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
 test("React task history renders a visible Scout label", () => {
   const markup = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
-    data: { filters: [], tasks: [{ id: "scout-history-1", description: "Inspect routing", status: "Done", task_kind: "scout", archived: false }] },
+    data: { filters: [], tasks: [
+      { id: "scout-history-1", description: "Inspect routing", status: "Done", task_kind: "scout", archived: false },
+      { id: "blocked-history-1", description: "Await operator input", status: "Blocked", task_kind: "implementation", archived: false },
+    ] },
     error: null,
     loading: false,
     filter: "all",
@@ -1419,6 +1437,7 @@ test("React task history renders a visible Scout label", () => {
   assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
   assertStatusPillsHaveGlyphs(markup);
   assert.match(markup, /class="status-pill-label">Done<\/span>/);
+  assert.match(markup, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
 });
 
 test("board action controller negotiates JSON, reloads, reports failures, and navigates", async () => {
@@ -2205,6 +2224,25 @@ function controlPlaneData(overrides = {}) {
     ...overrides,
   };
 }
+
+test("ControlPlaneSettings renders untested connections as attention statuses", async () => {
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(ControlPlaneSettingsState, {
+      data: controlPlaneData(),
+      error: null,
+      loading: false,
+      onRefresh: () => {},
+    }));
+  });
+  const markup = JSON.stringify(renderer.toJSON());
+  const label = renderer.root.findByProps({ className: "status-pill-label" });
+  assert.equal(label.children.join(""), "needs test");
+  assert.equal(label.parent.props.className, "status-pill status-pill-warning");
+  assert.ok(label.parent.findByProps({ className: "status-pill-glyph" }).children.join(""));
+  assert.match(markup, /needs test/);
+  await act(async () => { renderer.unmount(); });
+});
 
 // This is the client-side replacement for the retired Jinja
 // <option selected>/hidden/disabled markup: dataToForm() in

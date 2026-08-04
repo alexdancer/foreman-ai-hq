@@ -231,8 +231,13 @@ test("StatusPill always renders a glyph and a text label", () => {
   assert.equal(trackingStatusTone("observed_only"), "warning");
   assert.equal(trackingStatusTone("unverified"), "warning");
   assert.equal(statusTone("blocked"), "warning");
+  assert.equal(statusTone("needs_test"), "warning");
   assert.equal(statusTone("failed"), "danger");
+  assert.equal(statusTone("offline"), "danger");
+  assert.equal(statusTone("online"), "success");
   assert.equal(capabilityStatusTone("blocked"), "warning");
+  assert.equal(capabilityStatusTone("unknown"), "warning");
+  assert.equal(capabilityStatusTone(), "warning");
 });
 
 test("loading, action, confirmation, and toast primitives expose accessible semantics", () => {

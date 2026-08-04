@@ -1629,11 +1629,8 @@ code,
   color: var(--fg-1);
   font-size: 12px;
 }
-.blocked-condition strong {
-  color: var(--warn);
-  font: 700 10px var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.blocked-condition .status-pill {
+  justify-self: start;
 }
 /* A retryable launch failure: an actual failure (danger hue), distinct from the
    amber guardrail "Blocked" condition. Full 1px border + tint, never a stripe. */
@@ -1648,11 +1645,8 @@ code,
   color: var(--fg-1);
   font-size: 12px;
 }
-.launch-failure strong {
-  color: var(--danger);
-  font: 700 10px var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.launch-failure .status-pill {
+  justify-self: start;
 }
 .launch-failure-detail {
   color: var(--fg-2);

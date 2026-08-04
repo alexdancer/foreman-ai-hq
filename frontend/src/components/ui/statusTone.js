@@ -5,9 +5,9 @@ function normalize(value) {
 export function statusTone(status) {
   const value = normalize(status);
   if (["running", "active"].includes(value)) return "running";
-  if (["failed", "fail", "error", "aborted", "canceled", "cancelled"].includes(value)) return "danger";
-  if (["blocked", "proposed", "pending", "review", "warning", "warn"].includes(value)) return "warning";
-  if (["accepted", "complete", "completed", "done", "pass", "passed", "ready", "success", "succeeded", "verified"].includes(value)) return "success";
+  if (["failed", "fail", "error", "aborted", "canceled", "cancelled", "offline"].includes(value)) return "danger";
+  if (["blocked", "needs_test", "needs test", "proposed", "pending", "review", "warning", "warn"].includes(value)) return "warning";
+  if (["accepted", "complete", "completed", "done", "online", "pass", "passed", "ready", "success", "succeeded", "verified"].includes(value)) return "success";
   if (["info", "low"].includes(value)) return "info";
   return "neutral";
 }
@@ -33,6 +33,7 @@ export function capabilityStatusTone(state, archived = false) {
   const value = normalize(state);
   if (value === "launch_ready") return "success";
   if (value === "analysis_ready") return "info";
+  if (["", "blocked", "unknown"].includes(value)) return "warning";
   return statusTone(value);
 }
 

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-import { StatusPill } from "../components/ui/index.js";
+import { StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -159,17 +159,6 @@ export function TaskHistoryState({
 }
 
 function TaskRow({ task, onUnarchive }) {
-  const tone =
-    task.status === "Done"
-      ? "green"
-      : task.status === "Blocked"
-      ? "red"
-      : task.status === "Review"
-      ? "yellow"
-      : task.status === "Running"
-      ? "blue"
-      : "muted";
-
   return (
     <tr id={task.id}>
       <td>
@@ -178,7 +167,7 @@ function TaskRow({ task, onUnarchive }) {
         <div className="mono muted">{task.id}</div>
       </td>
       <td>
-        <StatusPill tone={tone === "muted" ? "neutral" : tone} label={task.status || "Unknown"} />
+        <StatusPill tone={statusTone(task.status)} label={task.status || "Unknown"} />
         {task.archived && <StatusPill tone="neutral" label="Archived" />}
       </td>
       <td>

@@ -577,7 +577,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
       <StatusPill tone={taskStatusTone(task.status)} label={task.status || "Unknown status"} />
       {task.status === "Running" && <span className="live-pulse-dot" aria-label="Running live" title="Running live" />}
     </header>
-    {task.blocked_condition && <div className="blocked-condition" role="status"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
+    <BlockedCondition condition={task.blocked_condition} announce />
     {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
     {task.status === "Running" && <LatestEventLine timeline={task.timeline} />}
     <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}</div>
@@ -633,10 +633,20 @@ function LaunchFailureNotice({ failure }) {
   const nextAction = (failure.next_action?.text || "").trim();
   return (
     <div className="launch-failure" role="status">
-      <strong>Last launch failed{failure.retryable ? " · retryable" : ""}</strong>
+      <StatusPill tone={statusTone("failed")} label={`Last launch failed${failure.retryable ? " · retryable" : ""}`} />
       <span>{reason}</span>
       {detail && <span className="launch-failure-detail">{detail}{Number.isInteger(failure.returncode) ? ` (exit ${failure.returncode})` : ""}</span>}
       {nextAction && <span className="launch-failure-action">{nextAction}</span>}
+    </div>
+  );
+}
+
+function BlockedCondition({ condition, announce = false }) {
+  if (!condition) return null;
+  return (
+    <div className="blocked-condition" role={announce ? "status" : undefined}>
+      <StatusPill tone={statusTone("blocked")} label="Blocked" />
+      <span>{condition.reason}</span>
     </div>
   );
 }
@@ -750,7 +760,7 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
       <header className="evidence-drawer-header"><div><span className="section-label">Task evidence</span><h2>{taskDisplayName(task)}</h2></div><Button size="small" variant="secondary" type="button" onClick={onClose}>Close</Button></header>
       <div className="evidence-drawer-body">
         <div className="task-meta"><span>Estimate {task.estimate_tokens ?? "unavailable"}</span><span>Actual {task.actual_tokens ?? "unavailable"}</span></div>
-        {task.blocked_condition && <div className="blocked-condition"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
+        <BlockedCondition condition={task.blocked_condition} />
         {loading && <Loading>Loading session evidence…</Loading>}
         {error && <Notice variant="danger" role="alert">{error}</Notice>}
         {!loading && !error && !data && <EmptyState>No session evidence is available.</EmptyState>}
