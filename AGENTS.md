@@ -21,6 +21,10 @@ Matt Pocock's engineering workflow may be available in an operator's environment
 Use `uv run pytest` for the Python test suite when using the repo-managed uv environment; `pytest` is acceptable when dependencies are already active.
 Run `npm run check` in `frontend/` to run the React shell tests and production build.
 
+## Code comments
+
+Add short, human-readable comments when they clarify non-obvious intent, invariants, edge cases, or why a choice exists. Do not add comments that merely restate obvious code.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
