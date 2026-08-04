@@ -1038,6 +1038,7 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
   ]) {
     assert.match(pipeline, new RegExp(text));
   }
+  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">✓<\/span><span class="status-pill-label">launch ready<\/span>/);
   assert.match(pipeline, /type="file"/);
   assert.match(pipeline, /type="number"/);
   assert.match(pipeline, /type="checkbox"/);
@@ -1108,7 +1109,8 @@ test("Execution Floor renders active runs, Review queue, and recently-finished t
     "Done DEMO task",
     "Archive",
   ]) assert.match(floor, new RegExp(text));
-  assert.match(floor, /aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
+  assert.match(floor, /class="token-comparison finished-token-comparison" aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
+  assert.match(floor, /status-pill-glyph[^>]*aria-hidden="true">▮<\/span><span class="status-pill-label">Queue idle<\/span>/);
   assert.ok(floor.indexOf("finished-token-comparison") < floor.indexOf("Done DEMO task"));
   assert.doesNotMatch(floor, /Short task intake|Planning Inbox|Estimated DEMO task|Task details/);
 });
@@ -1155,6 +1157,7 @@ test("Evidence Drawer fetches its Session Report handoff and reuses bounded evid
     "Block",
   ]) assert.match(drawer, new RegExp(text));
   assert.match(drawer, /role="dialog"/);
+  assert.match(drawer, /class="live-event live-event-launch event-row"/);
   assert.match(drawer, /Preview truncated/);
 });
 
@@ -1183,6 +1186,8 @@ test("board intake shows progress while task estimation is running", () => {
   assert.match(busy, /role="progressbar"/);
   assert.match(busy, /aria-valuetext="Estimating task and preparing review"/);
   assert.match(busy, /aria-busy="true"/);
+  assert.equal((busy.match(/aria-describedby="board-estimating-reason"/g) || []).length, 3);
+  assert.match(busy, /Task estimation is already in progress\./);
   assert.match(busy, /disabled=""/);
 });
 

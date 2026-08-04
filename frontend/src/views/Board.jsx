@@ -6,7 +6,7 @@ import { drainLiveEvents, runSingleFlight } from "../live-events.js";
 import { LiveRunDock, liveRunsFromTasks } from "../components/LiveRunDock.jsx";
 import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
 import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, Pill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody } from "../components/ui/index.js";
+import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, TokenComparison } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -366,9 +366,10 @@ function ProjectHeader({ projectId, workspace, action }) {
         </details>
       </div>
       <div className="pipeline-readiness">
-        <Pill tone={summary.launch_ready ? "green" : "yellow"}>
-          {summary.launch_ready ? "launch ready" : capability.label || capability.state || "setup needed"}
-        </Pill>
+        <StatusPill
+          tone={summary.launch_ready ? "green" : "yellow"}
+          label={summary.launch_ready ? "launch ready" : capability.label || capability.state || "setup needed"}
+        />
         {capability.reasons?.map((reason) => <span className="muted" key={reason}>{reason}</span>)}
       </div>
       <nav className="toolbar" aria-label="Project orchestration surfaces">
@@ -408,21 +409,21 @@ function PipelineSurface({
         <form className="board-intake" onSubmit={(event) => { event.preventDefault(); if (estimating) return; estimateTask(new FormData(event.currentTarget)); }}>
           <label className="board-intake-task-field" htmlFor="react-board-intake">
             <span>Task description</span>
-            <textarea className="board-input" id="react-board-intake" name="description" placeholder="Describe a short task or paste Markdown" rows="3" disabled={estimating} />
+            <textarea className="board-input" id="react-board-intake" name="description" placeholder="Describe a short task or paste Markdown" rows="3" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined} />
           </label>
           <label className="board-intake-kind-field">
             <span>Task kind</span>
-            <select className="board-input" name="task_kind" disabled={estimating}><option value="implementation">implementation</option><option value="scout">scout</option></select>
+            <select className="board-input" name="task_kind" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined}><option value="implementation">implementation</option><option value="scout">scout</option></select>
           </label>
           <label className="board-intake-file-field">
             <span>Markdown file <em>(optional)</em></span>
-            <input className="board-file" name="markdown_file" type="file" accept=".md,text/markdown,text/plain" disabled={estimating} />
+            <input className="board-file" name="markdown_file" type="file" accept=".md,text/markdown,text/plain" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined} />
           </label>
-          <Button size="small" type="submit" disabled={estimating}>{estimating ? "Estimating…" : "Estimate task"}</Button>
+          <Button size="small" type="submit" disabled={estimating} disabledReason="Task estimation is already in progress.">{estimating ? "Estimating…" : "Estimate task"}</Button>
           {estimating && <div className="board-intake-progress" role="status" aria-live="polite">
             <div className="board-intake-progress-copy">
               <strong>Preparing Task Breakdown Review</strong>
-              <span>Estimating and breaking down the task. Keep this page open.</span>
+              <span id="board-estimating-reason">Estimating and breaking down the task. Keep this page open.</span>
             </div>
             <div className="board-intake-progress-track" role="progressbar" aria-label="Task estimation progress" aria-valuetext="Estimating task and preparing review">
               <span className="board-intake-progress-bar" />
@@ -475,7 +476,7 @@ function NeedsYouItem({ item, action }) {
         if (a.kind === "manual_estimate") {
           return <form key={a.kind} className="needs-you-inline" onSubmit={(event) => { event.preventDefault(); if (!Number(value)) return; post(a, { estimate_tokens: Number(value) }); }}>
             <input className="board-input" type="number" min="1" value={value} onChange={(event) => setValue(event.target.value)} placeholder="tokens" />
-            <Button size="small" type="submit" disabled={!Number(value)}>{a.label}</Button>
+            <Button size="small" type="submit" disabled={!Number(value)} disabledReason="Enter a positive token estimate.">{a.label}</Button>
           </form>;
         }
         if (a.method === "GET") {
@@ -495,7 +496,7 @@ function FloorSurface({ projectId, data, tasksByStatus, visible, action, openEvi
   return <div className="execution-floor">
     <div className="board-command-bar">
       <div className="board-command-status">
-        <Pill tone={queueRunning ? "running" : "idle"}>Queue {data.automation.queue.status}</Pill>
+        <StatusPill tone={queueRunning ? "running" : "idle"} label={`Queue ${data.automation.queue.status}`} />
         <span className="column-count">{running.length} active · {review.length} review</span>
       </div>
       <div className="board-command-actions">
@@ -528,27 +529,6 @@ function QueueStart({ projectId, queue, action }) {
     <label className="check-row"><input name="auto_agent_review" type="checkbox" defaultChecked={queue.auto_agent_review} /> Auto Agent Review</label>
     <Button size="small" type="submit">Start queue</Button>
   </form>;
-}
-
-function FinishedTokenComparison({ estimate, actual }) {
-  const savings =
-    Number.isFinite(estimate) && Number.isFinite(actual) && estimate > 0 && actual <= estimate
-      ? Math.round((1 - actual / estimate) * 100)
-      : null;
-
-  return (
-    <div className="finished-token-comparison" aria-label="Estimate versus actual tokens">
-      <div className="token-stat token-stat-estimate">
-        <small>Estimate</small>
-        <strong>{estimate?.toLocaleString() ?? "Unavailable"}</strong>
-      </div>
-      <div className="token-stat-divider" aria-hidden="true" />
-      <div className="token-stat token-stat-actual">
-        <small>{savings != null && savings > 0 ? `Actual · −${savings}%` : "Actual"}</small>
-        <strong>{actual?.toLocaleString() ?? "Unavailable"}</strong>
-      </div>
-    </div>
-  );
 }
 
 function TaskCard({ task, projectId, adapters = [], action, openEvidence = () => {}, recentlyFinished = false, actionVariant = "secondary" }) {
@@ -588,7 +568,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
     action(`/tasks/${task.id}/launch`, form);
   };
   return <article className="task" id={`task-${task.id}`}>
-    {recentlyFinished && <FinishedTokenComparison estimate={task.estimate_tokens} actual={task.actual_tokens} />}
+    {recentlyFinished && <TokenComparison className="finished-token-comparison" estimate={task.estimate_tokens} actual={task.actual_tokens} />}
     <header className="task-heading">
       <span className="task-id">{task.id}</span>
       <h4 className="task-title" title={fullSummary}>{displayName}</h4>
@@ -621,7 +601,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
           </>}
         </div>
       </details>}
-      <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)}>Launch</Button>
+      <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)} disabledReason="Enter a positive manual token estimate before launch.">Launch</Button>
       {!selectedAdapter?.launchable && controls.setup_href && <a href={controls.setup_href}>Open Worker Setup</a>}
     </div>}
     {(controls.can_refresh || controls.can_archive || controls.can_dismiss || task.session_href) && <div className="task-actions">
