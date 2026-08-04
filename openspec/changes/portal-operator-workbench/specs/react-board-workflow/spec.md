@@ -15,11 +15,11 @@ Pipeline SHALL present the highest-priority Needs You item as its visually domin
 - **AND** no empty decision container is rendered
 
 ### Requirement: Pipeline reports workflow position without a Kanban board
-Pipeline SHALL report Intake plus the four authoritative task buckets as a single compact stage rail ordered Intake, Estimated, Running, Review, and Done. Intake SHALL count `needs_you.items` whose kind is `breakdown_review`; Estimated, Running, Review, and Done SHALL each read the matching `tasks_by_status` bucket without deriving a new lifecycle state. Selecting Intake SHALL open the canonical Needs You queue with its intake decisions emphasized and SHALL NOT filter the task ledger. Selecting a task bucket SHALL filter the ledger to that exact bucket. The rail SHALL NOT be implemented as parallel scrolling columns of cards.
+Pipeline SHALL report task counts for intake, review, estimated, running, and acceptance as a single compact stage rail, and selecting a stage SHALL filter the task ledger to it. Intake SHALL count `needs_you.items` whose kind is `breakdown_review`; Review, Estimated, Running, and Accept SHALL map to the authoritative `Review`, `Estimated`, `Running`, and `Done` `tasks_by_status` buckets respectively, without deriving a new lifecycle state. Selecting Intake SHALL open the canonical Needs You queue with its intake decisions emphasized and SHALL NOT filter the task ledger. The rail SHALL NOT be implemented as parallel scrolling columns of cards.
 
 #### Scenario: Operator selects a stage
-- **WHEN** the operator selects Estimated, Running, Review, or Done in the rail
-- **THEN** the ledger shows only tasks from the matching `tasks_by_status` bucket
+- **WHEN** the operator selects Review, Estimated, Running, or Accept in the rail
+- **THEN** the ledger shows only tasks from the mapped `Review`, `Estimated`, `Running`, or `Done` `tasks_by_status` bucket
 - **AND** the selected stage is marked by position and text as well as colour
 - **AND** selecting it again clears the filter
 

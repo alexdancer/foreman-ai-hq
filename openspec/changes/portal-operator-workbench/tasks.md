@@ -3,7 +3,7 @@
 - [ ] 1.1 Replace the `:root` block in `frontend/src/tokens.css` with the role-named ramp; keep `--bg-0/1/2`, `--line`, `--line-2`, `--fg-0..3`, `--accent`, `--accent-dim`, `--warn`, `--danger`, `--info`, `--purple` as aliases; remove `--bg-3`.
 - [ ] 1.2 Make the primary button solid `--mint` on `#04120e` and prove the AA contrast improvement over the previous `accent-dim`/`bg-0` pair; keep secondary transparent with a `--line-strong` border and danger transparent with a red border.
 - [ ] 1.3 Add `Fieldset`, `Disclosure`, `DataTable`/`Row`/`ColumnHead`, `Skeleton`, `StickyActionBar`, `ConfirmSheet`, and `Toast` to `frontend/src/components/ui/` with tests for their render and keyboard states.
-- [ ] 1.4 Extend `Pill` into `StatusPill` with a required `glyph` prop and 4px radius; add a test asserting every tone renders a glyph and a text label.
+- [ ] 1.4 Extend `Pill` into `StatusPill` with a required `glyph` prop and 5px radius; add a test asserting every tone renders a glyph and a text label.
 - [ ] 1.5 Extend `:focus-visible` coverage to grid rows and disclosure triggers; assert every interactive primitive exposes a visible focus ring.
 
 ## 2. Type Pass
@@ -14,8 +14,8 @@
 
 ## 3. Application Shell
 
-- [ ] 3.1 Add tests for rail groups, active-item marking, badge tones, project switching, context-bar crumbs, and the loading/error states of `/api/portal/nav`.
-- [ ] 3.2 Rewrite `components/Shell.jsx` as `AppShell` + `NavRail` + `NavGroup` + `NavItem` + `ProjectSwitcher` + `ContextBar` on the existing nav payload and `activeView` values; keep the `AppLink`/`OwnedLink` split unchanged.
+- [ ] 3.1 Add tests for rail groups; route-specific active marking across Dashboard, project surfaces, Sessions, Setup, and Settings; badge tones; project switching; context-bar crumbs; authenticated `/api/portal/nav` payload and failure states; conditional logout; route ownership; and Back/Forward navigation.
+- [ ] 3.2 Rewrite `components/Shell.jsx` as `AppShell` + `NavRail` + `NavGroup` + `NavItem` + `ProjectSwitcher` + `ContextBar` on the existing nav payload and `activeView` values; preserve the logout form, authenticated navigation payload, and `AppLink`/`OwnedLink` split unchanged.
 - [ ] 3.3 Mark the active nav item with a raised fill plus a 2px inset mint rail, never coloured text alone; delete `.shell-footer` and the brand topbar.
 
 ## 4. Task Breakdown Review — Structure
@@ -42,8 +42,8 @@
 
 ## 7. Pipeline Ledger
 
-- [ ] 7.1 Add tests for the breakdown-review Intake count, exact Estimated / Running / Review / Done bucket counts and filters, ledger rows across all four `tasks_by_status` buckets, blocked and launch-failure annotations, and evidence opening from any row.
-- [ ] 7.2 Implement `StageRail` in Intake / Estimated / Running / Review / Done order: derive Intake only from `needs_you.items` with kind `breakdown_review` and route it to the canonical Needs You queue; map every other count and filter directly to its same-named `tasks_by_status` bucket.
+- [ ] 7.1 Add tests for stage counts, stage filtering, ledger rows across all four `tasks_by_status` buckets, blocked and launch-failure annotations, and evidence opening from any row.
+- [ ] 7.2 Implement `StageRail` reporting Intake / Review / Estimated / Running / Accept counts and filtering the ledger on select; derive Intake from `needs_you.items` with kind `breakdown_review`, and map Review / Estimated / Running / Accept to the authoritative `Review` / `Estimated` / `Running` / `Done` buckets respectively.
 - [ ] 7.3 Implement the ledger as a `DataTable` over all four buckets with a horizontal-scroll wrapper and `minmax()` tracks so the slice title cannot collapse and the row action cannot clip.
 - [ ] 7.4 Move adapter, model, and `.card-guardrails` launch controls into a popover on the Launch button; keep the guardrail fields, their help text, and their required-field behaviour.
 - [ ] 7.5 Keep Planning Chat available on Pipeline as a collapsed, visually secondary panel using the existing `compact` prop.
