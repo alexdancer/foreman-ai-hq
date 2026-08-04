@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Status is carried by glyph and text as well as hue
 Every status indicator SHALL carry a glyph and a text label in addition to its semantic hue. The five semantic hues and their meanings SHALL be unchanged: mint for live, selected, accepted, or actionable; amber for attention, proposed, or blocked; red for failure, alarm, or destructive; blue for informational or running; violet for orchestration spend and synthetic data.

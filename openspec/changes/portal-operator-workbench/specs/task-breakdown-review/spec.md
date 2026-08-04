@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Task Breakdown Review presents one focused candidate at a time
 The review surface SHALL present candidates as a navigable list plus exactly one focused candidate editor, rather than one expanded form per candidate. The list SHALL show, for every candidate, its ordinal, title, kind, execution mode, and decision state. The editor SHALL show the focused candidate's fields grouped by purpose. No candidate field enumerated by the existing review projection SHALL be removed from the surface.

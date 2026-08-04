@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: The Portal shell presents a grouped navigation rail
+### Requirement: React shell preserves the full Portal chrome
 The shell SHALL present a fixed-width navigation rail containing a project switcher and three labelled groups — the active project's surfaces, governance surfaces, and configuration surfaces. Group membership SHALL be stable regardless of which project is active, and the active project's surfaces SHALL NOT be rendered as ASCII-prefixed children of a project entry.
 
 #### Scenario: A project is active
@@ -12,6 +12,8 @@ The shell SHALL present a fixed-width navigation rail containing a project switc
 - **WHEN** no project is connected
 - **THEN** the project group states that no repo is connected and offers the connect action
 - **AND** governance and configuration groups remain reachable
+
+## ADDED Requirements
 
 ### Requirement: The active navigation item is marked by more than colour
 The active item SHALL be marked by a raised surface and a persistent inset edge as well as text colour.
@@ -27,8 +29,6 @@ The shell SHALL present a per-page context bar carrying the project and page ide
 - **WHEN** the operator opens a React-owned route
 - **THEN** the context bar names the project and the page
 - **AND** no separate brand bar or footer occupies vertical space
-
-## ADDED Requirements
 
 ### Requirement: The shell owns one additional canonical route
 The shell SHALL own `/projects/{project_id}/needs-you` as a React-owned canonical route. Every other canonical route, redirect alias, and `parseRoute` view name SHALL be unchanged.

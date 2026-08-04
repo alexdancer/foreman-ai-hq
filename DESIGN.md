@@ -58,6 +58,12 @@ typography:
     fontWeight: 400
     lineHeight: 1.45
     letterSpacing: "normal"
+  control-label:
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
+    lineHeight: 1.4
+    letterSpacing: "normal"
   data:
     fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas, monospace"
     fontSize: "11px"
@@ -87,21 +93,21 @@ components:
     backgroundColor: "{colors.mint}"
     textColor: "{colors.mint-ink}"
     borderColor: "{colors.mint}"
-    typography: "{typography.micro-label}"
+    typography: "{typography.control-label}"
     rounded: "{rounded.md}"
     padding: "7px 13px"
   button-secondary:
     backgroundColor: "transparent"
     textColor: "{colors.text-secondary}"
     borderColor: "{colors.line-strong}"
-    typography: "{typography.micro-label}"
+    typography: "{typography.control-label}"
     rounded: "{rounded.md}"
     padding: "7px 13px"
   button-danger:
     backgroundColor: "transparent"
     textColor: "{colors.danger}"
     borderColor: "#6a3030"
-    typography: "{typography.micro-label}"
+    typography: "{typography.control-label}"
     rounded: "{rounded.md}"
     padding: "7px 13px"
   button-disabled:
@@ -312,7 +318,7 @@ radii (5–9px), no ornament. The shared inventory lives in
 status marker composes it from here rather than writing its own CSS.
 
 ### Buttons
-- **Shape:** 6px radius. Monospace label, 12px, 600, 0.04em tracking. 32px tall (`7px 13px`); the small variant is 28px (`5px 10px`).
+- **Shape:** 6px radius. Sentence-case sans label, 12px, 600. 32px tall (`7px 13px`); the small variant is 28px (`5px 10px`).
 - **Primary:** Signal Mint fill with Mint Ink text; hover lightens to `#8df7d8`.
 - **Secondary / Ghost:** Transparent, Line Strong border, Secondary Ink text; hover brightens the text and, where the action is affirmative, the border to Mint Edge.
 - **Danger:** Transparent with a red border and red text; hover fills to a 10% red tint. Never adjacent to the approval action — the two are separated across the bar.

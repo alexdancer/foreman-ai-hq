@@ -42,8 +42,8 @@
 
 ## 7. Pipeline Ledger
 
-- [ ] 7.1 Add tests for stage counts, stage filtering, ledger rows across all four `tasks_by_status` buckets, blocked and launch-failure annotations, and evidence opening from any row.
-- [ ] 7.2 Implement `StageRail` reporting Intake / Review / Estimated / Running / Accept counts and filtering the ledger on select.
+- [ ] 7.1 Add tests for the breakdown-review Intake count, exact Estimated / Running / Review / Done bucket counts and filters, ledger rows across all four `tasks_by_status` buckets, blocked and launch-failure annotations, and evidence opening from any row.
+- [ ] 7.2 Implement `StageRail` in Intake / Estimated / Running / Review / Done order: derive Intake only from `needs_you.items` with kind `breakdown_review` and route it to the canonical Needs You queue; map every other count and filter directly to its same-named `tasks_by_status` bucket.
 - [ ] 7.3 Implement the ledger as a `DataTable` over all four buckets with a horizontal-scroll wrapper and `minmax()` tracks so the slice title cannot collapse and the row action cannot clip.
 - [ ] 7.4 Move adapter, model, and `.card-guardrails` launch controls into a popover on the Launch button; keep the guardrail fields, their help text, and their required-field behaviour.
 - [ ] 7.5 Keep Planning Chat available on Pipeline as a collapsed, visually secondary panel using the existing `compact` prop.
@@ -69,3 +69,4 @@
 - [ ] 10.1 Run the frontend test suite and `npm --prefix frontend run check`; fix all regressions.
 - [ ] 10.2 Verify at 1440px and 1728px and down to 1280px and 1100px: no panel nested in a panel, no prose in monospace, every status legible in greyscale, every disabled control accompanied by its reason, and Pipeline / Execution Floor / Worker Run / Needs You / Evidence unchanged as terms.
 - [ ] 10.3 Update `DESIGN.md` frontmatter and prose to the retuned ramp, the micro-label policy, and the expanded component inventory.
+- [ ] 10.4 Update `CONTEXT.md` so Proposed Task Breakdown, Pipeline Surface, and Needs You document the removed Planning Inbox presentation and the canonical Needs You route when the implementation lands.
