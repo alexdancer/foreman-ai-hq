@@ -1420,12 +1420,13 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
   assert.doesNotMatch(populated, /href="\/app\/projects\/demo-999\/board"/);
 });
 
-test("React task history renders a visible Scout label", () => {
+test("React task history renders Scout and blocked-condition labels", () => {
   const markup = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
     data: { filters: [], tasks: [
       { id: "scout-history-1", description: "Inspect routing", status: "Done", task_kind: "scout", archived: false },
       { id: "blocked-history-1", description: "Await operator input", status: "Blocked", task_kind: "implementation", archived: false },
+      { id: "archived-blocked-history-1", description: "Preserve blocked evidence", status: "Estimated", task_kind: "implementation", archived: true, blocked_reason: "Needs operator input" },
     ] },
     error: null,
     loading: false,
@@ -1438,6 +1439,9 @@ test("React task history renders a visible Scout label", () => {
   assertStatusPillsHaveGlyphs(markup);
   assert.match(markup, /class="status-pill-label">Done<\/span>/);
   assert.match(markup, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
+  assert.match(markup, /class="status-pill-label">Estimated<\/span>/);
+  assert.match(markup, /class="status-pill-label">Archived<\/span>/);
+  assert.match(markup, /Needs operator input/);
 });
 
 test("board action controller negotiates JSON, reloads, reports failures, and navigates", async () => {
