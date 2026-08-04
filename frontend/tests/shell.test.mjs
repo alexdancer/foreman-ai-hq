@@ -1426,7 +1426,7 @@ test("React task history renders Scout and blocked-condition labels", () => {
     data: { filters: [], tasks: [
       { id: "scout-history-1", description: "Inspect routing", status: "Done", task_kind: "scout", archived: false },
       { id: "blocked-history-1", description: "Await operator input", status: "Blocked", task_kind: "implementation", archived: false },
-      { id: "archived-blocked-history-1", description: "Preserve blocked evidence", status: "Estimated", task_kind: "implementation", archived: true, blocked_reason: "Needs operator input" },
+      { id: "archived-blocked-history-1", description: "Preserve blocked evidence", status: "Estimated", task_kind: "implementation", archived: true, blocked_reason: "Needs operator input", requires_manual_estimate: true },
     ] },
     error: null,
     loading: false,
@@ -1442,6 +1442,7 @@ test("React task history renders Scout and blocked-condition labels", () => {
   assert.match(markup, /class="status-pill-label">Estimated<\/span>/);
   assert.match(markup, /class="status-pill-label">Archived<\/span>/);
   assert.match(markup, /Needs operator input/);
+  assert.match(markup, /class="status-pill status-pill-warning"><span class="status-pill-glyph" aria-hidden="true">▲<\/span><span class="status-pill-label">Manual estimate required<\/span><\/span>/);
 });
 
 test("board action controller negotiates JSON, reloads, reports failures, and navigates", async () => {

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-import { BlockedCondition } from "../components/BlockedCondition.jsx";
+import { BlockedCondition, TaskCondition } from "../components/BlockedCondition.jsx";
 import { StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
@@ -190,9 +190,7 @@ function TaskRow({ task, onUnarchive }) {
         )}
         {task.worker_run_id && <div className="mono muted">Worker Run: {task.worker_run_id}</div>}
         <BlockedCondition reason={task.blocked_reason} />
-        {task.requires_manual_estimate && (
-          <div className="mono muted">Manual estimate required</div>
-        )}
+        {task.requires_manual_estimate && <TaskCondition label="Manual estimate required" />}
       </td>
       <td>
         {task.archived_at ? (

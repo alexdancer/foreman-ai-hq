@@ -1618,7 +1618,7 @@ code,
   color: var(--fg-1);
   font-size: 13px;
 }
-.blocked-condition {
+.task-condition {
   display: grid;
   gap: 2px;
   margin: 10px 0;
@@ -1629,7 +1629,7 @@ code,
   color: var(--fg-1);
   font-size: 12px;
 }
-.blocked-condition .status-pill {
+.task-condition .status-pill {
   justify-self: start;
 }
 /* A retryable launch failure: an actual failure (danger hue), distinct from the
