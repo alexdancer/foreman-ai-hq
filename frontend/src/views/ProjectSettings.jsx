@@ -353,7 +353,7 @@ function ProofOutcome({ outcome, passed }) {
   const reasons = outcome?.launch_guardrails?.reasons;
   return (
     <p className={`notice ${passed ? "success" : "warning"}`}>
-      {passed ? "Read-only proof launched" : "Read-only proof blocked"}
+      <StatusPill tone={passed ? "success" : "warning"} label={passed ? "Read-only proof launched" : "Read-only proof blocked"} />
       {reasons?.length ? `: ${reasons.join(" ")}` : ""}
     </p>
   );

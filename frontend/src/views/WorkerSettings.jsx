@@ -296,7 +296,7 @@ export function WorkerSettingsState({
               </button>
               {discoverResult && (
                 <p className={`notice ${discoverResult.passed ? "success" : "warning"}`}>
-                  {discoverResult.passed ? "Discovery passed" : "Discovery failed"}
+                  <StatusPill tone={discoverResult.passed ? "success" : "danger"} label={discoverResult.passed ? "Discovery passed" : "Discovery failed"} />
                   {discoverResult.reasons?.length ? `: ${discoverResult.reasons.join(" ")}` : ""}
                 </p>
               )}
@@ -402,7 +402,7 @@ export function WorkerSettingsState({
               </form>
               {verifyResult && (
                 <p className={`notice ${verifyResult.passed ? "success" : "warning"}`}>
-                  {verifyResult.passed ? "Verification passed" : "Verification failed"}
+                  <StatusPill tone={verifyResult.passed ? "success" : "danger"} label={verifyResult.passed ? "Verification passed" : "Verification failed"} />
                   {verifyResult.reasons?.length ? `: ${verifyResult.reasons.join(" ")}` : ""}
                 </p>
               )}

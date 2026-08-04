@@ -103,7 +103,7 @@ export function SetupState({ data, error, loading }) {
               <ol>
                 {steps.map((step) => (
                   <li key={step.name}>
-                    <a href={step.href}>{step.name}</a>: {step.state}
+                    <a href={step.href}>{step.name}</a>: <StatusPill tone={setupTone(step.state)} label={step.state || "unknown"} />
                   </li>
                 ))}
               </ol>

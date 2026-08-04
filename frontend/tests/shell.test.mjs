@@ -706,6 +706,7 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   for (const text of ["First-run setup", "Control plane model", "Token budget", "Worker adapter", "Projects", "No launch-ready project", "setup needed", "OpenCode", "unverified"]) {
     assert.match(populated, new RegExp(text));
   }
+  assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /class="status-pill-label">false<\/span>/);
   assert.doesNotMatch(populated, />not launchable</);
   // The forwarded adapter context reaches the destination link.

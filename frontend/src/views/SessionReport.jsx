@@ -1,7 +1,8 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
-import { budgetZoneStatusTone, checkpointStatusTone, sessionStatusTone, severityStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
+import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
+import { sessionStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { drainLiveEvents } from "../live-events.js";
 import { LiveEventFeed } from "../components/LiveEventFeed.jsx";
@@ -119,7 +120,7 @@ export function SessionReportState({
       <TokenSummary tokens={tokens} />
       {data.related_agent_review && <AgentReview key={`review-${version}`} review={data.related_agent_review} isReviewSession={session.kind === "Agent Review"} />}
       <EvidenceSection key={`tokens-${version}`} title="Token log" page={tokens.log} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
-      <EvidenceSection key={`zones-${version}`} title="Budget-zone timeline" page={data.zone_timeline} renderItem={(item, index) => <EvidenceItem key={index} status={<StatusPill tone={budgetZoneStatusTone(item.zone)} label={`${item.zone || "unknown"} zone`} />} title="Budget zone" meta={`${item.created_at || "time unavailable"} · max tokens ${item.max_tokens ?? "unavailable"}`} />} />
+      <EvidenceSection key={`zones-${version}`} title="Budget-zone timeline" page={data.zone_timeline} renderItem={(item, index) => <EvidenceItem key={index} {...budgetZoneEvidenceProps(item)} />} />
       {(liveEvents.length > 0 || data.freshness.active) && (
         <section className="panel evidence-section live-feed-panel">
           <div className="panel-header"><h3>Live Worker Run feed</h3><span>system evidence</span></div>
@@ -130,8 +131,8 @@ export function SessionReportState({
       )}
       <EvidenceSection key={`worker-${version}`} title="Worker Run timeline" page={data.worker_timeline} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.level} · ${item.layer} · ${item.kind} · ${item.title}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary}`} detail={item.detail} />} />
       <RepoContext key={`repo-${version}`} page={data.repo_context_briefs} />
-      <EvidenceSection key={`alarms-${version}`} title="Alarms" page={data.alarms} renderItem={(item) => <EvidenceItem key={item.id} status={<StatusPill tone={severityStatusTone(item.severity)} label={item.severity || "unknown"} />} title={item.type || "Alarm"} meta={`${item.id} · ${item.created_at || "time unavailable"}`} body={item.recommended_action} />} />
-      <EvidenceSection key={`checkpoints-${version}`} title="Checkpoint results" page={data.checkpoints} renderItem={(item, index) => <EvidenceItem key={index} status={<StatusPill tone={checkpointStatusTone(item.passed)} label={item.passed ? "PASS" : "FAIL"} />} title={item.name || "Checkpoint"} detail={item.details} />} />
+      <EvidenceSection key={`alarms-${version}`} title="Alarms" page={data.alarms} renderItem={(item) => <EvidenceItem key={item.id} {...alarmEvidenceProps(item)} />} />
+      <EvidenceSection key={`checkpoints-${version}`} title="Checkpoint results" page={data.checkpoints} renderItem={(item, index) => <EvidenceItem key={index} {...checkpointEvidenceProps(item)} />} />
     </>
   );
 }
@@ -231,10 +232,11 @@ export function EvidenceSection({ title, page, renderItem, nested = false }) {
   );
 }
 
-export function EvidenceItem({ title, status = null, meta = null, body = null, detail = null }) {
+export function EvidenceItem({ title, status = null, statusTone: tone = null, statusLabel = null, meta = null, body = null, detail = null }) {
+  const visibleStatus = status || (statusLabel ? <StatusPill tone={tone || "neutral"} label={statusLabel} /> : null);
   return (
     <article className="evidence-item">
-      <div className="evidence-item-heading">{status}<h3>{title}</h3></div>{meta && <p className="mono muted">{meta}</p>}{body && <p>{body}</p>}
+      <div className="evidence-item-heading">{visibleStatus}<h3>{title}</h3></div>{meta && <p className="mono muted">{meta}</p>}{body && <p>{body}</p>}
       {detail && <details><summary>Evidence detail</summary><BoundedText value={detail} /></details>}
     </article>
   );
