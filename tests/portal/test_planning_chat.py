@@ -71,6 +71,7 @@ def test_only_planning_chat_can_create_tasks_with_intake_provenance(tmp_path, mo
         registry._live[project["id"]] = planning_conversation.LiveConversation(
             conv=SimpleNamespace(proc=SimpleNamespace(poll=lambda: None), close=lambda: None),
             planning_session_id="sess_planning_intake",
+            model=client.app.state.settings.orchestrator_model,
             last_used_at=time.monotonic(),
         )
         created = client.post(
@@ -140,6 +141,7 @@ def test_planning_message_surfaces_provider_auth_expiring_mid_conversation(tmp_p
         registry._live[project["id"]] = planning_conversation.LiveConversation(
             conv=_ExpiredAuthConversation(),
             planning_session_id="sess_planning_test",
+            model=client.app.state.settings.orchestrator_model,
             last_used_at=time.monotonic(),
         )
         response = client.post(

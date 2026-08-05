@@ -419,6 +419,7 @@ class RecordedDemo:
                 self._live[project_id] = planning_conversation.LiveConversation(
                     conv=fake_conv,
                     planning_session_id=session["id"],
+                    model=model,
                     last_used_at=time.monotonic(),
                 )
             return session["id"]

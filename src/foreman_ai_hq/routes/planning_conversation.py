@@ -37,6 +37,7 @@ class PlanningConversationCapacityError(RuntimeError):
 class LiveConversation:
     conv: PiConversation
     planning_session_id: str
+    model: str
     last_used_at: float
 
 
@@ -74,11 +75,15 @@ class PlanningConversationRegistry:
         with self._lock:
             self._sweep(now)
             live = self._live.get(project_id)
-            if live is not None and live.conv.proc.poll() is None:
+            if (
+                live is not None
+                and live.conv.proc.poll() is None
+                and live.model == model
+            ):
                 live.last_used_at = now
                 return live.planning_session_id
             if live is not None:
-                del self._live[project_id]
+                self._live.pop(project_id).conv.close()
             if len(self._live) >= self._max:
                 idle = [
                     (pid, item)
@@ -100,6 +105,7 @@ class PlanningConversationRegistry:
             live = LiveConversation(
                 conv=conv,
                 planning_session_id=conv.session["id"],
+                model=model,
                 last_used_at=now,
             )
             self._live[project_id] = live

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import { getJSON, postForm, postJSON } from "../api.js";
+import { NavContext } from "../nav.jsx";
+import { parseRoute } from "../routes.js";
 import {
   Button,
   EmptyState,
@@ -156,7 +158,14 @@ export async function drainPlanningEvents(base, get = getJSON) {
   }
 }
 
+export function breakdownReviewHref(outcome) {
+  const href = outcome?.decision === "needs_breakdown" ? outcome.next_href : null;
+  if (typeof href !== "string" || !href.startsWith("/") || href.startsWith("//")) return null;
+  return parseRoute(href.split(/[?#]/)[0]).view === "taskBreakdownReview" ? href : null;
+}
+
 export default function PlanningChat({ projectId, onTurnComplete, compact, initialMessage = "" }) {
+  const navigate = React.useContext(NavContext);
   const [state, setState] = useState({
     loading: true,
     error: null,
@@ -258,6 +267,8 @@ export default function PlanningChat({ projectId, onTurnComplete, compact, initi
       const turn = await postForm(`${base}/intake`, body);
       if (!mounted.current) return;
       appendTurn(text || (file ? `Attached ${file.name}` : ""), turn);
+      const reviewHref = breakdownReviewHref(turn.outcome);
+      if (reviewHref) navigate(reviewHref);
     } catch (error) {
       if (!mounted.current) return;
       setState((s) => ({ ...s, sending: null, error }));

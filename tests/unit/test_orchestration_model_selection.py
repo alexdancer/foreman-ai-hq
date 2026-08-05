@@ -11,12 +11,34 @@ from tests.conftest import seed_orchestrator_inventory
 
 
 class _Conversation:
-    def __init__(self):
+    def __init__(self, session_id="sess-planning"):
         self.proc = SimpleNamespace(poll=lambda: None)
-        self.session = {"id": "sess-planning"}
+        self.session = {"id": session_id}
+        self.closed = False
 
     def close(self):
-        pass
+        self.closed = True
+
+
+def test_planning_registry_recreates_conversation_when_model_changes(tmp_path, monkeypatch):
+    opened = []
+
+    def open_conversation(_database_path, *, model, **_kwargs):
+        conversation = _Conversation(f"sess-{len(opened) + 1}")
+        opened.append((model, conversation))
+        return conversation
+
+    monkeypatch.setattr(planning_conversation, "open_pi_conversation", open_conversation)
+    registry = planning_conversation.PlanningConversationRegistry()
+
+    first = registry.start("project-1", tmp_path / "harness.db", "model-a", tmp_path)
+    reused = registry.start("project-1", tmp_path / "harness.db", "model-a", tmp_path)
+    replaced = registry.start("project-1", tmp_path / "harness.db", "model-b", tmp_path)
+
+    assert (first, reused, replaced) == ("sess-1", "sess-1", "sess-2")
+    assert [model for model, _conversation in opened] == ["model-a", "model-b"]
+    assert opened[0][1].closed is True
+    assert opened[1][1].closed is False
 
 
 def test_divergent_legacy_models_never_select_an_orchestration_job(tmp_path, monkeypatch):

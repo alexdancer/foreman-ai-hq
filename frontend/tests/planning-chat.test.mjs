@@ -12,6 +12,8 @@ let server;
 let PlanningChatState;
 let PlanningChat;
 let drainPlanningEvents;
+let breakdownReviewHref;
+let NavContext;
 
 before(async () => {
   server = await createServer({
@@ -20,7 +22,8 @@ before(async () => {
     logLevel: "silent",
     server: { middlewareMode: true },
   });
-  ({ PlanningChatState, drainPlanningEvents, default: PlanningChat } = await server.ssrLoadModule("/src/views/PlanningChat.jsx"));
+  ({ PlanningChatState, breakdownReviewHref, drainPlanningEvents, default: PlanningChat } = await server.ssrLoadModule("/src/views/PlanningChat.jsx"));
+  ({ NavContext } = await server.ssrLoadModule("/src/nav.jsx"));
 });
 
 after(async () => {
@@ -294,6 +297,63 @@ test("PlanningChat submits governed intake only from the explicit intake action"
   });
 
   assert.match(JSON.stringify(renderer.toJSON()), /Intake decision: single_task/);
+
+  await act(async () => {
+    renderer.unmount();
+  });
+});
+
+test("PlanningChat opens the validated review destination for breakdown intake", async () => {
+  const { fetchMock, getIntakeResolve } = makeFetch([]);
+  globalThis.fetch = fetchMock;
+  const navigations = [];
+
+  assert.equal(
+    breakdownReviewHref({ decision: "needs_breakdown", next_href: "/task-breakdowns/bd-123/review" }),
+    "/task-breakdowns/bd-123/review",
+  );
+  assert.equal(
+    breakdownReviewHref({ decision: "needs_breakdown", next_href: "https://example.invalid/review" }),
+    null,
+  );
+  assert.equal(
+    breakdownReviewHref({ decision: "single_task", next_href: "/task-breakdowns/bd-123/review" }),
+    null,
+  );
+
+  let renderer;
+  await act(async () => {
+    renderer = create(
+      React.createElement(
+        NavContext.Provider,
+        { value: (href) => navigations.push(href) },
+        React.createElement(PlanningChat, { projectId: "demo-999" }),
+      ),
+    );
+  });
+
+  const input = renderer.root.findByProps({ placeholder: "Describe the task or goal…" });
+  await act(async () => {
+    input.props.onChange({ target: { value: "# Split this work" } });
+  });
+  const intakeButton = renderer.root.findAllByType("button")
+    .find((button) => button.children.join("").includes("Create governed work"));
+  await act(async () => {
+    intakeButton.props.onClick();
+  });
+  await act(async () => {
+    getIntakeResolve()(jsonResponse({
+      content: "Intake decision: needs_breakdown.",
+      stop_reason: "end_turn",
+      outcome: {
+        decision: "needs_breakdown",
+        reason: "Multiple bounded slices.",
+        next_href: "/task-breakdowns/bd-123/review",
+      },
+    }));
+  });
+
+  assert.deepEqual(navigations, ["/task-breakdowns/bd-123/review"]);
 
   await act(async () => {
     renderer.unmount();
