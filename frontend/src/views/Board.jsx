@@ -284,7 +284,7 @@ export function BoardState({
     const media = window.matchMedia("(max-width: 760px)");
     const onChange = (event) => {
       if (event.matches) {
-        setPlanningExpanded((current) => ({ ...current, pipeline: false }));
+        setPlanningExpanded({ pipeline: false, floor: false });
       }
     };
     media.addEventListener?.("change", onChange);

@@ -1322,6 +1322,56 @@ test("Planning pane disclosure survives a board refresh", async (t) => {
   await act(async () => { renderer.unmount(); });
 });
 
+test("Narrow viewport collapses Planning on Pipeline and Floor", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  });
+  let mediaListener;
+  globalThis.window = {
+    matchMedia: () => ({
+      matches: false,
+      addEventListener: (_type, listener) => { mediaListener = listener; },
+      removeEventListener: () => {},
+    }),
+  };
+  globalThis.fetch = async (url) => {
+    if (url.includes("/planning/start")) {
+      return new Response(JSON.stringify({ planning_session_id: "sess-plan-999" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ events: [], next_since_id: 0, has_more: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const data = boardData();
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "floor", data, error: null, loading: false,
+    }));
+  });
+  const floorDisclosure = () => renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-floor" });
+  await act(async () => { floorDisclosure().props.onClick(); });
+  assert.equal(floorDisclosure().props["aria-expanded"], true);
+
+  await act(async () => { mediaListener({ matches: true }); });
+  assert.equal(floorDisclosure().props["aria-expanded"], false);
+  await act(async () => {
+    renderer.update(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
+    }));
+  });
+  const pipelineDisclosure = renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-pipeline" });
+  assert.equal(pipelineDisclosure.props["aria-expanded"], false);
+  await act(async () => { renderer.unmount(); });
+});
+
 test("Execution Floor renders active runs, Review queue, and recently-finished trail", () => {
   const floor = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
