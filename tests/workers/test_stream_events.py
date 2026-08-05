@@ -8,6 +8,7 @@ from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.stream_events import streaming_runner
 from foreman_ai_hq.task_launch import launch_task
 from foreman_ai_hq.worker_adapters import CommandPlan, get_adapter_builder
+from tests.conftest import git_project_profile
 
 
 def _verified_native_task(db_path, root):
@@ -16,7 +17,7 @@ def _verified_native_task(db_path, root):
         db_path,
         name="DEMO 999 stream project",
         root_path=str(root),
-        profile={"name": "DEMO 999 stream project", "root_path": str(root)},
+        profile=git_project_profile(root, name="DEMO 999 stream project"),
         capability={"state": "launch_ready", "can_launch": True},
     )
     db.update_worker_adapter(
@@ -107,6 +108,8 @@ def test_streamed_launch_records_events_without_changing_final_actuals(tmp_path)
     prompt_holder = {}
 
     def runner(plan, on_event):
+        # Write-capable runs need a real change, otherwise the diff check blocks them.
+        (tmp_path / "worker_change.txt").write_text("changed\n", encoding="utf-8")
         prompt_index = plan.metadata["prompt_argument_indices"][0]
         prompt = plan.command[prompt_index] + ("\nMULTILINE PROMPT CONTENT" * 200)
         plan.command[prompt_index] = prompt

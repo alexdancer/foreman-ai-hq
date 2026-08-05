@@ -234,7 +234,7 @@ def _candidate_mode(candidate: dict[str, Any]) -> str:
 def _normalized_candidate(candidate: Any) -> dict[str, Any]:
     source = _mapping(candidate)
     normalized = dict(source)
-    normalized["kind"] = source.get("kind") if source.get("kind") in {"implementation", "scout", "acceptance_verification"} else "implementation"
+    normalized["kind"] = source.get("kind") if source.get("kind") in {"implementation", "acceptance_verification"} else "implementation"
     normalized["execution_mode"] = _candidate_mode(source)
     normalized["human_in_loop"] = normalized["execution_mode"] == "HITL"
     return normalized
@@ -290,9 +290,9 @@ def _candidate_items(context: dict[str, Any]) -> list[dict[str, Any]]:
         item: dict[str, Any] = {
             "index": index,
             "accepted_by_default": proposed,
-            "kind": candidate.get("kind") if candidate.get("kind") in {"implementation", "scout", "acceptance_verification"} else "implementation",
+            "kind": candidate.get("kind") if candidate.get("kind") in {"implementation", "acceptance_verification"} else "implementation",
             "execution_mode": _candidate_mode(candidate),
-            "target_task_id": _safe_id(candidate.get("target_task_id")),
+            "target_task_id": None,
         }
         for selector, (field, limit) in _CANDIDATE_TEXT_FIELDS.items():
             item[field] = _bounded(
@@ -395,6 +395,10 @@ def task_breakdown_review_projection(context: dict[str, Any]) -> dict[str, Any]:
     prefix = _api_prefix(breakdown_id)
     controls = context["controls"]
     session_id = _safe_id(breakdown.get("session_id"))
+    intake_metadata = _mapping(breakdown.get("intake_metadata"))
+    intake_decision = intake_metadata.get("intake_decision")
+    if intake_decision not in {"single_task", "needs_breakdown"}:
+        intake_decision = None
     decision = breakdown.get("decision")
     if decision not in {"single_task", "proposed_task_breakdown", "manual_required"}:
         decision = "manual_required"
@@ -422,6 +426,12 @@ def task_breakdown_review_projection(context: dict[str, Any]) -> dict[str, Any]:
             "model": _bounded(breakdown.get("model"), 200, f"{prefix}/text/model"),
             "session_id": session_id,
             "session_href": f"/sessions/{quote(session_id, safe='')}" if session_id else None,
+            "intake_decision": intake_decision,
+            "intake_decision_reason": _bounded(
+                intake_metadata.get("intake_decision_reason"),
+                2_000,
+                f"{prefix}/text/intake-decision-reason",
+            ),
             "rationale": _bounded(breakdown.get("rationale"), 4_000, f"{prefix}/text/rationale"),
             "source_text": _bounded(breakdown.get("source_text"), 20_000, f"{prefix}/text/source"),
             "failure_type": None if not isinstance(breakdown.get("failure_type"), str) else _bounded(breakdown.get("failure_type"), 200, f"{prefix}/text/failure-type"),
@@ -460,6 +470,11 @@ def _context_text(context: dict[str, Any], text_id: str) -> tuple[str, int]:
     if text_id in _FIXED_TEXT:
         field, limit = _FIXED_TEXT[text_id]
         return _text(breakdown.get(field)), limit
+    if text_id == "intake-decision-reason":
+        return (
+            _text(_mapping(breakdown.get("intake_metadata")).get("intake_decision_reason")),
+            2_000,
+        )
     if text_id == "repo-source":
         return _text(_mapping(breakdown.get("repo_context_evidence")).get("source")), 2_000
 

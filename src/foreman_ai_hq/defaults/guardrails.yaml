@@ -53,7 +53,7 @@ guardrails:
   session_timeout:
     enabled: true
     duration: 1800        # 30 minutes in seconds
-    action: notify_and_checkpoint  # SESSION_TIMEOUT alarm + save checkpoint
+    action: notify_and_checkpoint  # SESSION_TIMEOUT alarm only; checkpoints evaluate at Worker Run completion
 
   # G6: Tool-category budget weighting. No single category > N% of session spend.
   tool_category_limit:

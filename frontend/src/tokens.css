@@ -1697,6 +1697,12 @@ code,
   display: grid;
   gap: 10px;
 }
+.drawer-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
 
 /* Legacy board layout remains for history-compatible helpers. */
 .board {

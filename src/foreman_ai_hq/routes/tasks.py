@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from pydantic import ValidationError
 
 from foreman_ai_hq import db
 from foreman_ai_hq.auth import require_portal_auth
+from foreman_ai_hq.orchestrator_gate import require_configured_orchestrator
 from foreman_ai_hq.estimation import EstimatorError, estimate_task
 from foreman_ai_hq.task_kind import (
     DEFAULT_TASK_KIND,
@@ -22,14 +23,28 @@ from foreman_ai_hq.task_kind import (
     validate_task_kind,
     with_task_kind,
 )
-from foreman_ai_hq.evidence_reporting import completion_content as _completion_content
 from foreman_ai_hq.evidence_reporting import safe_evidence as _safe_review_value
 from foreman_ai_hq.evidence_reporting import token_totals
-from foreman_ai_hq.llm import LLMClientError, extract_usage, resolve_cost, response_to_dict
 from foreman_ai_hq.model_routing import route_worker_model
-from foreman_ai_hq.project_context import project_task_metadata, task_matches_project, task_project_board_path
+from foreman_ai_hq.pi_adapter import (
+    PiStructuredJobError,
+    PiStructuredOutputError,
+    run_pi_structured_job,
+)
+from foreman_ai_hq.project_context import project_task_metadata, resolve_task_project, task_matches_project, task_project_board_path
 from foreman_ai_hq.repo_context import build_repo_context_brief
-from foreman_ai_hq.task_launch import DEFAULT_PROXY_URL, TaskLaunchBlocked, launch_task, refresh_task_from_session
+from foreman_ai_hq.task_launch import (
+    DEFAULT_PROXY_URL,
+    TaskLaunchBlocked,
+    _create_harness_commit,
+    _fast_forward_base,
+    _git_diff_summary,
+    _restore_operator_branch,
+    _review_disposition_state_after_commit,
+    detect_pr_capability,
+    launch_task,
+    refresh_task_from_session,
+)
 from foreman_ai_hq.task_breakdown import (
     TaskBreakdownError,
     breakdown_task_source,
@@ -38,11 +53,6 @@ from foreman_ai_hq.task_breakdown import (
 from foreman_ai_hq.estimate_decision import (
     acknowledge_low_confidence,
     apply_manual_estimate,
-    apply_reestimate,
-    create_scout_for_task,
-    dismiss_reestimate,
-    request_scout_reestimate,
-    retry_reestimate,
 )
 from foreman_ai_hq.worker_model_allowlist import allowed_worker_model_ids
 
@@ -50,16 +60,6 @@ router = APIRouter()
 CANONICAL_TASK_STATUSES = {"Estimated", "Running", "Review", "Done"}
 PositiveStrictInt = Annotated[int, Field(strict=True, gt=0)]
 NonNegativeStrictInt = Annotated[int, Field(strict=True, ge=0)]
-
-
-class TaskCreateRequest(BaseModel):
-    description: str = Field(min_length=1)
-    status: str | None = None
-    estimate_tokens: PositiveStrictInt | None = None
-    recommended_model: str | None = None
-    actual_tokens: NonNegativeStrictInt | None = None
-    session_id: str | None = None
-    metadata: dict[str, Any] | None = None
 
 
 class TaskUpdateRequest(BaseModel):
@@ -70,14 +70,6 @@ class TaskUpdateRequest(BaseModel):
     actual_tokens: NonNegativeStrictInt | None = None
     session_id: str | None = None
     metadata: dict[str, Any] | None = None
-
-
-class EstimateRequest(BaseModel):
-    description: str = Field(min_length=1)
-    adapter_id: str | None = None
-    remaining_daily_tokens: NonNegativeStrictInt | None = None
-    daily_cap_tokens: PositiveStrictInt | None = None
-    task_kind: str | None = None
 
 
 class TaskLaunchRequest(BaseModel):
@@ -91,10 +83,11 @@ class TaskLaunchRequest(BaseModel):
 
 
 class TaskReviewActionRequest(BaseModel):
-    action: str = Field(pattern="^(save_prompt|agent_review|mark_done|block)$")
+    action: str = Field(pattern="^(save_prompt|agent_review|mark_done|block|approve_commit|open_pr)$")
     project_id: str | None = None
     review_prompt: str | None = None
     blocked_reason: str | None = None
+    approve_commit_reason: str | None = None
 
 
 class ManualEstimateRequest(BaseModel):
@@ -103,26 +96,6 @@ class ManualEstimateRequest(BaseModel):
 
 class RetryReestimateRequest(BaseModel):
     acknowledge_possible_duplicate_spend: bool = False
-
-
-@router.post("/tasks")
-def create_task(payload: TaskCreateRequest, request: Request) -> dict[str, Any]:
-    database_path = request.app.state.settings.database_path
-    try:
-        status, metadata = _initial_task_status_and_metadata(payload, database_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    metadata = _with_single_project_default(database_path, metadata)
-    return db.create_task(
-        database_path,
-        description=payload.description,
-        status=status,
-        estimate_tokens=payload.estimate_tokens,
-        recommended_model=payload.recommended_model,
-        actual_tokens=payload.actual_tokens,
-        session_id=payload.session_id,
-        metadata=metadata,
-    )
 
 
 @router.put("/tasks/{task_id}")
@@ -145,7 +118,7 @@ def update_task(task_id: str, payload: TaskUpdateRequest, request: Request) -> d
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/tasks/{task_id}/launch", dependencies=[Depends(require_portal_auth)])
+@router.post("/tasks/{task_id}/launch", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def launch_task_endpoint(task_id: str, request: Request):
     try:
         payload, wants_html = await _launch_payload_from_request(request)
@@ -175,6 +148,7 @@ async def launch_task_endpoint(task_id: str, request: Request):
                 timezone=request.app.state.settings.timezone,
             ),
             runner=runner,
+            guardrail_config=request.app.state.guardrails,
         )
     except KeyError as exc:
         if _wants_react_json(request):
@@ -271,6 +245,10 @@ async def review_task_endpoint(task_id: str, request: Request):
             updated = _block_review_task(database_path, task, payload.blocked_reason)
         elif payload.action == "agent_review":
             updated = await _run_agent_review(request, task, payload.review_prompt)
+        elif payload.action == "approve_commit":
+            updated = _approve_harness_commit(database_path, task, payload.approve_commit_reason)
+        elif payload.action == "open_pr":
+            updated = _open_pull_request(database_path, task)
         else:  # pragma: no cover - pydantic validation prevents this
             raise HTTPException(status_code=422, detail="unsupported review action")
     except KeyError as exc:
@@ -343,76 +321,6 @@ async def manual_estimate_decision(project_id: str, task_id: str, request: Reque
     return result
 
 
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout", dependencies=[Depends(require_portal_auth)])
-async def create_scout_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = await create_scout_for_task(request, database_path, project_id, task_id, _estimate_revision_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate", dependencies=[Depends(require_portal_auth)])
-async def request_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = await request_scout_reestimate(request, database_path, project_id, task_id, _estimate_revision_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate/retry", dependencies=[Depends(require_portal_auth)])
-async def retry_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        body = await request.json()
-        ack = bool(body.get("acknowledge_possible_duplicate_spend"))
-    except Exception:
-        try:
-            form = await request.form()
-            ack = str(form.get("acknowledge_possible_duplicate_spend", "")).lower() in {"1", "true", "on"}
-        except Exception:
-            return JSONResponse(status_code=422, content={"detail": "invalid request body"})
-    try:
-        result = await retry_reestimate(request, database_path, project_id, task_id, _estimate_revision_query(request), _attempt_id_query(request), ack)
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate/apply", dependencies=[Depends(require_portal_auth)])
-async def apply_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = apply_reestimate(database_path, project_id, task_id, _estimate_revision_query(request), _attempt_id_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/api/projects/{project_id}/tasks/{task_id}/estimate-decision/scout/reestimate/dismiss", dependencies=[Depends(require_portal_auth)])
-async def dismiss_reestimate_decision(project_id: str, task_id: str, request: Request):
-    database_path = request.app.state.settings.database_path
-    try:
-        result = dismiss_reestimate(database_path, project_id, task_id, _estimate_revision_query(request), _attempt_id_query(request))
-    except HTTPException as exc:
-        return _estimate_decision_error_response(request, exc)
-    return result
-
-
-@router.post("/estimate", dependencies=[Depends(require_portal_auth)])
-async def estimate(payload: EstimateRequest, request: Request) -> dict[str, Any]:
-    return await _estimate_and_create_task(
-        request,
-        payload.description,
-        adapter_id=payload.adapter_id,
-        remaining_daily_tokens=payload.remaining_daily_tokens,
-        daily_cap_tokens=payload.daily_cap_tokens,
-    )
-
-
 async def _estimate_and_create_task(
     request: Request,
     description: str,
@@ -431,16 +339,17 @@ async def _estimate_and_create_task(
         except KeyError:
             pass
     settings = request.app.state.settings
-    estimator_model = settings.estimator_model
+    estimator_model = settings.orchestrator_model
     adapter = _selected_worker_adapter(database_path, adapter_id)
     if task_kind is None:
         task_kind = read_task_kind(extra_metadata) if extra_metadata else DEFAULT_TASK_KIND
     try:
         project_root = (extra_metadata or {}).get("project_root_path")
-        result, llm_response = await estimate_task(
+        result, job_result = await estimate_task(
             description,
             request.app.state.guardrails,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
             estimator_model=estimator_model,
             remaining_daily_tokens=remaining_daily_tokens,
             daily_cap_tokens=daily_cap_tokens,
@@ -470,25 +379,7 @@ async def _estimate_and_create_task(
             },
         )
 
-    estimation_session = db.create_session(
-        database_path,
-        task_description=description,
-        model=estimator_model,
-        session_key_hash=_estimation_session_key_hash(description),
-        guardrail_overrides={},
-        status="completed",
-    )
-    usage = extract_usage(llm_response)
-    db.record_token_turn(
-        database_path,
-        session_id=estimation_session["id"],
-        usage_kind="estimation",
-        model=estimator_model,
-        prompt_tokens=usage["prompt_tokens"],
-        completion_tokens=usage["completion_tokens"],
-        cost=resolve_cost(estimator_model, llm_response),
-        raw_usage={**usage, "response": response_to_dict(llm_response)},
-    )
+    estimation_session = job_result.session
     # Route Worker model choice after estimation so allowlists and budgets can constrain it.
     model_routing = route_worker_model(
         request.app.state.guardrails,
@@ -512,6 +403,7 @@ async def _estimate_and_create_task(
         "shadow_token_estimate": result.shadow_token_estimate,
         "estimate_disagreement": result.estimate_disagreement,
         "coefficient_provenance": result.coefficient_provenance,
+        "investigation_recommended": result.investigation_recommended,
         **(extra_metadata or {}),
         **model_routing.metadata,
         "task_kind": task_kind,
@@ -540,107 +432,6 @@ def _selected_worker_adapter(database_path: Path | str, adapter_id: str | None) 
     return next((item for item in adapters if item.get("is_default")), adapters[0] if adapters else None)
 
 
-@router.post("/tasks/estimate-form", dependencies=[Depends(require_portal_auth)])
-async def estimate_form(
-    request: Request,
-    description: str = Form(""),
-    task_kind: str = Form(DEFAULT_TASK_KIND),
-    markdown_file: UploadFile | None = File(None),
-):
-    """HTML or negotiated JSON intake: plain text estimates; Markdown is review-first."""
-    return await _estimate_form_for_project(request, description=description, task_kind=task_kind, markdown_file=markdown_file)
-
-
-@router.post("/projects/{project_id}/tasks/estimate-form", dependencies=[Depends(require_portal_auth)])
-async def project_estimate_form(
-    project_id: str,
-    request: Request,
-    description: str = Form(""),
-    task_kind: str = Form(DEFAULT_TASK_KIND),
-    markdown_file: UploadFile | None = File(None),
-):
-    return await _estimate_form_for_project(
-        request,
-        description=description,
-        task_kind=task_kind,
-        markdown_file=markdown_file,
-        project_id=project_id,
-    )
-
-
-async def _estimate_form_for_project(
-    request: Request,
-    *,
-    description: str,
-    task_kind: str,
-    markdown_file: UploadFile | None,
-    project_id: str | None = None,
-):
-    wants_json = _wants_react_json(request)
-    project_metadata: dict[str, Any] = {}
-    board_path = "/board"
-    if project_id:
-        board_path = f"/projects/{project_id}"
-        try:
-            project = db.get_connected_project(request.app.state.settings.database_path, project_id)
-        except KeyError as exc:
-            if wants_json:
-                return _react_action_outcome(
-                    ok=False,
-                    error="connected project not found",
-                    status_code=404,
-                )
-            raise HTTPException(status_code=404, detail="connected project not found") from exc
-        if db.project_is_archived(project):
-            error = "restore archived project before adding tasks"
-            if wants_json:
-                return _react_action_outcome(ok=False, error=error, status_code=409)
-            return RedirectResponse(
-                f"{board_path}?error={quote(error)}",
-                status_code=303,
-            )
-        project_metadata = project_task_metadata(project)
-    try:
-        task_kind = validate_task_kind(task_kind)
-        if task_kind not in {"implementation", "scout"}:
-            raise ValueError("short intake task_kind must be implementation or scout")
-    except ValueError as exc:
-        error = str(exc)
-        if wants_json:
-            return _react_action_outcome(ok=False, error=error, status_code=422)
-        return RedirectResponse(f"{board_path}?error={quote(error)}", status_code=303)
-
-    try:
-        normalized_description, intake_metadata = await _description_from_intake_form(description, markdown_file)
-    except ValueError as exc:
-        if wants_json:
-            return _react_action_outcome(ok=False, error=str(exc), status_code=422)
-        return RedirectResponse(f"{board_path}?error={quote(str(exc))}", status_code=303)
-
-    intake_metadata = _with_single_project_default(
-        request.app.state.settings.database_path,
-        {"task_kind": task_kind, **intake_metadata, **project_metadata},
-    )
-
-    if _requires_task_breakdown_review(normalized_description, intake_metadata):
-        # Large or Markdown-shaped intake is reviewed before it becomes board cards.
-        breakdown = await _create_task_breakdown_review(request, normalized_description, intake_metadata)
-        review_href = f"/task-breakdowns/{breakdown['id']}/review"
-        if wants_json:
-            return _react_action_outcome(ok=True, next_href=review_href)
-        return RedirectResponse(review_href, status_code=303)
-
-    task = await _estimate_and_create_task(
-        request,
-        normalized_description,
-        task_kind=task_kind,
-        extra_metadata=intake_metadata,
-    )
-    if wants_json:
-        return _react_action_outcome(ok=True, task=task)
-    return RedirectResponse(board_path, status_code=303)
-
-
 @router.get("/task-breakdowns/{breakdown_id}/review", response_class=HTMLResponse, dependencies=[Depends(require_portal_auth)])
 def task_breakdown_review(breakdown_id: str, request: Request):
     from foreman_ai_hq.routes.react_shell import react_shell_or_missing_build
@@ -655,7 +446,7 @@ def task_breakdown_review(breakdown_id: str, request: Request):
     return react_shell_or_missing_build()
 
 
-@router.post("/task-breakdowns/{breakdown_id}/accept", dependencies=[Depends(require_portal_auth)])
+@router.post("/task-breakdowns/{breakdown_id}/accept", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def accept_task_breakdown(breakdown_id: str, request: Request):
     database_path = request.app.state.settings.database_path
     wants_json = _wants_react_json(request)
@@ -679,6 +470,17 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
             )
         return RedirectResponse(f"/task-breakdowns/{breakdown_id}/review", status_code=303)
 
+    if not _breakdown_has_intake_provenance(breakdown):
+        message = "Task Breakdown has no Planning Chat intake provenance. Start a new intake in Planning Chat."
+        if wants_json:
+            return _breakdown_action_outcome(
+                breakdown,
+                status_code=409,
+                error=message,
+                retry_href=f"/task-breakdowns/{breakdown_id}/review",
+            )
+        raise HTTPException(status_code=409, detail=message)
+
     try:
         form = await request.form()
         candidates = breakdown.get("candidates")
@@ -697,7 +499,6 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
         accepted_candidates = _accepted_breakdown_candidates(
             breakdown, form, presence_aware=True
         )
-        _validate_scout_target_tasks(database_path, breakdown, accepted_candidates)
         claimed_breakdown = db.update_task_breakdown(
             database_path,
             breakdown_id,
@@ -767,21 +568,6 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
                     "task_breakdown_global_constraints": global_constraints,
                     "task_breakdown_verification": verification,
                     "task_breakdown_recommended_last": candidate["kind"] == "acceptance_verification",
-                    **(
-                        {
-                            "scout_question": candidate["objective"],
-                            "scout_inspection_boundary": candidate["constraints"],
-                            "scout_expected_findings": candidate["acceptance_criteria"],
-                            "scout_proof": candidate["proof"],
-                            **(
-                                {"target_task_id": candidate["target_task_id"]}
-                                if candidate.get("target_task_id")
-                                else {}
-                            ),
-                        }
-                        if candidate["kind"] == "scout"
-                        else {}
-                    ),
                 },
             )
             created_task_ids.append(task["id"])
@@ -844,7 +630,7 @@ async def accept_task_breakdown(breakdown_id: str, request: Request):
     return RedirectResponse(_breakdown_board_path(breakdown), status_code=303)
 
 
-@router.post("/task-breakdowns/{breakdown_id}/retry", dependencies=[Depends(require_portal_auth)])
+@router.post("/task-breakdowns/{breakdown_id}/retry", dependencies=[Depends(require_portal_auth), Depends(require_configured_orchestrator)])
 async def retry_task_breakdown(breakdown_id: str, request: Request):
     database_path = request.app.state.settings.database_path
     wants_json = _wants_react_json(request)
@@ -1032,12 +818,6 @@ async def manual_task_breakdown_candidate(
     return RedirectResponse(f"/task-breakdowns/{breakdown_id}/review", status_code=303)
 
 
-def _requires_task_breakdown_review(description: str, intake_metadata: dict[str, Any]) -> bool:
-    if intake_metadata.get("intake_source") in {"markdown_paste", "markdown_upload"}:
-        return True
-    return len(description.split()) >= 120
-
-
 async def _create_task_breakdown_review(
     request: Request, description: str, intake_metadata: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1067,38 +847,20 @@ async def _task_breakdown_agent_updates(
 ) -> dict[str, Any]:
     database_path = request.app.state.settings.database_path
     settings = request.app.state.settings
-    model = settings.task_breakdown_model
+    model = settings.orchestrator_model
     repo_context, repo_context_evidence = _build_breakdown_repo_context(intake_metadata)
     try:
-        result, response = await breakdown_task_source(
+        result, job_result = await breakdown_task_source(
             description,
-            llm_client=request.app.state.llm_client,
+            database_path=database_path,
+            job_runner=request.app.state.orchestrator_job_runner,
             task_breakdown_model=model,
             intake_metadata=intake_metadata,
             structure_hints=_markdown_task_items(description),
             repo_context=repo_context,
             timeout_seconds=settings.task_breakdown_timeout_seconds,
         )
-        session = db.create_session(
-            database_path,
-            task_description=f"Task breakdown review for {source_sha256[:12]}",
-            model=model,
-            session_key_hash=_task_breakdown_session_key_hash(source_sha256),
-            guardrail_overrides={"spend_category": "task_breakdown"},
-            status="completed",
-        )
-        response_body = response_to_dict(response)
-        usage = extract_usage(response_body)
-        db.record_token_turn(
-            database_path,
-            session_id=session["id"],
-            usage_kind="task_breakdown",
-            model=model,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
-            cost=resolve_cost(model, response_body),
-            raw_usage={**usage, "spend_category": "task_breakdown", "usage_source": "control_plane"},
-        )
+        session = job_result.session
         payload = result.as_dict()
         return {
             "status": "proposed",
@@ -1128,7 +890,7 @@ async def _task_breakdown_agent_updates(
             "status": "failed",
             "decision": "manual_required",
             "model": model,
-            "session_id": None,
+            "session_id": getattr(exc, "session_id", None),
             "candidates": [],
             "rejected_items": [],
             "global_contract_summary": "",
@@ -1235,6 +997,18 @@ def _breakdown_action_outcome(
     )
 
 
+def _breakdown_has_intake_provenance(breakdown: dict[str, Any]) -> bool:
+    metadata = breakdown.get("intake_metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        bool(metadata.get("intake_source"))
+        and metadata.get("intake_decision") in {"single_task", "needs_breakdown"}
+        and isinstance(metadata.get("intake_decision_reason"), str)
+        and bool(metadata["intake_decision_reason"].strip())
+    )
+
+
 def _validate_breakdown_accept_form(form: Any, *, candidate_count: int) -> None:
     global_fields = {
         "global_contract_summary",
@@ -1335,7 +1109,7 @@ def _accepted_breakdown_candidates(
             fallback="Merging this with adjacent work would broaden the Worker prompt and weaken reviewability.",
             presence_aware=presence_aware,
         )
-        if kind not in {"implementation", "scout", "acceptance_verification"}:
+        if kind not in {"implementation", "acceptance_verification"}:
             raise HTTPException(status_code=422, detail="Task breakdown acceptance is invalid.")
         if execution_mode not in {"AFK", "HITL"}:
             raise HTTPException(status_code=422, detail="Task breakdown acceptance is invalid.")
@@ -1358,7 +1132,6 @@ def _accepted_breakdown_candidates(
                 "why_not_larger": why_not_larger,
                 "dependencies": _candidate_form_lines(form, original, "dependencies", index, presence_aware=presence_aware),
                 "likely_entry_points": _candidate_form_lines(form, original, "likely_entry_points", index, presence_aware=presence_aware),
-                "target_task_id": original.get("target_task_id"),
                 "execution_mode": execution_mode,
                 "hitl_reason": hitl_reason,
                 "human_in_loop": execution_mode == "HITL",
@@ -1393,27 +1166,6 @@ def _accepted_breakdown_candidates(
         {**candidate.as_dict(), "_source_index": source_index}
         for source_index, candidate in zip(source_indexes, result.candidates, strict=True)
     ]
-
-
-def _validate_scout_target_tasks(
-    database_path: Path | str,
-    breakdown: dict[str, Any],
-    candidates: list[dict[str, Any]],
-) -> None:
-    intake_metadata = breakdown.get("intake_metadata") or {}
-    project_id = intake_metadata.get("connected_project_id")
-    for candidate in candidates:
-        target_task_id = candidate.get("target_task_id")
-        if not target_task_id:
-            continue
-        if candidate.get("kind") != "scout" or not project_id:
-            raise HTTPException(status_code=422, detail="Scout target Task is invalid.")
-        try:
-            target = db.get_task(database_path, str(target_task_id))
-        except KeyError as exc:
-            raise HTTPException(status_code=422, detail="Scout target Task is invalid.") from exc
-        if not task_matches_project(target, str(project_id)):
-            raise HTTPException(status_code=422, detail="Scout target Task is invalid.")
 
 
 def _task_breakdown_candidate_task_id(breakdown_id: str, source_index: int) -> str:
@@ -1514,14 +1266,6 @@ def _breakdown_candidate_description(
         )
         if source_text.strip():
             sections.extend(["", "Original source contract:", source_text.strip()])
-    elif candidate.get("kind") == "scout":
-        sections.extend(
-            [
-                "",
-                "Scout scope:",
-                "This is a read-only investigation. Ask the bounded question, inspect only the declared boundary, collect the expected findings, and report. Do not edit files, run destructive commands, migrations, or commits.",
-            ]
-        )
     else:
         sections.extend(
             [
@@ -1554,51 +1298,6 @@ def _breakdown_candidate_description(
 
 def _textarea_lines(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
-
-
-def _task_breakdown_session_key_hash(source_sha256: str) -> str:
-    return hashlib.sha256(f"task-breakdown:v1:{source_sha256}:{_now_iso()}".encode("utf-8")).hexdigest()
-
-
-async def _description_from_intake_form(
-    description: str, markdown_file: UploadFile | None
-) -> tuple[str, dict[str, Any]]:
-    if markdown_file and markdown_file.filename:
-        filename = Path(markdown_file.filename).name
-        if Path(filename).suffix.lower() != ".md":
-            raise ValueError("Upload a Markdown .md file or paste Markdown text.")
-        raw = await markdown_file.read()
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("Markdown upload must be UTF-8 text.") from exc
-        normalized = text.strip()
-        if not normalized:
-            raise ValueError("Markdown upload is empty.")
-        return normalized, {"intake_source": "markdown_upload", "intake_filename": filename}
-
-    normalized = description.strip()
-    if not normalized:
-        raise ValueError("Describe a coding task or upload a Markdown .md file.")
-    metadata = {"intake_source": "markdown_paste"} if _looks_like_markdown(normalized) else {"intake_source": "plain_text"}
-    return normalized, metadata
-
-
-def _looks_like_markdown(text: str) -> bool:
-    markdown_patterns = (
-        r"(?m)^\s{0,3}#{1,6}\s+",
-        r"(?m)^\s{0,3}(?:[-+*]\s+|\d+[.)]\s+|>\s*)",
-        r"(?m)^\s{0,3}(?:```|~~~)",
-        r"(?m)^\s{0,3}(?:[-*_]\s*){3,}$",
-        r"!?\[[^\]]+\]\([^\)]+\)",
-        r"(?:\*\*|__)[^\n]+?(?:\*\*|__)",
-        r"(?<!\*)\*[^*\n]+\*(?!\*)|(?<![\w_])_[^\n]+?_(?![\w_])",
-        r"`+[^`\n]+`+",
-        r"~~[^\n]+?~~",
-        r"<(?:https?://|mailto:)[^>\n]+>",
-        r"(?m)^\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}",
-    )
-    return any(re.search(pattern, text) for pattern in markdown_patterns)
 
 
 def _markdown_task_items(description: str) -> list[str]:
@@ -1669,7 +1368,27 @@ def _save_review_prompt(database_path: Path | str, task: dict[str, Any], prompt:
 
 
 def _mark_review_done(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
+    project, _ = resolve_task_project(database_path, task)
+    project_root = str(project["root_path"]) if project else None
     metadata = dict(task.get("metadata", {}))
+    harness_commit = metadata.get("harness_commit")
+    if harness_commit and isinstance(harness_commit, dict) and project_root:
+        profile = project.get("profile") or {}
+        base_branch = profile.get("base_branch")
+        if base_branch:
+            success, reason = _fast_forward_base(Path(project_root), base_branch, harness_commit["sha"])
+            if not success:
+                # Refuse acceptance, leave the commit and task branch intact, surface the divergence.
+                metadata["base_divergence"] = {
+                    "base_branch": base_branch,
+                    "commit_sha": harness_commit["sha"],
+                    "reason": reason,
+                    "at": _now_iso(),
+                }
+                metadata["blocked_condition"] = _blocked_condition(reason, "base_divergence")
+                db.update_task(database_path, task["id"], {"metadata": metadata})
+                raise ValueError(f"Cannot accept task: {reason}")
+        _restore_operator_branch(project_root, metadata.get("operator_branch"))
     for key in (
         "blocked_condition",
         "blocked_reason",
@@ -1677,6 +1396,7 @@ def _mark_review_done(database_path: Path | str, task: dict[str, Any]) -> dict[s
         "launch_guardrail_reasons",
         "budget_override_available",
         "budget_override_reason",
+        "base_divergence",
     ):
         metadata.pop(key, None)
     metadata.update({
@@ -1702,83 +1422,204 @@ def _block_review_task(database_path: Path | str, task: dict[str, Any], reason: 
     return db.update_task(database_path, task["id"], {"status": "Review", "metadata": metadata})
 
 
+def _approve_harness_commit(database_path: Path | str, task: dict[str, Any], reason: str | None) -> dict[str, Any]:
+    if not task.get("session_id"):
+        raise ValueError("Approve commit requires a Worker Session.")
+    session = db.get_session(database_path, task["session_id"])
+    project, _ = resolve_task_project(database_path, task)
+    project_root = str(project["root_path"]) if project else None
+    if not project_root:
+        raise ValueError("Approve commit requires a connected project.")
+    metadata = dict(task.get("metadata", {}))
+    diff_summary = _git_diff_summary(project_root)
+    if not diff_summary["has_changes"]:
+        raise ValueError("Approve commit requires uncommitted Worker changes.")
+    verification = metadata.get("post_run_verification") or {}
+    authorization = {
+        "authorized_by": "operator",
+        "authorized_at": _now_iso(),
+        "reason": (reason or "").strip() or None,
+        "verification_did_not_clear": (verification.get("passed") is False) or bool(verification.get("reason")),
+    }
+    commit = _create_harness_commit(
+        project_root,
+        task,
+        session,
+        verification_result=verification if isinstance(verification, dict) else None,
+        authorization=authorization,
+    )
+    if commit is None:
+        raise ValueError("No uncommitted changes found; the commit may already exist.")
+    _restore_operator_branch(project_root, metadata.get("operator_branch"))
+    pr_capability = detect_pr_capability(project_root)
+    review_state = _review_disposition_state_after_commit(commit, pr_capability)
+    for key in ("launch_blocked_reason", "launch_guardrail_reasons", "blocked_condition"):
+        metadata.pop(key, None)
+    metadata.update({
+        "harness_commit": commit,
+        "harness_commit_authorization": authorization,
+        "review_disposition_state": review_state,
+    })
+    return db.update_task(database_path, task["id"], {"metadata": metadata})
+
+
+def _open_pull_request(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
+    project, _ = resolve_task_project(database_path, task)
+    project_root = str(project["root_path"]) if project else None
+    if not project_root:
+        raise ValueError("Open PR requires a connected project.")
+    metadata = dict(task.get("metadata", {}))
+    harness_commit = metadata.get("harness_commit")
+    if not isinstance(harness_commit, dict) or not harness_commit.get("sha"):
+        raise ValueError("Open PR requires a Harness-owned commit.")
+    pr_capability = metadata.get("pr_capability") or detect_pr_capability(project_root)
+    if not pr_capability.get("available"):
+        reason = pr_capability.get("reason") or "Pull request capability is not available."
+        metadata["pr_unavailable_reason"] = reason
+        db.update_task(database_path, task["id"], {"metadata": metadata})
+        raise ValueError(reason)
+    base_branch = (project.get("profile") or {}).get("base_branch") or metadata.get("operator_branch")
+    task_branch = metadata.get("task_branch")
+    if not task_branch:
+        raise ValueError("Open PR requires a Task branch.")
+    session_id = task.get("session_id")
+    artifact = db.build_session_artifact(database_path, session_id) if session_id else {}
+    token_totals = _token_evidence_summary(artifact)
+    verification = metadata.get("post_run_verification") or {}
+    body = _pr_body(task, harness_commit, token_totals, verification)
+    title = f"[{task['id']}] {task['description'][:80]}"
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--title",
+                title,
+                "--body",
+                body,
+                "--base",
+                base_branch,
+                "--head",
+                task_branch,
+            ],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except FileNotFoundError:
+        result = None
+    if result is None or result.returncode != 0:
+        raw = result.stderr if result else "gh CLI is not installed or not on PATH"
+        safe_reason = _safe_pr_reason(raw)
+        metadata["pr_failure"] = {
+            "reason": safe_reason,
+            "attempted_at": _now_iso(),
+        }
+        db.update_task(database_path, task["id"], {"metadata": metadata})
+        raise ValueError(f"Pull request creation failed: {safe_reason}")
+    pr_url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
+    metadata["pull_request"] = {
+        "url": pr_url,
+        "base_branch": base_branch,
+        "head_branch": task_branch,
+        "created_at": _now_iso(),
+    }
+    db.update_task(database_path, task["id"], {"metadata": metadata})
+    return db.get_task(database_path, task["id"])
+
+
+def _token_evidence_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    token_log = artifact.get("token_log") or []
+    total = sum(int(turn.get("total_tokens") or 0) for turn in token_log)
+    return {
+        "total_tokens": total,
+        "session_id": (artifact.get("session") or {}).get("id"),
+    }
+
+
+def _pr_body(task: dict[str, Any], commit: dict[str, Any], token_totals: dict[str, Any], verification: dict[str, Any]) -> str:
+    lines = [
+        f"Task: {task['id']}",
+        f"Session: {token_totals.get('session_id') or task.get('session_id')}",
+        f"Harness commit: {commit.get('sha')}",
+        f"Tokens: {token_totals.get('total_tokens')}",
+        "Verification:",
+        f"  passed: {verification.get('passed') if isinstance(verification, dict) else None}",
+    ]
+    if verification.get("command"):
+        lines.append(f"  command: {verification['command']}")
+    if verification.get("reason"):
+        lines.append(f"  reason: {verification['reason']}")
+    return "\n".join(lines)
+
+
+def _safe_pr_reason(text: str) -> str:
+    # Keep the reason human-readable and bounded; do not leak token or credential text.
+    safe = _safe_review_value(str(text)) if text else "unknown error"
+    return str(safe)[:500]
+
+
+AGENT_REVIEW_TIMEOUT_SECONDS = 120
+
+
 async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str | None) -> dict[str, Any]:
     database_path = request.app.state.settings.database_path
     settings = request.app.state.settings
+    # Gated here rather than on the route: Review Disposition also carries Mark Done
+    # and Block, which spend nothing and must stay available when pi is unconfigured.
+    require_configured_orchestrator(request)
     metadata = {**task.get("metadata", {})}
     review_prompt = (prompt or metadata.get("review_prompt") or "").strip()
     if review_prompt:
         metadata["review_prompt"] = review_prompt
         metadata["review_prompt_updated_at"] = _now_iso()
 
-    review_session = db.create_session(
-        database_path,
-        task_description=f"Agent review for task {task['id']}: {task['description']}",
-        model=settings.control_plane_model,
-        session_key_hash=_agent_review_session_key_hash(task["id"], _now_iso()),
-        guardrail_overrides={"spend_category": "agent_review", "task_id": task["id"]},
-        status="completed",
-    )
-    llm_request = {
-        "model": settings.control_plane_model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are the Foreman AI HQ control-plane reviewer. Review completed Worker Run evidence. "
-                    "Return compact JSON with keys summary, recommendation, findings. "
-                    "recommendation must be approve, needs_changes, or block. findings is an array of objects "
-                    "with severity and message, optionally path and line. Use plain human-readable text in every "
-                    "string field: no Markdown, bullets, headings, tables, or fenced code blocks. Do not include secrets."
-                ),
-            },
-            {"role": "user", "content": _agent_review_prompt(task, review_prompt, database_path)},
-        ],
-        "temperature": 0,
-        "max_tokens": 700,
-    }
+    model = settings.orchestrator_model
+    task_description = f"Agent review for task {task['id']}: {task['description']}"
+    review: dict[str, Any]
     try:
-        response = await request.app.state.llm_client.acompletion(llm_request)
-        response_body = response_to_dict(response)
-        usage = extract_usage(response_body)
-        db.record_token_turn(
+        result = await request.app.state.orchestrator_job_runner(
             database_path,
-            session_id=review_session["id"],
+            instructions="",
+            input_payload=_agent_review_input(task, review_prompt, database_path),
+            model=model,
+            persona_filename="agent_review.md",
+            extension_filename="submit-review.ts",
+            submit_tool="submit_review",
             usage_kind="reporting",
-            model=settings.control_plane_model,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
-            cost=resolve_cost(settings.control_plane_model, response_body),
-            raw_usage={
-                **usage,
-                "spend_category": "reporting_summary",
-                "usage_source": "control_plane",
-                "reporting_kind": "agent_review",
-                "response": _safe_review_value(response_body),
-            },
+            task_description=task_description,
+            timeout=AGENT_REVIEW_TIMEOUT_SECONDS,
+            result_validator=_validate_agent_review_result,
         )
-        review = _parse_agent_review(_completion_content(response_body))
-        review.update(
-            {
-                "status": "completed",
-                "reviewed_at": _now_iso(),
-                "review_session_id": review_session["id"],
-                "model": settings.control_plane_model,
-                "token_totals": _agent_review_token_totals(database_path, review_session["id"]),
-            }
-        )
-    except (LLMClientError, RuntimeError, TypeError, ValueError) as exc:
-        db.update_session_status(database_path, review_session["id"], "failed")
+        review = {
+            "status": "completed",
+            "summary": result.validated["summary"],
+            "recommendation": result.validated["recommendation"],
+            "findings": result.validated["findings"],
+            "reviewed_at": _now_iso(),
+            "review_session_id": result.session["id"],
+            "model": model,
+            "token_totals": token_totals(db.build_session_artifact(database_path, result.session["id"])),
+        }
+    except (PiStructuredJobError, PiStructuredOutputError, RuntimeError, TypeError, ValueError) as exc:
+        review_session_id = getattr(exc, "session_id", None)
         review = {
             "status": "failed",
             "summary": "Agent Review failed; operator can still mark done or block manually.",
             "findings": [],
             "recommendation": "needs_changes",
             "reviewed_at": _now_iso(),
-            "review_session_id": review_session["id"],
-            "model": settings.control_plane_model,
-            "token_totals": _agent_review_token_totals(database_path, review_session["id"]),
-            "error_type": type(exc).__name__,
+            "review_session_id": review_session_id,
+            "model": model,
+            "token_totals": (
+                token_totals(db.build_session_artifact(database_path, review_session_id))
+                if review_session_id
+                else {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            ),
+            "error_type": type(getattr(exc, "__cause__", None) or exc).__name__,
             "error": _safe_review_value(str(exc)),
         }
 
@@ -1786,7 +1627,7 @@ async def _run_agent_review(request: Request, task: dict[str, Any], prompt: str 
     return db.update_task(database_path, task["id"], {"metadata": metadata})
 
 
-def _agent_review_prompt(task: dict[str, Any], review_prompt: str, database_path: Path | str) -> str:
+def _agent_review_input(task: dict[str, Any], review_prompt: str, database_path: Path | str) -> dict[str, Any]:
     artifact: dict[str, Any] = {}
     worker_runs: list[dict[str, Any]] = []
     if task.get("session_id"):
@@ -1814,119 +1655,82 @@ def _agent_review_prompt(task: dict[str, Any], review_prompt: str, database_path
         "token_log": artifact.get("token_log", [])[-5:],
         "checkpoint_results": artifact.get("checkpoint_results", [])[-5:],
         "worker_runs": worker_runs[-3:],
+        "task_branch_diff": _agent_review_diff_summary(database_path, task),
     }
-    return json.dumps(_safe_review_value(evidence), sort_keys=True)[:6000]
+    return _safe_review_value(evidence)
 
 
-def _parse_agent_review(content: str) -> dict[str, Any]:
-    parsed: Any = _extract_agent_review_json(content)
-    if not isinstance(parsed, dict):
-        parsed = _parse_markdownish_agent_review(content)
-    findings = _clean_review_findings(parsed.get("findings"))
-    recommendation = _normalize_review_recommendation(parsed.get("recommendation"))
-    return {
-        "summary": _clean_review_text(parsed.get("summary") or "Agent Review completed."),
-        "findings": findings,
-        "recommendation": recommendation,
-    }
-
-
-def _normalize_review_recommendation(value: Any) -> str:
-    normalized = _clean_review_text(value or "needs_changes").lower().replace(" ", "_").replace("-", "_")
-    if normalized in {"approve", "approved"}:
-        return "approve"
-    if normalized in {"block", "blocked"}:
-        return "block"
-    if normalized in {"needs_changes", "needs_change", "changes_requested", "request_changes"}:
-        return "needs_changes"
-    return "needs_changes"
-
-
-def _clean_review_findings(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    cleaned: list[dict[str, Any]] = []
-    for item in value:
-        if isinstance(item, dict):
-            message = _clean_review_text(item.get("message") or item.get("summary") or "")
-            if not message:
-                continue
-            severity = _normalize_review_severity(item.get("severity"))
-            finding: dict[str, Any] = {"severity": severity, "message": message}
-            path = _clean_review_text(item.get("path") or "")
-            if path:
-                finding["path"] = path
-            line = item.get("line")
-            if line not in (None, ""):
-                finding["line"] = line
-            cleaned.append(finding)
-        elif isinstance(item, str):
-            parsed_finding = _finding_from_text(item)
-            if parsed_finding:
-                cleaned.append(parsed_finding)
-    return cleaned
-
-
-def _normalize_review_severity(value: Any) -> str:
-    severity = _clean_review_text(value or "info").lower()
-    return severity if severity in {"critical", "high", "medium", "low", "info"} else "info"
-
-
-def _parse_markdownish_agent_review(content: str) -> dict[str, Any]:
-    lines = [line.strip() for line in _strip_code_fences(content).splitlines()]
-    summary_lines: list[str] = []
-    finding_lines: list[str] = []
-    recommendation: str | None = None
-    section = "summary"
-    for line in lines:
-        if not line:
-            continue
-        clean_heading = _clean_review_text(line).rstrip(":").lower()
-        if clean_heading in {"summary", "review summary", "agent review"}:
-            section = "summary"
-            continue
-        if clean_heading in {"findings", "issues", "review findings"}:
-            section = "findings"
-            continue
-        if clean_heading in {"recommendation", "decision"}:
-            section = "recommendation"
-            continue
-        recommendation_match = re.match(r"^\s*(?:[-*]\s*)?(?:\*\*)?recommendation(?:\*\*)?\s*[:\-]\s*(.+)$", line, re.IGNORECASE)
-        if recommendation_match:
-            recommendation = recommendation_match.group(1)
-            continue
-        if section == "recommendation" and recommendation is None:
-            recommendation = line
-            continue
-        if section == "findings":
-            finding_lines.append(line)
-        else:
-            summary_lines.append(line)
-    findings = [finding for line in finding_lines if (finding := _finding_from_text(line))]
-    summary = _clean_review_text(" ".join(summary_lines) or content)
-    return {"summary": summary, "recommendation": recommendation or "needs_changes", "findings": findings}
-
-
-def _finding_from_text(value: str) -> dict[str, str] | None:
-    text = _clean_review_text(value)
-    if not text:
+def _agent_review_root_path(database_path: Path | str, task: dict[str, Any]) -> str | None:
+    """Resolve the project root for a task, preferring the bound project metadata."""
+    metadata = task.get("metadata") or {}
+    root_path = metadata.get("project_root_path")
+    if root_path:
+        return str(root_path)
+    project_id = metadata.get("connected_project_id")
+    if not project_id:
         return None
-    match = re.match(r"^(critical|high|medium|low|info)\s*[:\-]\s*(.+)$", text, re.IGNORECASE)
-    if match:
-        return {"severity": _normalize_review_severity(match.group(1)), "message": match.group(2).strip()}
-    return {"severity": "info", "message": text}
+    try:
+        project = db.get_connected_project(database_path, str(project_id))
+    except KeyError:
+        return None
+    return str(project.get("root_path") or "")
 
 
-def _strip_code_fences(value: Any) -> str:
+def _harness_commit_diff_summary(root_path: str, sha: str) -> dict[str, Any]:
+    """Diff evidence for a commit the Harness already created."""
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(root_path),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    files = [line for line in _git("show", "--pretty=", "--name-only", sha).splitlines() if line]
+    return {
+        "has_changes": bool(files),
+        "files_changed": files[:50],
+        "stat": _git("show", "--pretty=", "--stat", sha)[:2000],
+        "porcelain": "\n".join(f"C  {name}" for name in files)[:2000],
+        "commit_sha": sha,
+    }
+
+
+def _agent_review_diff_summary(database_path: Path | str, task: dict[str, Any]) -> dict[str, Any]:
+    """Bounded git diff evidence for the review payload."""
+    root_path = _agent_review_root_path(database_path, task)
+    if not root_path:
+        return {"has_changes": False, "files_changed": [], "stat": ""}
+    # Once the Harness owns a commit the working tree is clean and HEAD is back on the
+    # operator's branch, so the reviewed change only exists in that commit.
+    harness_commit = (task.get("metadata") or {}).get("harness_commit")
+    if isinstance(harness_commit, dict) and harness_commit.get("sha"):
+        committed = _harness_commit_diff_summary(root_path, str(harness_commit["sha"]))
+        if committed["has_changes"]:
+            return committed
+    summary = _git_diff_summary(root_path)
+    files = summary.get("files_changed") or []
+    stat = summary.get("stat") or ""
+    porcelain = summary.get("porcelain") or ""
+    return {
+        "has_changes": summary.get("has_changes", False),
+        "files_changed": files[:50],
+        "stat": stat[:2000],
+        "porcelain": porcelain[:2000],
+    }
+
+
+def _strip_review_markdown(value: Any) -> str:
+    """Collapse accidental markdown so a review stays readable in plain text."""
     text = str(value or "")
     text = re.sub(r"```(?:\w+)?", "", text)
-    return text.replace("```", "")
-
-
-def _clean_review_text(value: Any) -> str:
-    text = _strip_code_fences(value)
+    text = text.replace("```", "")
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
-    cleaned_lines: list[str] = []
+    lines: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         line = re.sub(r"^#{1,6}\s+", "", line)
@@ -1935,47 +1739,48 @@ def _clean_review_text(value: Any) -> str:
         line = line.replace("**", "").replace("__", "").replace("`", "")
         line = re.sub(r"\s+", " ", line).strip()
         if line:
-            cleaned_lines.append(line)
-    return " ".join(cleaned_lines).strip()
+            lines.append(line)
+    return " ".join(lines).strip()
 
 
-def _extract_agent_review_json(content: str) -> Any:
-    stripped = content.strip()
-    for candidate in _agent_review_json_candidates(stripped):
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
-
-
-def _agent_review_json_candidates(content: str) -> list[str]:
-    candidates = [content]
-    candidates.extend(match.group(1).strip() for match in re.finditer(r"```(?:json)?\s*(.*?)```", content, re.DOTALL | re.IGNORECASE))
-    first_brace = content.find("{")
-    if first_brace != -1:
-        try:
-            parsed, end = json.JSONDecoder().raw_decode(content[first_brace:])
-        except json.JSONDecodeError:
-            parsed = None
-            end = 0
-        if isinstance(parsed, dict):
-            candidates.append(content[first_brace : first_brace + end])
-    return candidates
-
-
-def _agent_review_session_key_hash(task_id: str, timestamp: str) -> str:
-    return hashlib.sha256(f"agent-review:v1:{task_id}:{timestamp}".encode("utf-8")).hexdigest()
-
-
-def _agent_review_token_totals(database_path: Path | str, session_id: str) -> dict[str, int]:
-    try:
-        artifact = db.build_session_artifact(database_path, session_id)
-    except KeyError:
-        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    return token_totals(artifact)
+def _validate_agent_review_result(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize the ``submit_review`` tool output before it reaches task metadata."""
+    if not isinstance(arguments, dict):
+        raise ValueError("Agent Review result must be an object.")
+    summary = _strip_review_markdown(arguments.get("summary")).strip()
+    if not summary:
+        raise ValueError("Agent Review summary is required.")
+    recommendation = (
+        _strip_review_markdown(arguments.get("recommendation")).lower().replace(" ", "_").replace("-", "_")
+    )
+    if recommendation in {"approve", "approved"}:
+        recommendation = "approve"
+    elif recommendation in {"block", "blocked"}:
+        recommendation = "block"
+    else:
+        recommendation = "needs_changes"
+    findings: list[dict[str, Any]] = []
+    raw_findings = arguments.get("findings")
+    if isinstance(raw_findings, list):
+        for raw in raw_findings:
+            if not isinstance(raw, dict):
+                continue
+            message = _strip_review_markdown(raw.get("message")).strip()
+            if not message:
+                continue
+            message = re.sub(r"^(critical|high|medium|low|info)\s*[:\-]\s+", "", message, flags=re.IGNORECASE)
+            severity = _strip_review_markdown(raw.get("severity")).lower().strip() or "info"
+            if severity not in {"critical", "high", "medium", "low", "info"}:
+                severity = "info"
+            finding: dict[str, Any] = {"severity": severity, "message": message}
+            path = _strip_review_markdown(raw.get("path")).strip()
+            if path:
+                finding["path"] = path
+            line = raw.get("line")
+            if isinstance(line, int) and line > 0:
+                finding["line"] = line
+            findings.append(finding)
+    return {"summary": summary, "recommendation": recommendation, "findings": findings}
 
 
 def _now_iso() -> str:
@@ -1984,11 +1789,6 @@ def _now_iso() -> str:
 
 def _current_day_start_iso(timezone: str) -> str:
     return db.current_day_start_iso(timezone)
-
-
-def _estimation_session_key_hash(description: str) -> str:
-    stable_key = f"estimation:v1:{description}"
-    return hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
 
 
 def _form_project_id(form: Any) -> str | None:
@@ -2142,50 +1942,6 @@ def _task_kind_metadata(metadata: dict[str, Any] | None, default: str = DEFAULT_
     elif default:
         metadata["task_kind"] = default
     return metadata
-
-
-def _initial_task_status_and_metadata(
-    payload: TaskCreateRequest, database_path: Path | str
-) -> tuple[str, dict[str, Any]]:
-    metadata = _task_kind_metadata(payload.metadata, default=DEFAULT_TASK_KIND)
-    has_estimate = payload.estimate_tokens is not None and bool(payload.recommended_model)
-    if payload.status is not None:
-        # Direct task writes cannot bypass the estimate/launch/review lifecycle routes.
-        normalized_status = "Estimated" if payload.status == "Ready" else payload.status
-        if normalized_status in CANONICAL_TASK_STATUSES:
-            lifecycle_status = _constrain_direct_lifecycle_status(
-                database_path,
-                requested_status=normalized_status,
-                session_id=payload.session_id,
-                metadata=metadata,
-            )
-            if lifecycle_status is not None:
-                return lifecycle_status, metadata
-            if not has_estimate:
-                metadata.setdefault("blocked_reason", "Estimate task before launch.")
-                metadata.setdefault("requires_manual_estimate", True)
-                metadata.setdefault("requested_status", payload.status)
-                metadata.setdefault(
-                    "blocked_condition",
-                    _blocked_condition("Estimate task before launch.", "task_create"),
-                )
-                return "Estimated", metadata
-            return normalized_status, metadata
-        metadata.setdefault("blocked_reason", f"Unsupported task status: {payload.status}")
-        metadata.setdefault("original_status", payload.status)
-        metadata.setdefault(
-            "blocked_condition",
-            _blocked_condition(f"Unsupported task status: {payload.status}", "task_create"),
-        )
-        return "Estimated", metadata
-    if has_estimate:
-        return "Estimated", metadata
-    metadata.setdefault("blocked_reason", "Estimate task before launch.")
-    metadata.setdefault("requires_manual_estimate", True)
-    metadata.setdefault(
-        "blocked_condition", _blocked_condition("Estimate task before launch.", "task_create")
-    )
-    return "Estimated", metadata
 
 
 def _canonicalize_task_updates(

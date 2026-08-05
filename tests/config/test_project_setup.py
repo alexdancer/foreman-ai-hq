@@ -95,7 +95,8 @@ def test_project_setup_api_connects_valid_path_and_returns_detected_profile(tmp_
     assert response.status_code == 200
     project = response.json()["project"]
     assert project["root_path"] == str(root.resolve())
-    assert project["profile"]["test_command"] == "pytest"
+    assert project["profile"]["test_command_suggested"] == "pytest"
+    assert project["profile"]["test_command"] is None
     assert project["profile"]["language_hints"] == ["python"]
     assert project["capability"]["state"] == "analysis_ready"
 
@@ -134,7 +135,8 @@ def test_project_settings_page_displays_profile_and_capability_state(tmp_path, m
     assert project["name"] == "portal-project"
     assert project["root_path"] == str(root.resolve())
     assert project["capability"]["label"] == "Analysis-ready"
-    assert project["profile"]["test_command"] == "pytest"
+    assert project["profile"]["test_command_suggested"] == "pytest"
+    assert project["profile"]["test_command"] is None
     assert "fastapi" in project["profile"]["framework_hints"]
     assert "README.md" in project["profile"]["relevant_docs"]
     # The literal "Projects" page title is static React copy
@@ -198,7 +200,8 @@ def test_project_workspace_displays_profile_capability_and_workflow_links(tmp_pa
     assert "Worker setup" in action_labels
     assert "Running work" in action_labels
     assert "Review needed" in action_labels
-    assert payload["project"]["profile"]["test_command"] == "pytest"
+    assert payload["project"]["profile"]["test_command_suggested"] == "pytest"
+    assert payload["project"]["profile"]["test_command"] is None
     assert "fastapi" in payload["project"]["profile"]["framework_hints"]
     assert "README.md" in payload["project"]["profile"]["relevant_docs"]
     for href in [f"/projects/{project['id']}", f"/projects/{project['id']}/floor", "/sessions", "/settings/workers", "/settings/project"]:
@@ -265,41 +268,9 @@ def test_project_page_shows_read_only_proof_only_when_launch_ready(tmp_path, mon
     assert launch_ready.json()["project"]["capability"]["state"] == "launch_ready"
 
 
-def test_project_read_only_proof_route_launches_when_launch_ready(tmp_path, monkeypatch):
+def test_project_read_only_proof_route_is_retired(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    root = _project_root(tmp_path)
-    runner_calls = []
-
     with _client(tmp_path) as client:
-        client.app.state.local_runner_proof_runner = lambda plan: (
-            runner_calls.append(plan)
-            or db.record_token_turn(
-                tmp_path / "harness.db",
-                session_id=plan.metadata["session_id"],
-                usage_kind="task_execution",
-                model="opencode/gpt-5.1",
-                prompt_tokens=10,
-                completion_tokens=5,
-                cost=0,
-                raw_usage={"total_tokens": 15},
-            )
-            or {"returncode": 0, "stdout": "report", "stderr": ""}
-        )
-        project = client.post("/settings/project/connect", headers=_headers(), json={"root_path": str(root)}).json()["project"]
-        db.update_worker_adapter(
-            tmp_path / "harness.db",
-            "opencode",
-            supported_models=["opencode/gpt-5.1"],
-        )
-        db.mark_worker_adapter_verification(tmp_path / "harness.db", "opencode", verified=True, evidence={"ok": True})
-        response = client.post(f"/settings/project/{project['id']}/read-only-proof", headers=_headers())
+        response = client.post("/settings/project/project_DEMO_999/read-only-proof", headers=_headers())
 
-    body = response.json()
-    assert response.status_code == 200
-    assert body["task"]["status"] == "Running"
-    _wait_for_worker_run(tmp_path / "harness.db", body["task"]["id"], "completed")
-    completed = db.get_task(tmp_path / "harness.db", body["task"]["id"])
-    assert completed["status"] == "Review"
-    assert completed["metadata"]["read_only_proof"] is True
-    assert completed["metadata"]["session_report"]["test_command"] == "pytest"
-    assert runner_calls[0].cwd == root.resolve()
+    assert response.status_code == 404

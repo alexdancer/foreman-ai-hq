@@ -82,6 +82,13 @@ export default function App() {
     />;
   } else if (route.view === "taskHistory") {
     content = <TaskHistory key={route.projectId} projectId={route.projectId} />;
+  } else if (route.view === "planningChat") {
+    content = <Board
+      key={`pipeline:${route.projectId}`}
+      projectId={route.projectId}
+      surface="pipeline"
+      onStateChanged={() => setNavRefreshKey((current) => current + 1)}
+    />;
   } else if (route.view === "budgetSettings") {
     content = <BudgetSettings />;
   } else if (route.view === "controlPlaneSettings") {

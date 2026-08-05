@@ -1,45 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
-import { getJSON, postJSON } from "../api.js";
+import { postJSON } from "../api.js";
 import { StatusPill, statusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
   error?.status === 401
-    ? "Control-plane settings require sign-in."
-    : "Could not load control-plane settings. Retry.";
-
-const PROVIDERS = [
-  { value: "openai", label: "openai" },
-  { value: "anthropic", label: "anthropic" },
-  { value: "openai-compatible", label: "openai-compatible" },
-  { value: "openrouter", label: "OpenRouter (recommended)" },
-];
-
-const OPENROUTER_DEFAULTS = {
-  baseUrl: "https://openrouter.ai/api/v1",
-  apiKeyEnv: "OPENROUTER_API_KEY",
-};
-
-const DEFAULT_CONNECTION = {
-  baseUrl: "",
-  apiKeyEnv: "FOREMAN_AI_HQ_CONTROL_API_KEY",
-};
-
-function dataToForm(data) {
-  const curated = (data.curated_models || []).find(
-    (m) => m.provider === data.provider && m.model === data.model
-  );
-  return {
-    provider: data.provider,
-    model: curated ? data.model : "__custom__",
-    customModel: curated ? "" : data.model,
-    baseUrl: data.base_url || "",
-    apiKeyEnv: data.api_key_env,
-    apiKey: "",
-    applyToEstimator: true,
-  };
-}
+    ? "Orchestrator settings require sign-in."
+    : "Could not load orchestrator settings. Retry.";
 
 export default function ControlPlaneSettings() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -57,130 +25,82 @@ export default function ControlPlaneSettings() {
 }
 
 export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
-  const [form, setForm] = useState(null);
-  const [initial, setInitial] = useState(null);
+  const [selected, setSelected] = useState("");
   const [status, setStatus] = useState(null);
   const [inlineError, setInlineError] = useState(null);
   const [busy, setBusy] = useState(false);
   const busyReasonId = busy ? "control-plane-busy-reason" : undefined;
 
   useEffect(() => {
-    if (data) {
-      const next = dataToForm(data);
-      setForm(next);
-      setInitial(next);
-    }
+    if (data) setSelected(data.model || "");
   }, [data]);
-
-  const isDirty = useMemo(() => {
-    if (!form || !initial) return false;
-    if (form.provider !== initial.provider) return true;
-    if (form.model !== initial.model) return true;
-    if (form.model === "__custom__" && form.customModel !== initial.customModel) return true;
-    if (form.baseUrl !== initial.baseUrl) return true;
-    if (form.apiKeyEnv !== initial.apiKeyEnv) return true;
-    if (form.applyToEstimator !== initial.applyToEstimator) return true;
-    if (form.apiKey.trim() !== "") return true;
-    return false;
-  }, [form, initial]);
-
-  const updateField = (field, value) => {
-    setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
-  };
-
-  const handleProviderChange = (newProvider) => {
-    setForm((prev) => {
-      if (!prev || !data) return prev;
-      const effective = prev.model === "__custom__" ? prev.customModel : prev.model;
-      const matching = (data.curated_models || []).find(
-        (m) => m.provider === newProvider && m.model === effective
-      );
-      const defaults = newProvider === "openrouter"
-        ? OPENROUTER_DEFAULTS
-        : prev.provider === "openrouter"
-          ? DEFAULT_CONNECTION
-          : {};
-      if (matching) {
-        return { ...prev, ...defaults, provider: newProvider, model: matching.model, customModel: "" };
-      }
-      if (newProvider === "openai-compatible") {
-        return { ...prev, ...defaults, provider: newProvider, model: "__custom__", customModel: effective };
-      }
-      const first = (data.curated_models || []).find((m) => m.provider === newProvider);
-      return {
-        ...prev,
-        ...defaults,
-        provider: newProvider,
-        model: first ? first.model : "__custom__",
-        customModel: "",
-      };
-    });
-  };
-
-  const handleModelChange = (newModel) => {
-    setForm((prev) => {
-      if (!prev) return prev;
-      if (newModel === "__custom__") {
-        const customValue = prev.model === "__custom__" ? prev.customModel : prev.model;
-        return { ...prev, model: "__custom__", customModel: customValue };
-      }
-      return { ...prev, model: newModel, customModel: "" };
-    });
-  };
 
   const submitSave = async (event) => {
     event.preventDefault();
     setInlineError(null);
     setStatus(null);
-    const model = form.model === "__custom__" ? form.customModel.trim() : form.model;
-    if (!model) {
-      setInlineError("Model is required.");
+    if (!selected) {
+      setInlineError("Choose a model from pi's inventory.");
       return;
     }
     setBusy(true);
     try {
-      const outcome = await postJSON("/settings/control-plane", {
-        control_plane_provider: form.provider,
-        control_plane_model: model,
-        control_plane_base_url: form.baseUrl.trim(),
-        control_plane_api_key_env: form.apiKeyEnv,
-        control_plane_api_key: form.apiKey.trim(),
-        apply_to_estimator_breakdown: form.applyToEstimator,
-      });
+      const outcome = await postJSON("/settings/control-plane", { control_plane_model: selected });
       if (!outcome?.ok) {
-        setInlineError(boundedError(outcome?.error, "Could not save control-plane settings."));
+        setInlineError(boundedError(outcome?.error, "Could not save the Orchestrator Model."));
       } else {
-        setStatus("Saved. Run a connection test to confirm the new settings.");
+        setStatus("Saved. Verify to prove the model runs and is metered.");
         onRefresh();
       }
     } catch (err) {
-      setInlineError(boundedError(err.message, "Could not save control-plane settings."));
+      setInlineError(boundedError(err.message, "Could not save the Orchestrator Model."));
     } finally {
       setBusy(false);
     }
   };
 
-  const submitTest = async () => {
+  const submitDiscover = async () => {
     setInlineError(null);
     setStatus(null);
     setBusy(true);
     try {
-      const outcome = await postJSON("/settings/control-plane/test", {});
-      if (outcome?.passed) {
-        setStatus("Connection test passed.");
+      const outcome = await postJSON("/settings/control-plane/discover", {});
+      if (outcome?.needs_authentication) {
+        setInlineError("pi reports no models. Run `pi /login` to authenticate a provider.");
+      } else if (!outcome?.models?.length) {
+        setInlineError(boundedError(outcome?.reasons?.join("; "), "Model discovery failed."));
       } else {
-        setInlineError(boundedError(outcome?.error, "Connection test failed."));
+        setStatus(`Discovered ${outcome.models.length} models from pi.`);
       }
-    } catch (err) {
-      setInlineError(boundedError(err.message, "Connection test failed."));
-    } finally {
       onRefresh();
+    } catch (err) {
+      setInlineError(boundedError(err.message, "Model discovery failed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitVerify = async () => {
+    setInlineError(null);
+    setStatus(null);
+    setBusy(true);
+    try {
+      const outcome = await postJSON("/settings/control-plane/verify", {});
+      if (outcome?.passed) {
+        setStatus("Verified: the sentinel matched and a token turn was recorded.");
+      } else {
+        setInlineError(boundedError(outcome?.error, "Verification failed."));
+      }
+      onRefresh();
+    } catch (err) {
+      setInlineError(boundedError(err.message, "Verification failed."));
+    } finally {
       setBusy(false);
     }
   };
 
   if (loading && !data) {
-    return <p className="spinner">Loading control-plane settings…</p>;
+    return <p className="spinner">Loading orchestrator settings…</p>;
   }
   if (error) {
     return (
@@ -190,20 +110,23 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
       </>
     );
   }
-  if (!data || !form) {
-    return <p className="spinner">Loading control-plane settings…</p>;
+  if (!data) {
+    return <p className="spinner">Loading orchestrator settings…</p>;
   }
 
-  const curatedForProvider = data.curated_models.filter((m) => m.provider === form.provider);
-  const customSelected = form.model === "__custom__";
+  const inventory = data.inventory || {};
+  const models = inventory.models || [];
+  const verification = data.verification || {};
+  const diverging = data.diverging_jobs || {};
+  const divergingKeys = Object.keys(diverging);
   const state = data.connection_status?.state || "offline";
   const details = data.connection_status?.details || null;
 
   return (
     <>
-      <h1 className="page-title">Control plane model</h1>
+      <h1 className="page-title">Orchestrator model</h1>
       <p className="page-sub">
-        Foreman AI HQ orchestration model · separate from Worker Harness models and credentials
+        Chosen from pi&rsquo;s own inventory · drives planning, estimation, breakdown, and agent review
       </p>
 
       <div className="live-notice" aria-live="polite">
@@ -211,215 +134,133 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
       </div>
       {busy && <p className="disabled-reason" id={busyReasonId} role="status">A control-plane settings action is already in progress.</p>}
 
+      {!data.configured && (
+        <div className="notice danger">
+          Orchestrator is not configured. Orchestration and the board are blocked until a
+          model from pi&rsquo;s inventory is saved.
+        </div>
+      )}
+
+      {divergingKeys.length > 0 && (
+        <div className="notice warning">
+          These ignored legacy settings do not select runtime models:{" "}
+          {divergingKeys.map((key) => `${key} = ${diverging[key]}`).join(", ")}. Saving the
+          Orchestrator Model removes them.
+        </div>
+      )}
+
       <section className="control-plane-layout">
         <article className="panel">
-          <div className="panel-header"><h3>Choose model</h3></div>
+          <div className="panel-header"><h3>Choose orchestrator model</h3></div>
           <div className="panel-body">
-            <form className="control-plane-form" onSubmit={submitSave}>
-              <div className="control-plane-fields">
-                <div className="control-plane-field">
-                  <label htmlFor="control-plane-provider">Provider</label>
-                  <select
-                    id="control-plane-provider"
-                    value={form.provider}
-                    onChange={(e) => handleProviderChange(e.target.value)}
-                    disabled={busy}
-                    aria-describedby={busyReasonId}
-                  >
-                    {PROVIDERS.map((provider) => (
-                      <option key={provider.value} value={provider.value}>{provider.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="control-plane-field">
-                  <label htmlFor="control-plane-model">Model</label>
-                  <select
-                    id="control-plane-model"
-                    value={form.model}
-                    onChange={(e) => handleModelChange(e.target.value)}
-                    disabled={busy}
-                    aria-describedby={busyReasonId}
-                  >
-                    {curatedForProvider.map((m) => (
-                      <option key={m.model} value={m.model}>{m.label}</option>
-                    ))}
-                    <option value="__custom__">Custom model…</option>
-                  </select>
-                </div>
-
-                {customSelected && (
+            {inventory.needs_authentication ? (
+              <div className="notice warning">
+                <p>
+                  pi reports no runnable models, which means no provider is authenticated yet.
+                </p>
+                <p>
+                  Run <code>pi /login</code> to sign in to a provider with OAuth or an API key,
+                  then refresh the inventory.
+                </p>
+              </div>
+            ) : models.length === 0 ? (
+              <p className="muted">
+                No inventory has been discovered yet. Refresh to ask pi which models it can run.
+              </p>
+            ) : (
+              <form className="control-plane-form" onSubmit={submitSave}>
+                <div className="control-plane-fields">
                   <div className="control-plane-field control-plane-field-wide">
-                  <label htmlFor="control-plane-custom-model">Custom model</label>
-                  <input
-                    id="control-plane-custom-model"
-                    value={form.customModel}
-                    onChange={(e) => updateField("customModel", e.target.value)}
-                    placeholder="model id for OpenAI-compatible or future providers"
-                    required
-                    disabled={busy}
-                    aria-describedby={busyReasonId}
-                  />
-                  <p className="muted">
-                    Use Custom model for OpenAI-compatible endpoints or provider model IDs that are not in the curated dropdown.
-                  </p>
+                    <label htmlFor="orchestrator-model">Model</label>
+                    <select
+                      id="orchestrator-model"
+                      value={selected}
+                      onChange={(e) => setSelected(e.target.value)}
+                      disabled={busy}
+                      aria-describedby={busyReasonId}
+                    >
+                      <option value="">Choose a model…</option>
+                      {models.map((model) => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
                   </div>
-                )}
-
-                <div className="control-plane-field control-plane-field-wide">
-                  <label htmlFor="control-plane-base-url">Base URL</label>
-                  <input
-                    id="control-plane-base-url"
-                    value={form.baseUrl}
-                    onChange={(e) => updateField("baseUrl", e.target.value)}
-                    placeholder="Required for OpenAI-compatible endpoints"
-                    disabled={busy}
-                    aria-describedby={busyReasonId}
-                  />
-                  <p className="muted">Required for OpenAI-compatible endpoints; leave blank for provider defaults.</p>
                 </div>
-
-                <div className="control-plane-field control-plane-field-wide">
-                  <label htmlFor="control-plane-api-key">API key</label>
-                  <input
-                    id="control-plane-api-key"
-                    type="password"
-                    value={form.apiKey}
-                    onChange={(e) => updateField("apiKey", e.target.value)}
-                    placeholder="Paste provider API key"
-                    disabled={busy}
-                    aria-describedby={busyReasonId}
-                  />
-                  <p className="muted">
-                    Leave blank to keep the existing key. The key is saved to ignored <code>.foreman/secrets.env</code>, never shown again, and never written to <code>.foreman/config.toml</code>.
-                  </p>
+                <div className="control-plane-actions">
+                  <button type="submit" className="btn" disabled={busy || !selected} aria-describedby={busyReasonId}>
+                    Save
+                  </button>
                 </div>
-              </div>
+              </form>
+            )}
 
-              <details className="control-plane-advanced">
-                <summary>Advanced connection settings</summary>
-                <div className="control-plane-field">
-                  <label htmlFor="control-plane-api-key-env">API key env name</label>
-                  <input
-                    id="control-plane-api-key-env"
-                    value={form.apiKeyEnv}
-                    onChange={(e) => updateField("apiKeyEnv", e.target.value)}
-                    required
-                    disabled={busy}
-                    aria-describedby={busyReasonId}
-                  />
-                </div>
-              </details>
-
-              <label className="control-plane-checkbox">
-                <input
-                  type="checkbox"
-                  checked={form.applyToEstimator}
-                  onChange={(e) => updateField("applyToEstimator", e.target.checked)}
-                  disabled={busy}
-                  aria-describedby={busyReasonId}
-                />
-                Use this model for estimation and task breakdown too
-              </label>
-
-              <div className="control-plane-actions">
-                <button type="submit" className="control-plane-primary" disabled={busy} aria-describedby={busyReasonId}>
-                  Save control-plane model
-                </button>
-              </div>
-            </form>
-
-            <p className="control-plane-save-note muted">
-              Saves non-secrets to <code>.foreman/config.toml</code> and applies to new control-plane requests.
+            <div className="control-plane-actions" style={{ marginTop: 12 }}>
+              <button type="button" className="btn" onClick={submitDiscover} disabled={busy} aria-describedby={busyReasonId}>
+                Refresh inventory
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={submitVerify}
+                disabled={busy || !data.configured}
+                aria-describedby={busyReasonId}
+              >
+                Verify
+              </button>
+            </div>
+            <p className="muted">
+              {inventory.discovered_at
+                ? `Inventory discovered ${inventory.discovered_at}`
+                : "Inventory has never been discovered."}
             </p>
-
-            {Object.keys(data.shadowed_settings).length > 0 && (
-              <p className="control-plane-override muted">
-                Effective value is overridden by environment: {JSON.stringify(data.shadowed_settings)}
+            {data.shadowed_settings?.orchestrator_model && (
+              <p className="muted">
+                Overridden by environment variable {data.shadowed_settings.orchestrator_model}.
               </p>
             )}
           </div>
         </article>
 
         <article className="panel">
-          <div className="panel-header"><h3>Configured connection</h3></div>
-          <div className="panel-body">
-            <dl className="connection-details">
-              <dt>Provider</dt><dd>{data.provider}</dd>
-              <dt>Model</dt><dd>{data.model}</dd>
-              <dt>API key env</dt><dd>{data.api_key_env}</dd>
-              <dt>API key present</dt><dd>{data.api_key_present ? "yes" : "no"}</dd>
-              <dt>Estimator model</dt><dd>{data.estimator_model}</dd>
-              <dt>Task breakdown model</dt><dd>{data.task_breakdown_model}</dd>
-              <dt>Legacy env fallback</dt>
-              <dd>{data.legacy_api_key_configured ? "configured" : "not set"}</dd>
-            </dl>
-            <p className="control-plane-connection-note muted">
-              This connection powers estimation, planning, recommendations, and budget reporting. It is not passed into OpenCode, Claude Code, Codex, or other Worker Harnesses.
-            </p>
-            <div className="control-plane-actions">
-              <button
-                type="button"
-                className="control-plane-primary"
-                onClick={submitTest}
-                disabled={busy || isDirty}
-                aria-describedby={busyReasonId || (isDirty ? "test-dirty-hint" : undefined)}
-              >
-                Test control-plane connection
-              </button>
-              {isDirty && (
-                <span id="test-dirty-hint" className="pill muted">Save before testing</span>
-              )}
-            </div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-header"><h3>Last connection test</h3></div>
+          <div className="panel-header"><h3>Verification</h3></div>
           <div className="panel-body">
             <p>
-              {state === "online" && <StatusPill tone={statusTone(state)} label="online" />}
-              {state === "needs_test" && <StatusPill tone={statusTone(state)} label="needs test" />}
-              {state === "offline" && <StatusPill tone={statusTone(state)} label="offline" />}
-              {data.connection_status.checked_at && (
-                <span className="pill muted">{data.connection_status.checked_at}</span>
-              )}
+              Status: <StatusPill tone={statusTone(state)} label={state === "needs_test" ? "needs test" : state} />
             </p>
-            {details ? (
-              <>
-                <div className="kv">
-                  {details.provider && <div className="k">Provider</div>}
-                  {details.provider && <div className="v">{details.provider}</div>}
-                  {details.model && <div className="k">Model</div>}
-                  {details.model && <div className="v">{details.model}</div>}
-                  {details.usage && (
-                    <>
-                      <div className="k">Total tokens</div>
-                      <div className="v">{details.usage.total_tokens || 0}</div>
-                    </>
-                  )}
-                  {details.usage && (
-                    <>
-                      <div className="k">Cost</div>
-                      <div className="v">
-                        {typeof details.cost === "number" ? `$${details.cost.toFixed(6)}` : "unavailable"}
-                      </div>
-                    </>
-                  )}
-                  {details.error && (
-                    <>
-                      <div className="k">Error</div>
-                      <div className="v">{details.error}</div>
-                    </>
-                  )}
-                </div>
-                <details style={{ marginTop: 10 }}>
-                  <summary>Raw sanitized details</summary>
-                  <pre className="raw-evidence">{JSON.stringify(details, null, 2)}</pre>
-                </details>
-              </>
+            {verification.verified_at ? (
+              <div className="kv">
+                <div className="k">Result</div>
+                <div className="v">{verification.passed ? "passed" : "failed"}</div>
+                <div className="k">Model</div>
+                <div className="v">{verification.model}</div>
+                <div className="k">Verified at</div>
+                <div className="v">{verification.verified_at}</div>
+                {verification.stale && (
+                  <>
+                    <div className="k">Stale</div>
+                    <div className="v">
+                      Proves a different model than the one configured now. Verify again.
+                    </div>
+                  </>
+                )}
+                {verification.reasons?.length > 0 && (
+                  <>
+                    <div className="k">Reasons</div>
+                    <div className="v">{verification.reasons.join("; ")}</div>
+                  </>
+                )}
+              </div>
             ) : (
-              <p className="muted">No control-plane connection test has been recorded yet.</p>
+              <p className="muted">
+                Not verified. Presence in the inventory is not verification — only a real
+                metered turn is.
+              </p>
+            )}
+            {details && (
+              <details style={{ marginTop: 10 }}>
+                <summary>Raw sanitized details</summary>
+                <pre className="raw-evidence">{JSON.stringify(details, null, 2)}</pre>
+              </details>
             )}
           </div>
         </article>

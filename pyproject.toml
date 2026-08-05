@@ -56,6 +56,10 @@ foreman_ai_hq = [
     "templates/*.html",
     "defaults/*.yaml",
     "data/*.json",
+    "orchestrator/pi/profile/*.md",
+    "orchestrator/pi/extensions/*.ts",
+    "orchestrator/pi/bridge/package.json",
+    "orchestrator/pi/bridge/package-lock.json",
     "static/react/*",
     "static/react/assets/*",
 ]

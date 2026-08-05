@@ -14,17 +14,26 @@ class Settings:
     guardrails_path: Path = Path("guardrails.yaml")
     timezone: str = "local"
     control_plane_provider: str = "openai"
-    control_plane_model: str = "gpt-5.4"
+    # There is no code default for the Orchestrator Model: pi's inventory is the
+    # sole authority, so absent configuration is *not configured*, not a fallback id.
+    orchestrator_model: str | None = None
     control_plane_api_key_env: str = "FOREMAN_AI_HQ_CONTROL_API_KEY"
     control_plane_base_url: str = ""
     provider_api_key_env: str = "PROVIDER_API_KEY"
-    estimator_model: str = "gpt-5.4"
-    task_breakdown_model: str = "gpt-5.4"
+    # Legacy persisted per-job values are migration evidence only. Runtime callers
+    # must always select ``orchestrator_model``.
+    legacy_orchestration_model_overrides: dict[str, str] | None = None
     task_breakdown_timeout_seconds: int = 120
     portal_token_env: str = "TOKEN_TRACKER_PORTAL_TOKEN"
     portal_auth_required: bool = True
     portal_cookie_secure: bool = False
     local_runner_enabled: bool = False
+
+    @property
+    def control_plane_model(self) -> str | None:
+        # Back-compat alias: the orchestrator model used to be exposed as the
+        # control-plane model. Every canonical caller should read orchestrator_model.
+        return self.orchestrator_model
 
     def __init__(
         self,
@@ -32,12 +41,11 @@ class Settings:
         guardrails_path: Path | str | None = None,
         timezone: str | None = None,
         control_plane_provider: str | None = None,
+        orchestrator_model: str | None = None,
         control_plane_model: str | None = None,
         control_plane_api_key_env: str | None = None,
         control_plane_base_url: str | None = None,
         provider_api_key_env: str | None = None,
-        estimator_model: str | None = None,
-        task_breakdown_model: str | None = None,
         task_breakdown_timeout_seconds: int | None = None,
         portal_token_env: str | None = None,
         portal_auth_required: bool | None = None,
@@ -93,21 +101,28 @@ class Settings:
             or provider_defaults.get("control_plane_api_key_env")
             or "FOREMAN_AI_HQ_CONTROL_API_KEY"
         )
-        resolved_control_model = (
-            control_plane_model
-            or os.getenv("FOREMAN_AI_HQ_CONTROL_MODEL")
-            or os.getenv("TOKEN_TRACKER_CONTROL_PLANE_MODEL")
-            or estimator_model
-            or os.getenv("TOKEN_TRACKER_ESTIMATOR_MODEL")
+        # The orchestrator model is the canonical model for planning, estimation,
+        # task breakdown, and Agent Review. There is no code default: a value absent
+        # from every source resolves to not configured, and pi's persisted inventory
+        # decides whether a present value is usable.
+        resolved_orchestrator_model = (
+            # Explicit constructor arguments win over ambient environment so a leaked
+            # FOREMAN_AI_HQ_ORCHESTRATOR_MODEL cannot override an explicit model.
+            orchestrator_model
+            or control_plane_model
+            or os.getenv("FOREMAN_AI_HQ_ORCHESTRATOR_MODEL")
+            or config.get("orchestrator_model")
+            # Read as a candidate so an existing configuration is validated against
+            # the inventory rather than silently ignored.
             or config.get("control_plane_model")
-            or "gpt-5.4"
+            or None
         )
         object.__setattr__(
             self,
             "control_plane_provider",
             resolved_control_provider,
         )
-        object.__setattr__(self, "control_plane_model", resolved_control_model)
+        object.__setattr__(self, "orchestrator_model", resolved_orchestrator_model)
         object.__setattr__(self, "control_plane_api_key_env", resolved_control_api_env)
         default_control_base_url = (
             provider_defaults.get("control_plane_base_url")
@@ -130,24 +145,14 @@ class Settings:
             "provider_api_key_env",
             legacy_provider_env,
         )
-        object.__setattr__(
-            self,
-            "estimator_model",
-            estimator_model
-            or os.getenv("FOREMAN_AI_HQ_ESTIMATOR_MODEL")
-            or os.getenv("TOKEN_TRACKER_ESTIMATOR_MODEL")
-            or config.get("estimator_model")
-            or resolved_control_model,
-        )
-        object.__setattr__(
-            self,
-            "task_breakdown_model",
-            task_breakdown_model
-            or os.getenv("FOREMAN_AI_HQ_TASK_BREAKDOWN_MODEL")
-            or os.getenv("TOKEN_TRACKER_TASK_BREAKDOWN_MODEL")
-            or config.get("task_breakdown_model")
-            or resolved_control_model,
-        )
+        legacy_overrides = {
+            key: value
+            for key in ("estimator_model", "task_breakdown_model")
+            if isinstance((value := config.get(key)), str)
+            and value.strip()
+            and value != resolved_orchestrator_model
+        }
+        object.__setattr__(self, "legacy_orchestration_model_overrides", legacy_overrides)
         object.__setattr__(
             self,
             "task_breakdown_timeout_seconds",

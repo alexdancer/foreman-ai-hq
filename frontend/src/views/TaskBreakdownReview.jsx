@@ -467,9 +467,11 @@ function ReviewSummary({ data }) {
       <dl className="detail-grid">
         <dt>Review</dt><dd>{review.id}</dd>
         <dt>Decision</dt><dd>{review.decision}</dd>
+        {review.intake_decision && <><dt>Intake decision</dt><dd>{review.intake_decision}</dd></>}
         <dt>Model</dt><dd>{review.model.preview || "Unavailable"}</dd>
         {review.session_href && <><dt>Token session</dt><dd><AppLink to={review.session_href}>{review.session_id}</AppLink></dd></>}
       </dl>
+      {review.intake_decision_reason?.preview && <BoundedEvidence label="Intake reason" value={review.intake_decision_reason} />}
       <BoundedEvidence label="Rationale" value={review.rationale} />
       <details><summary>Original source</summary><BoundedEvidence value={review.source_text} /></details>
       {review.failure_type && <BoundedEvidence label="Failure type" value={review.failure_type} />}
@@ -493,7 +495,7 @@ function CandidateEditor({ candidate, update, updateField, loadField }) {
   return <article className="review-candidate">
     <label className="check-row"><input type="checkbox" checked={candidate.selected} onChange={(event) => update((current) => ({ ...current, selected: event.target.checked }))} /> Accept candidate {candidate.index + 1}</label>
     <div className="review-field-row">
-      <label>Candidate kind<select value={candidate.kind} onChange={(event) => update((current) => ({ ...current, kind: event.target.value, kindTouched: true }))}><option value="implementation">implementation</option><option value="scout">scout</option><option value="acceptance_verification">acceptance_verification</option></select></label>
+      <label>Candidate kind<select value={candidate.kind} onChange={(event) => update((current) => ({ ...current, kind: event.target.value, kindTouched: true }))}><option value="implementation">implementation</option><option value="acceptance_verification">acceptance_verification</option></select></label>
       <label>Execution mode<select value={candidate.executionMode} onChange={(event) => update((current) => ({ ...current, executionMode: event.target.value, executionModeTouched: true }))}><option value="AFK">AFK</option><option value="HITL">HITL</option></select></label>
     </div>
     {controls(primary)}

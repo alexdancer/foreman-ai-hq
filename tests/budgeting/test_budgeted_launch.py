@@ -13,6 +13,7 @@ from foreman_ai_hq import db
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes.tasks import _current_day_start_iso as _portal_launch_day_start_iso
 from foreman_ai_hq.task_launch import TaskLaunchBlocked, abort_worker_session, launch_task
+from tests.conftest import git_project_profile
 
 
 def _connect_project(db_path: Path, root: Path) -> dict:
@@ -20,7 +21,7 @@ def _connect_project(db_path: Path, root: Path) -> dict:
         db_path,
         name=root.name,
         root_path=str(root.resolve()),
-        profile={"name": root.name, "root_path": str(root.resolve()), "test_command": "pytest"},
+        profile=git_project_profile(root),
         capability={"state": "launch_ready", "can_launch": True},
     )
 
@@ -60,8 +61,15 @@ def _wait_for_worker_run(db_path: Path, task_id: str, status: str | None = None)
     raise AssertionError("worker run did not reach expected status")
 
 
+def _write_worker_change(plan) -> None:
+    (Path(plan.cwd) / "worker_change.txt").write_text(f"changed by {plan.metadata['session_id']}\n")
+
+
 def _runner_recording(db_path: Path, *, total_tokens: int = 10):
     def runner(plan):
+        # A write-capable Worker that changes nothing is a failure, so the recording
+        # runner leaves a change behind the way a real one does.
+        _write_worker_change(plan)
         db.record_token_turn(
             db_path,
             session_id=plan.metadata["session_id"],
@@ -176,6 +184,7 @@ def test_native_worker_actuals_and_budget_exclude_cache_read_but_count_cache_wri
     task = _verified_budget_task(db_path, tmp_path, estimate=100, budget={"daily_used_tokens": 0, "daily_cap_tokens": 500})
 
     def runner(plan):
+        _write_worker_change(plan)
         db.record_token_turn(
             db_path,
             session_id=plan.metadata["session_id"],
@@ -272,6 +281,7 @@ def test_launch_injects_repo_context_brief_and_records_timeline_events(tmp_path)
 
     def runner(plan):
         calls.append(plan)
+        _write_worker_change(plan)
         db.record_token_turn(
             db_path,
             session_id=plan.metadata["session_id"],
@@ -424,6 +434,7 @@ def test_launch_returns_before_long_running_worker_adapter_completes(tmp_path):
     release_runner = threading.Event()
 
     def long_running_runner(plan):
+        _write_worker_change(plan)
         db.record_token_turn(
             db_path,
             session_id=plan.metadata["session_id"],
@@ -591,6 +602,7 @@ def test_native_usage_launch_passes_selected_model_and_records_usage_metadata(tm
 
     def runner(plan):
         calls.append(plan)
+        _write_worker_change(plan)
         return {
             "returncode": 0,
             "stdout": json.dumps(
@@ -890,6 +902,7 @@ def test_budget_overrun_alarm_uses_reset_window_after_launch(tmp_path):
     def runner(plan):
         started.set()
         assert release.wait(timeout=2)
+        _write_worker_change(plan)
         db.record_token_turn(
             db_path,
             session_id=plan.metadata["session_id"],

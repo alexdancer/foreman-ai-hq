@@ -6,6 +6,7 @@ from foreman_ai_hq import db
 from foreman_ai_hq.app import create_app
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.settings import Settings
+from tests.conftest import git_project_profile
 
 ROOT = Path(__file__).resolve().parents[2]
 PORTAL_TOKEN = "test-portal-token"
@@ -39,6 +40,9 @@ def _client(tmp_path, *, portal_auth_required: bool = True, local_runner_enabled
         local_runner_enabled=local_runner_enabled,
         operator_config={},
     )
+    # Explicit so the conftest hook that seeds orchestrator discovery evidence runs;
+    # tests marked `unconfigured_orchestrator` get a bare database instead.
+    db.init_db(settings.database_path)
     return TestClient(create_app(settings))
 
 
@@ -74,7 +78,7 @@ def _connect_project(database_path: Path, root: Path) -> dict:
         database_path,
         name=root.name,
         root_path=str(root.resolve()),
-        profile={"name": root.name, "root_path": str(root.resolve()), "test_command": "pytest"},
+        profile=git_project_profile(root),
         capability={"state": "launch_ready", "can_launch": True},
     )
 

@@ -34,8 +34,7 @@ Paste relevant redacted `foremanctl check` output, traceback, or logs. If you ar
 - CPU architecture:
 - Install method: pipx / curl installer / Homebrew / source checkout / Docker / other
 - Does `command -v foremanctl` succeed?: yes / no
-- Control-plane provider/model:
+- Orchestrator Model and pi inventory state:
 - Worker Adapter:
 - Tracking mode:
 - Docker or local Python:
-

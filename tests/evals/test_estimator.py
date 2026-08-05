@@ -21,6 +21,7 @@ from foreman_ai_hq.estimation import (
 )
 from foreman_ai_hq.guardrails import load_guardrails
 from foreman_ai_hq.settings import Settings
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 from foreman_ai_hq.task_breakdown import (
     TASK_BREAKDOWN_MAX_TOKENS,
     TASK_BREAKDOWN_TIMEOUT_SECONDS,
@@ -73,6 +74,7 @@ class FakeEstimatorLLM:
             "shadow_token_estimate": 11_000,
             "complexity": "modest",
             "confidence": 0.82,
+            "investigation_recommended": False,
             "rationale": "Endpoint plus tests is a modest task.",
             "assumptions": ["No schema migration needed."],
             "risk_flags": ["Integration tests may expand scope"],
@@ -166,12 +168,12 @@ def _client_with_llm(tmp_path, llm):
     settings = Settings(
         database_path=tmp_path / "harness.db",
         guardrails_path=ROOT / "guardrails.yaml",
-        estimator_model="openai/gpt-4.1-mini",
-        task_breakdown_model="openai/gpt-4.1-mini",
+        orchestrator_model="openai/gpt-4.1-mini",
         operator_config={},
     )
     app = create_app(settings)
     app.state.llm_client = llm
+    app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
     return TestClient(app)
 
 
@@ -187,7 +189,7 @@ async def test_eval_estimator_returns_all_required_fields():
     result, response = await estimate_task(
         "Add a new REST endpoint with tests",
         config,
-        llm_client=llm,
+        job_runner=FakeOrchestratorJobRunner(llm),
         estimator_model="gpt-4o-mini",
     )
 
@@ -217,14 +219,14 @@ async def test_eval_estimator_as_dict_has_expected_keys():
     """EstimateResult.as_dict() returns all expected keys."""
     config = load_guardrails(ROOT / "guardrails.yaml")
     llm = FakeEstimatorLLM()
-    result, _ = await estimate_task("Fix a typo", config, llm_client=llm, estimator_model="gpt-4o-mini")
+    result, _ = await estimate_task("Fix a typo", config, job_runner=FakeOrchestratorJobRunner(llm), estimator_model="gpt-4o-mini")
 
     d = result.as_dict()
     assert set(d.keys()) == {
         "token_estimate", "complexity", "confidence",
         "rationale", "assumptions", "risk_flags", "budget_note", "source",
         "drivers", "shadow_token_estimate", "estimate_disagreement",
-        "coefficient_provenance",
+        "coefficient_provenance", "investigation_recommended",
     }
 
 
@@ -242,41 +244,16 @@ async def test_eval_estimator_token_estimate_is_positive_integer():
         "shadow_token_estimate": 5_000,
         "complexity": "simple",
         "confidence": 0.95,
+        "investigation_recommended": False,
         "rationale": "Trivial fix.",
         "assumptions": [],
         "risk_flags": [],
         "budget_note": "",
         "source": "llm",
     })
-    result, _ = await estimate_task("Fix a trailing comma", config, llm_client=llm, estimator_model="gpt-4o-mini")
+    result, _ = await estimate_task("Fix a trailing comma", config, job_runner=FakeOrchestratorJobRunner(llm), estimator_model="gpt-4o-mini")
     assert result.token_estimate > 0
     assert isinstance(result.token_estimate, int)
-
-
-# ---------------------------------------------------------------------------
-# Estimation token tracking
-# ---------------------------------------------------------------------------
-
-def test_eval_estimator_usage_tracked_as_estimation_kind(tmp_path, monkeypatch):
-    """Estimator token usage is persisted with usage_kind='estimation'."""
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM()
-    client = _client_with_llm(tmp_path, llm)
-
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": "Add a save command and test it"},
-            headers=_auth_headers(),
-        )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "Estimated"
-
-    with db.connect(tmp_path / "harness.db") as conn:
-        rows = conn.execute("select usage_kind from token_turns").fetchall()
-    kinds = {row["usage_kind"] for row in rows}
-    assert "estimation" in kinds
 
 
 @pytest.mark.asyncio
@@ -321,7 +298,7 @@ async def test_eval_task_breakdown_accepts_common_model_json_variants():
 
     result, _ = await breakdown_task_source(
         "# DEMO_TASK_2099 comparison\n\n- [ ] Run comparison\n- [ ] Run pytest.",
-        llm_client=llm,
+        job_runner=FakeOrchestratorJobRunner(llm),
         task_breakdown_model="gpt-5.4-mini",
     )
 
@@ -333,18 +310,16 @@ async def test_eval_task_breakdown_accepts_common_model_json_variants():
 
 
 @pytest.mark.asyncio
-async def test_task_breakdown_accepts_single_fenced_json_response():
+async def test_task_breakdown_rejects_fenced_json_without_submit_call():
     content = _breakdown_content("Stabilize DEMO_TASK_2099 Claude breakdown")
     llm = FakeRawContentLLM(f"```json\n{json.dumps(content)}\n```")
 
-    result, _ = await breakdown_task_source(
-        "# DEMO_TASK_2099 Claude breakdown\n\n- [ ] Stabilize Claude JSON output",
-        llm_client=llm,
-        task_breakdown_model="claude-sonnet-4-6",
-    )
-
-    assert isinstance(result, TaskBreakdownResult)
-    assert result.candidates[0].title == "Stabilize DEMO_TASK_2099 Claude breakdown"
+    with pytest.raises(TaskBreakdownValidationError, match="did not call submit_breakdown"):
+        await breakdown_task_source(
+            "# DEMO_TASK_2099 Claude breakdown\n\n- [ ] Stabilize Claude JSON output",
+            job_runner=FakeOrchestratorJobRunner(llm),
+            task_breakdown_model="claude-sonnet-4-6",
+        )
 
 
 @pytest.mark.asyncio
@@ -353,7 +328,7 @@ async def test_task_breakdown_request_uses_explicit_large_output_cap():
 
     await breakdown_task_source(
         "# DEMO_TASK_2099 Claude breakdown\n\n- [ ] Check request cap",
-        llm_client=llm,
+        job_runner=FakeOrchestratorJobRunner(llm),
         task_breakdown_model="claude-sonnet-4-6",
     )
 
@@ -368,7 +343,7 @@ async def test_task_breakdown_system_prompt_includes_task_slicing_policy_schema(
 
     await breakdown_task_source(
         "# DEMO_TASK_2099 policy\n\n- [ ] Slice with proof\n- [ ] Do not split setup prose.",
-        llm_client=llm,
+        job_runner=FakeOrchestratorJobRunner(llm),
         task_breakdown_model="claude-sonnet-4-6",
     )
 
@@ -544,7 +519,7 @@ async def test_task_breakdown_preserves_policy_rejections_for_non_task_markdown_
 
     result, _ = await breakdown_task_source(
         "# DEMO_TASK_2099 slicing\n\n- [ ] Do not add network dependencies.\n- [ ] Run pytest.\n- [ ] Create database layer first.\n- [ ] Prepare for future multi-tenant support.",
-        llm_client=llm,
+        job_runner=FakeOrchestratorJobRunner(llm),
         task_breakdown_model="claude-sonnet-4-6",
     )
 
@@ -560,10 +535,10 @@ async def test_task_breakdown_rejects_incomplete_fenced_json_response():
     content = json.dumps(_breakdown_content("Reject DEMO_TASK_2099 truncation"))
     llm = FakeRawContentLLM(f"```json\n{content[:-20]}")
 
-    with pytest.raises(TaskBreakdownValidationError, match="invalid JSON"):
+    with pytest.raises(TaskBreakdownValidationError, match="did not call submit_breakdown"):
         await breakdown_task_source(
             "# DEMO_TASK_2099 Claude breakdown\n\n- [ ] Reject truncated JSON",
-            llm_client=llm,
+            job_runner=FakeOrchestratorJobRunner(llm),
             task_breakdown_model="claude-sonnet-4-6",
         )
 
@@ -573,10 +548,10 @@ async def test_task_breakdown_rejects_prose_wrapped_fenced_json_response():
     content = _breakdown_content("Reject DEMO_TASK_2099 wrapper")
     llm = FakeRawContentLLM(f"Here is the breakdown:\n```json\n{json.dumps(content)}\n```")
 
-    with pytest.raises(TaskBreakdownValidationError, match="invalid JSON"):
+    with pytest.raises(TaskBreakdownValidationError, match="did not call submit_breakdown"):
         await breakdown_task_source(
             "# DEMO_TASK_2099 Claude breakdown\n\n- [ ] Reject prose wrapper",
-            llm_client=llm,
+            job_runner=FakeOrchestratorJobRunner(llm),
             task_breakdown_model="claude-sonnet-4-6",
         )
 
@@ -645,71 +620,6 @@ def test_task_breakdown_rejects_invalid_candidate_kind():
         )
 
 
-def test_task_breakdown_rejects_scout_without_bounded_investigation_fields():
-    content = _breakdown_content("Investigate DEMO_TASK_2099 routing")
-    content["candidates"][0].update({"kind": "scout", "constraints": []})
-
-    with pytest.raises(TaskBreakdownValidationError, match="bounded question, inspection boundary"):
-        validate_breakdown_result(content)
-
-
-def test_task_breakdown_preserves_bounded_scout_target_task_id():
-    content = _breakdown_content("Investigate DEMO_TASK_2099 routing")
-    content["candidates"][0].update({
-        "kind": "scout",
-        "target_task_id": "task-DEMO-2099",
-        "constraints": ["Inspect src/foreman_ai_hq routing only."],
-    })
-
-    result = validate_breakdown_result(content)
-
-    assert result.candidates[0].target_task_id == "task-DEMO-2099"
-    assert result.candidates[0].as_dict()["target_task_id"] == "task-DEMO-2099"
-
-
-def test_estimate_form_failed_breakdown_records_validation_reason(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeSequentialLLM([{"not": "a valid breakdown"}])
-
-    with _client_with_llm(tmp_path, llm) as client:
-        response = client.post(
-            "/tasks/estimate-form",
-            headers={**_auth_headers(), "accept": "text/html"},
-            data={"description": "# DEMO_TASK_2099 invalid output\n\n- [ ] Run comparison"},
-            follow_redirects=False,
-        )
-        breakdown_id = response.headers["location"].split("/")[2]
-        breakdown = db.get_task_breakdown(tmp_path / "harness.db", breakdown_id)
-
-    assert response.status_code == 303
-    assert breakdown["status"] == "failed"
-    assert breakdown["failure_type"] == "TaskBreakdownValidationError"
-    assert "task breakdown missing fields" in breakdown["failure_message"]
-
-
-def test_eval_estimator_tokens_count_against_daily_budget(tmp_path, monkeypatch):
-    """Estimator tokens are recorded in token_turns and accumulate toward daily total."""
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM()
-    client = _client_with_llm(tmp_path, llm)
-
-    with client:
-        client.post(
-            "/estimate",
-            json={"description": "Add a list endpoint"},
-            headers=_auth_headers(),
-        )
-
-    with db.connect(tmp_path / "harness.db") as conn:
-        row = conn.execute(
-            "select prompt_tokens, completion_tokens, total_tokens from token_turns where usage_kind = 'estimation'"
-        ).fetchone()
-
-    assert row["prompt_tokens"] == 111
-    assert row["completion_tokens"] == 22
-    assert row["total_tokens"] == 133
-
-
 # ---------------------------------------------------------------------------
 # Estimator failures → Blocked
 # ---------------------------------------------------------------------------
@@ -721,7 +631,7 @@ async def test_eval_estimator_unavailable_raises_typed_error():
     llm = FakeEstimatorLLM(exc=RuntimeError("connection refused"))
 
     with pytest.raises(EstimatorUnavailableError, match="connection refused"):
-        await estimate_task("Task", config, llm_client=llm, estimator_model="gpt-4o-mini")
+        await estimate_task("Task", config, job_runner=FakeOrchestratorJobRunner(llm), estimator_model="gpt-4o-mini")
 
 
 @pytest.mark.asyncio
@@ -730,8 +640,8 @@ async def test_eval_estimator_invalid_json_raises_validation_error():
     config = load_guardrails(ROOT / "guardrails.yaml")
     llm = FakeEstimatorLLM(content="not valid json")  # string, not dict
 
-    with pytest.raises(EstimatorValidationError, match="estimator JSON must be an object"):
-        await estimate_task("Task", config, llm_client=llm, estimator_model="gpt-4o-mini")
+    with pytest.raises(EstimatorValidationError, match="did not call submit_estimate"):
+        await estimate_task("Task", config, job_runner=FakeOrchestratorJobRunner(llm), estimator_model="gpt-4o-mini")
 
 
 def test_eval_estimator_does_not_swallow_strict_calibration_validation_errors(monkeypatch):
@@ -748,99 +658,9 @@ def test_eval_estimator_does_not_swallow_strict_calibration_validation_errors(mo
         )
 
 
-def test_eval_estimator_failure_creates_blocked_task(tmp_path, monkeypatch):
-    """When estimator fails, the task endpoint returns Blocked, not Estimated."""
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM(exc=RuntimeError("provider down"))
-    client = _client_with_llm(tmp_path, llm)
-
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": "Add export endpoint"},
-            headers=_auth_headers(),
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "Estimated"
-    assert "estimator_unavailable" in body.get("metadata", {}).get("blocked_reason", "") or "Estimator unavailable" in body.get("metadata", {}).get("blocked_reason", "")
-
-
 # ---------------------------------------------------------------------------
 # Markdown task intake / decomposition behavior
 # ---------------------------------------------------------------------------
-
-def test_eval_repo_aware_markdown_intake_records_breakdown_review_and_model_usage(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeSequentialLLM([
-        _breakdown_content(
-            "Add DEMO_ROUTE_2099_budget_alarm fixture coverage",
-            "Update DEMO_TEMPLATE_2099_session_report visibility",
-        )
-    ])
-    client = _client_with_llm(tmp_path, llm)
-    with client:
-        response = client.post(
-            "/tasks/estimate-form",
-            data={"description": MARKDOWN_EVAL_FIXTURES["repo_aware"]},
-            headers={**_auth_headers(), "accept": "text/html"},
-            follow_redirects=False,
-        )
-        tasks = db.list_tasks(tmp_path / "harness.db")
-        breakdown_id = response.headers["location"].split("/")[2]
-        breakdown = db.get_task_breakdown(tmp_path / "harness.db", breakdown_id)
-        usage = db.token_usage_breakdown(tmp_path / "harness.db")
-
-    assert response.status_code == 303
-    assert response.headers["location"].startswith("/task-breakdowns/")
-    assert tasks == []
-    assert breakdown["status"] == "proposed"
-    assert breakdown["model"] == "openai/gpt-4.1-mini"
-    assert breakdown["intake_metadata"]["intake_source"] == "markdown_paste"
-    assert [candidate["title"] for candidate in breakdown["candidates"]] == [
-        "Add DEMO_ROUTE_2099_budget_alarm fixture coverage",
-        "Update DEMO_TEMPLATE_2099_session_report visibility",
-    ]
-    assert breakdown["rejected_items"][0]["reason"] == "context metadata, not a task"
-    assert usage["by_category"]["task_breakdown"] == 133
-
-
-def test_eval_bullet_markdown_direct_estimate_does_not_create_deterministic_breakdown_metadata(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM()
-    client = _client_with_llm(tmp_path, llm)
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": MARKDOWN_EVAL_FIXTURES["phased"]},
-            headers=_auth_headers(),
-        )
-
-    task = response.json()
-    assert response.status_code == 200
-    assert task["status"] == "Estimated"
-    assert "task_breakdown" not in task["metadata"]
-    assert "decomposition_source" not in task["metadata"]
-
-
-def test_eval_complex_markdown_failure_has_specific_manual_estimate_reason(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM(content={"complexity": "unknown", "source": "llm"})
-    client = _client_with_llm(tmp_path, llm)
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": MARKDOWN_EVAL_FIXTURES["complex_rejection"]},
-            headers=_auth_headers(),
-        )
-
-    task = response.json()
-    assert response.status_code == 200
-    assert task["status"] == "Estimated"
-    assert task["metadata"]["blocked_reason"] == "Estimator unavailable or invalid; manual estimate required."
-    assert task["metadata"]["estimator_failure_type"] == "EstimatorValidationError"
-    assert task["metadata"]["requires_manual_estimate"] is True
 
 
 class EstimatorMarkdownFakeDataInvariantTests:

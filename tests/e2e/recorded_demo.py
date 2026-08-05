@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import types
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +24,48 @@ DEMO_TASK_ID = "DEMO_999_TASK_001"
 DEMO_SESSION_ID = "session_2099_demo_claude"
 DEMO_ADAPTER_ID = "claude_code"
 DEMO_MODEL = "claude-sonnet-4-6"
+# Seeded explicitly because there is no code default for the Orchestrator Model:
+# a Recorded Demo Run configures it as ordinary scenario state, provider-qualified
+# like any value pi's inventory would offer.
+DEMO_ORCHESTRATOR_MODEL = "anthropic/claude-sonnet-4-6"
 DEMO_SENTINEL = "DEMO streamed progress 2099"
+
+
+def _seed_orchestrator_inventory(database_path) -> None:
+    """Seed pi's discovery evidence the way a real refresh would write it.
+
+    The readiness gate reads this row, so a demo passes it through the production
+    code path rather than through an environment bypass that would weaken it.
+    """
+    from foreman_ai_hq import db
+    from foreman_ai_hq.pi_adapter import (
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        ORCHESTRATOR_STATUS_RECORD_NAME,
+    )
+
+    db.upsert_execution_backend_status(
+        database_path,
+        ORCHESTRATOR_STATUS_RECORD_ID,
+        name=ORCHESTRATOR_STATUS_RECORD_NAME,
+        online=True,
+        details={
+            "model_discovery": {
+                "state": "ready",
+                "models": [DEMO_ORCHESTRATOR_MODEL],
+                "discovered_at": "2099-01-01T00:00:00+00:00",
+                "returncode": 0,
+                "reasons": [],
+            },
+            "verification": {
+                "model": DEMO_ORCHESTRATOR_MODEL,
+                "passed": True,
+                "verified_at": "2099-01-01T00:00:00+00:00",
+                "sentinel_matched": True,
+                "token_recorded": True,
+                "reasons": [],
+            },
+        },
+    )
 DEMO_PORTAL_TOKEN_ENV = "DEMO_999_PORTAL_TOKEN"
 
 
@@ -200,6 +242,7 @@ class RecordedDemo:
     _original_streaming_runner: Any = field(default=None, repr=False)
     _original_apply_outcome: Any = field(default=None, repr=False)
     _original_react_build_dir: Callable[[], Path] | None = field(default=None, repr=False)
+    _original_planning_start: Any = field(default=None, repr=False)
     _project_root: Path = field(init=False)
 
     def __enter__(self) -> "RecordedDemo":
@@ -267,7 +310,9 @@ class RecordedDemo:
             local_runner_enabled=True,
             timezone="UTC",
             operator_config={},
+            orchestrator_model=DEMO_ORCHESTRATOR_MODEL,
         )
+        _seed_orchestrator_inventory(self.database_path)
         app = create_app(settings)
         self._seed_llm_client(app)
 
@@ -330,6 +375,11 @@ class RecordedDemo:
 
             _react_shell.react_build_dir = self._original_react_build_dir
 
+        if self._original_planning_start is not None:
+            import foreman_ai_hq.routes.planning_conversation as planning_conversation
+
+            planning_conversation.PlanningConversationRegistry.start = self._original_planning_start
+
         os.environ.pop(DEMO_PORTAL_TOKEN_ENV, None)
 
         if self._temp_dir is not None:
@@ -337,13 +387,100 @@ class RecordedDemo:
 
     def _seed_llm_client(self, app) -> None:
         """Subclasses may inject a fake LLM client before the server starts."""
+        import foreman_ai_hq.db as db
+        import foreman_ai_hq.pi_adapter as pi_adapter
+        import foreman_ai_hq.routes.planning_conversation as planning_conversation
+        import time
+
+        app.state.orchestrator_job_runner = self._fake_orchestrator
+
+        # Replace the planning-conversation start so the demo never needs a real
+        # pi CLI; only the session id and a no-op conversation handle are used.
+        # The lifespan will create a new PlanningConversationRegistry instance, so
+        # we patch the class method rather than a single instance.
+        self._original_planning_start = planning_conversation.PlanningConversationRegistry.start
+
+        def _fake_start(self, project_id, database_path, model, cwd=None, timeout=60):
+            with self._lock:
+                live = self._live.get(project_id)
+                if live is not None and live.conv.proc.poll() is None and live.model == model:
+                    return live.planning_session_id
+
+            session, _ = db.create_planning_session(
+                database_path,
+                task_description="Demo planning conversation",
+                model=model,
+                tracking_mode="native_usage",
+            )
+            fake_proc = types.SimpleNamespace(poll=lambda: None)
+            fake_conv = types.SimpleNamespace(
+                session=session,
+                proc=fake_proc,
+                prompt=lambda text: ("ok", "end_turn"),
+                cancel=lambda: None,
+                close=lambda: None,
+            )
+            with self._lock:
+                self._live[project_id] = planning_conversation.LiveConversation(
+                    conv=fake_conv,
+                    planning_session_id=session["id"],
+                    model=model,
+                    last_used_at=time.monotonic(),
+                )
+            return session["id"]
+
+        planning_conversation.PlanningConversationRegistry.start = _fake_start
+
+    async def _fake_orchestrator(self, database_path, *, instructions, input_payload, model, persona_filename, extension_filename, submit_tool, usage_kind, task_description, result_validator=None, session_id=None, timeout=None, **kwargs):
+        """Deterministic orchestrator/estimator that lets the chat pane create a Task."""
+        import foreman_ai_hq.db as db
+        import foreman_ai_hq.pi_adapter as pi_adapter
+
+        session = db.create_session(
+            database_path,
+            task_description=task_description,
+            model=model,
+            session_key_hash="x" * 64,
+            guardrail_overrides={},
+            status="running",
+        )
+        session = db.update_session_status(database_path, session["id"], "completed")
+
+        if persona_filename == "intake.md":
+            raw = {"decision": "single_task", "reason": "Demo fixture judged as a single small task."}
+        elif persona_filename == "estimator.md":
+            raw = {
+                "drivers": {"files_to_read": 1, "files_to_modify": 0, "expected_turns": 1, "needs_test_run": False},
+                "shadow_token_estimate": 1500,
+                "complexity": "simple",
+                "confidence": 0.9,
+                "investigation_recommended": False,
+                "rationale": "Demo fixture estimate.",
+                "assumptions": [],
+                "risk_flags": [],
+                "budget_note": "demo",
+                "source": "llm",
+            }
+        else:
+            raw = {}
+
+        validated = result_validator(raw) if result_validator else raw
+        return pi_adapter.PiStructuredJobResult(
+            arguments=raw,
+            validated=validated,
+            session=session,
+            args=[],
+        )
 
     def _seed_data(self) -> None:
         import foreman_ai_hq.db as db
         import foreman_ai_hq.execution_backend as execution_backend
         from foreman_ai_hq.project_context import project_task_metadata
+        from foreman_ai_hq.task_kind import with_task_kind
 
         db.init_db(self.database_path)
+        # After init_db, so the demo's own Orchestrator Model is the one that survives.
+        _seed_orchestrator_inventory(self.database_path)
 
         adapter = db.get_worker_adapter(self.database_path, DEMO_ADAPTER_ID)
         config = dict(adapter.get("config") or {})
@@ -399,10 +536,26 @@ class RecordedDemo:
             status="Estimated",
             estimate_tokens=1_500,
             recommended_model=DEMO_MODEL,
-            metadata={
-                "read_only": True,
-                "synthetic_fixture": True,
-                **project_task_metadata(project),
-            },
+            # Launch mode follows the canonical Task kind; the old `read_only` metadata
+            # flag is ignored, so the demo declares an acceptance-verification Task.
+            metadata=with_task_kind(
+                {
+                    "synthetic_fixture": True,
+                    **project_task_metadata(project),
+                },
+                "acceptance_verification",
+            ),
         )
         self.task_id = task["id"]
+
+    def set_task_kind_acceptance_verification(self, task_id: str) -> None:
+        """Test helper to flip a chat-created task to the read-only kind expected by the demo run."""
+        import foreman_ai_hq.db as db
+        from foreman_ai_hq.task_kind import with_task_kind
+
+        current = db.get_task(self.database_path, task_id)
+        db.update_task(
+            self.database_path,
+            task_id,
+            {"metadata": with_task_kind(current.get("metadata", {}), "acceptance_verification")},
+        )

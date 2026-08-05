@@ -57,10 +57,32 @@ def apply_governance(
 
 
 def _rewrite_system_prompt(messages: list[dict[str, Any]], zone_prompt: str) -> list[dict[str, Any]]:
-    replacement = {"role": "system", "content": zone_prompt}
+    # Preserve the caller's system prompt as the base and append zone guidance.
+    # This keeps orchestrator personas, JSON instructions, and Worker base prompts
+    # intact while still enforcing the budget zone message.
     if messages and messages[0].get("role") == "system":
-        return [replacement, *messages[1:]]
-    return [replacement, *messages]
+        base = messages[0]
+        rest = messages[1:]
+        composed = _compose_system_content(base, zone_prompt)
+    else:
+        base = None
+        rest = messages
+        composed = zone_prompt
+    return [{"role": "system", "content": composed}, *rest]
+
+
+def _compose_system_content(system_message: dict[str, Any], zone_prompt: str) -> str | list[dict[str, Any]]:
+    content = system_message.get("content", "")
+    if isinstance(content, str):
+        if not content:
+            return zone_prompt
+        return f"{content}\n\n{zone_prompt}"
+    # Multimodal/array system messages: append the zone guidance as a new text
+    # item, leaving the caller's existing items untouched.
+    if isinstance(content, list):
+        return [*content, {"type": "text", "text": zone_prompt}]
+    # Unknown content shape: fall back to string concatenation.
+    return f"{content}\n\n{zone_prompt}"
 
 
 def _clamp_max_tokens(requested_max_tokens: int | None, zone_max_tokens: int) -> int:

@@ -1,7 +1,7 @@
 # ADR-0006: Planning Chat models spec-kit's specify/clarify front stages
 
 **Date**: 2026-07-21
-**Status**: proposed
+**Status**: superseded by [ADR-0011](0011-chat-is-the-front-door-and-scout-retires.md)
 
 ## Context
 

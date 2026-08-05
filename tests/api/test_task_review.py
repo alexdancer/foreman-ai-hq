@@ -10,6 +10,7 @@ from foreman_ai_hq.app import create_app
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_launch import refresh_task_from_session
+from tests.fake_orchestrator import FakeOrchestratorJobRunner
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,11 +170,11 @@ def _client_with_llm(tmp_path, llm):
     settings = Settings(
         database_path=tmp_path / "harness.db",
         guardrails_path=ROOT / "guardrails.yaml",
-        estimator_model="openai/gpt-4.1-mini",
     )
     app = create_app(settings)
     db.init_db(settings.database_path)
     app.state.llm_client = llm
+    app.state.orchestrator_job_runner = FakeOrchestratorJobRunner(llm)
     project_root = tmp_path / "connected-project"
     project_root.mkdir(exist_ok=True)
     db.upsert_connected_project(
@@ -517,10 +518,14 @@ def test_review_action_agent_review_uses_control_plane_and_stays_in_review(tmp_p
     assert board_task["session_href"] == f"/sessions/{session['id']}"
 
 
-def test_review_action_agent_review_parses_fenced_json_without_raw_board_dump(tmp_path, monkeypatch):
+def test_review_action_agent_review_records_review_payload_without_raw_board_dump(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     llm = FakeEstimatorLLM(
-        content='''Here is the review:\n```json\n{"summary":"DEMO fenced review 2099 is clean.","recommendation":"approve","findings":[{"severity":"low","message":"DEMO fenced finding 2099.","path":"README.md","line":7}]}\n```''',
+        content={
+            "summary": "DEMO fenced review 2099 is clean.",
+            "recommendation": "approve",
+            "findings": [{"severity": "low", "message": "DEMO fenced finding 2099.", "path": "README.md", "line": 7}],
+        },
         usage={"prompt_tokens": 20, "completion_tokens": 7, "total_tokens": 27},
     )
     database_path = tmp_path / "harness.db"
@@ -563,15 +568,14 @@ def test_review_action_agent_review_parses_fenced_json_without_raw_board_dump(tm
 def test_review_action_agent_review_normalizes_markdown_to_plain_text(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     llm = FakeEstimatorLLM(
-        content="""# Agent Review
-## Summary
-- **DEMO_2099 worker verification is incomplete** because `pip install` was skipped.
-## Findings
-- **High:** `README.md` still references the wrong DEMO_2099 path.
-- Low - **Minor wording** still reads like markdown.
-## Recommendation
-- needs changes
-""",
+        content={
+            "summary": "**DEMO_2099 worker verification is incomplete** because `pip install` was skipped.",
+            "recommendation": "needs changes",
+            "findings": [
+                {"severity": "high", "message": "**High:** `README.md` still references the wrong DEMO_2099 path."},
+                {"severity": "low", "message": "Low - **Minor wording** still reads like markdown."},
+            ],
+        },
         usage={"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28},
     )
     database_path = tmp_path / "harness.db"

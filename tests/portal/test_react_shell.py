@@ -6,8 +6,13 @@ from pathlib import Path
 import pytest
 
 from foreman_ai_hq import db
+from foreman_ai_hq.pi_adapter import (
+    OrchestratorModelDiscoveryResult,
+    OrchestratorVerificationResult,
+)
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import portal, react_shell
+from tests.conftest import TEST_ORCHESTRATOR_MODEL
 from tests.portal.helpers import (
     PORTAL_TOKEN,
     _client,
@@ -1103,7 +1108,8 @@ def test_react_workspace_state_uses_exact_contract_and_route_ownership(tmp_path,
     assert set(payload["project"]["capability"]) == {"state", "label", "reasons"}
     assert set(payload["project"]["profile"]) == {
         "git_branch", "language_hints", "framework_hints", "package_manager_hints",
-        "test_command", "run_command", "relevant_docs",
+        "test_command", "test_command_suggested", "test_command_confirmed",
+        "run_command", "relevant_docs",
     }
     assert set(payload["summary"]) == {
         "counts", "total_tasks", "launch_ready", "capability_state", "attention_actions",
@@ -1262,6 +1268,8 @@ def test_react_workspace_projection_uses_typed_defaults_for_malformed_values():
             "framework_hints": [],
             "package_manager_hints": [],
             "test_command": None,
+            "test_command_suggested": None,
+            "test_command_confirmed": False,
             "run_command": None,
             "relevant_docs": [],
         },
@@ -1314,6 +1322,8 @@ def test_react_workspace_endpoint_tolerates_malformed_stored_profile(tmp_path, m
         "framework_hints": [],
         "package_manager_hints": [],
         "test_command": None,
+        "test_command_suggested": None,
+        "test_command_confirmed": False,
         "run_command": None,
         "relevant_docs": [],
     }
@@ -1426,7 +1436,6 @@ def test_react_restore_html_caller_gets_303_to_workspace(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("path", "data"),
     [
-        ("/projects/missing-DEMO-999/tasks/estimate-form", {"description": "DEMO task 999"}),
         ("/tasks/missing-DEMO-999/launch", {}),
         ("/tasks/missing-DEMO-999/refresh", {}),
         ("/tasks/missing-DEMO-999/review", {"action": "save_prompt"}),
@@ -1533,7 +1542,6 @@ def test_react_board_state_and_frontend_use_estimate_token_field(tmp_path, monke
     assert "Accept: \"application/json\"" in board_source
     assert "status.reload_required" in board_source
     for action_path in (
-        "/tasks/estimate-form",
         "/run-next",
         "/queue/start",
         "/queue/stop",
@@ -1544,6 +1552,11 @@ def test_react_board_state_and_frontend_use_estimate_token_field(tmp_path, monke
         "/tasks/${task.id}/review",
     ):
         assert action_path in board_source
+    for chat_path in (
+        "PlanningChat",
+        "onTurnComplete",
+    ):
+        assert chat_path in board_source
     for form_field in (
         'form.set("project_id"',
         'form.set("adapter_id"',
@@ -1752,12 +1765,15 @@ def test_react_board_projection_uses_exact_nested_allowlists_and_safe_evidence()
     }
     assert set(card) == {
         "id", "status", "summary", "task_kind", "estimate_tokens", "actual_tokens",
-        "recommended_model", "launch_model", "session_href", "blocked_condition",
-        "launch_failure", "review_prompt", "timeline", "controls",
+        "recommended_model", "launch_model", "session_href", "task_branch",
+        "harness_commit", "pull_request", "blocked_condition", "launch_failure",
+        "review_prompt", "timeline", "controls",
+        "intake_decision", "intake_decision_reason",
     }
     assert set(card["controls"]) == {
         "can_launch", "can_refresh", "can_save_review_prompt", "can_agent_review",
-        "can_mark_done", "can_block", "can_archive", "can_dismiss",
+        "can_mark_done", "can_block", "can_approve_commit", "can_open_pr",
+        "pr_unavailable_reason", "can_archive", "can_dismiss",
         "requires_manual_estimate",
         "budget_override_available", "native_usage_override_ack_required",
         "native_usage_override_ack_text", "setup_href",
@@ -1819,6 +1835,9 @@ def test_react_task_projection_has_stable_null_and_empty_defaults():
     assert card["recommended_model"] is None
     assert card["launch_model"] is None
     assert card["session_href"] is None
+    assert card["task_branch"] is None
+    assert card["harness_commit"] is None
+    assert card["pull_request"] is None
     assert card["blocked_condition"] is None
     assert card["review_prompt"] == {"text": "", "truncated": False}
     assert card["timeline"] == []
@@ -2590,99 +2609,51 @@ def test_react_control_plane_settings_json_uses_exact_contract_and_key_value_nev
 ):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     monkeypatch.setenv("TEST_CONTROL_PLANE_KEY", "sk_secret_value_999")
-    with _client_with_control_plane_llm(tmp_path, FakeControlPlaneLLM()) as client:
+    with _client(tmp_path) as client:
         response = client.get("/api/settings/control-plane", headers=_portal_headers())
     assert response.status_code == 200
     payload = response.json()
+    # The credential trio and the curated list are gone; pi's inventory replaces them.
     assert set(payload) == {
-        "provider",
         "model",
-        "base_url",
-        "api_key_env",
-        "api_key_present",
-        "estimator_model",
-        "task_breakdown_model",
-        "legacy_api_key_configured",
+        "configured",
+        "inventory",
+        "verification",
+        "diverging_jobs",
         "shadowed_settings",
-        "curated_models",
         "connection_status",
     }
-    assert payload["provider"] == "anthropic"
-    assert payload["model"] == "claude-sonnet-4-6"
-    assert payload["base_url"] is None
-    assert payload["api_key_env"] == "TEST_CONTROL_PLANE_KEY"
-    assert payload["api_key_present"] is True
-    assert payload["estimator_model"] == "claude-sonnet-4-6"
-    assert payload["task_breakdown_model"] == "claude-sonnet-4-6"
-    assert payload["legacy_api_key_configured"] is False
+    assert payload["configured"] is True
+    assert payload["inventory"]["models"] == [TEST_ORCHESTRATOR_MODEL]
+    assert payload["inventory"]["needs_authentication"] is False
+    assert payload["verification"]["passed"] is False
     assert isinstance(payload["shadowed_settings"], dict)
-    assert payload["curated_models"] == [
-        {"provider": provider, "model": model, "label": label}
-        for provider, model, label in portal.CURATED_CONTROL_PLANE_MODELS
-    ]
     assert "sk_secret_value_999" not in str(payload)
     assert "sk_secret_value_999" not in response.text
-    assert payload["connection_status"]["state"] == "offline"
-    assert payload["connection_status"]["checked_at"] is None
-    assert payload["connection_status"]["details"] is None
 
 
 def test_react_control_plane_connection_status_mapping(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeControlPlaneLLM()
-    with _client_with_control_plane_llm(tmp_path, llm) as client:
+    monkeypatch.setattr(
+        portal,
+        "discover_orchestrator_models",
+        lambda _p: OrchestratorModelDiscoveryResult(
+            state="ready", models=[TEST_ORCHESTRATOR_MODEL], reasons=[], evidence={}
+        ),
+    )
+    with _client(tmp_path) as client:
         save = client.post(
             "/settings/control-plane",
             headers={**_portal_headers(), "Accept": "application/json"},
-            json={
-                "control_plane_provider": "anthropic",
-                "control_plane_model": "claude-sonnet-4-6",
-                "control_plane_base_url": "",
-                "control_plane_api_key_env": "TEST_CONTROL_PLANE_KEY",
-                "apply_to_estimator_breakdown": True,
-            },
+            json={"control_plane_model": TEST_ORCHESTRATOR_MODEL},
         )
-        assert save.status_code == 200
-        save_payload = save.json()
-        assert save_payload["ok"] is True
-        assert save_payload["status"]["state"] == "needs_test"
-
-        # save_control_plane_settings replaces llm_client with a real LLMClient;
-        # restore the fake so the test posts use the mock, not the network.
-        client.app.state.llm_client = llm
+        assert save.status_code == 200, save.text
+        # A save is never trusted until a real metered turn proves it.
+        assert save.json()["status"]["state"] == "needs_verification"
 
         read = client.get("/api/settings/control-plane", headers=_portal_headers())
-        assert read.json()["connection_status"]["state"] == "needs_test"
-
-        passed = client.post(
-            "/settings/control-plane/test",
-            headers={**_portal_headers(), "Accept": "application/json"},
-            json={},
-        )
-        assert passed.status_code == 200
-        passed_payload = passed.json()
-        assert passed_payload["passed"] is True
-        assert passed_payload["status"]["state"] == "online"
-
-        read2 = client.get("/api/settings/control-plane", headers=_portal_headers())
-        assert read2.json()["connection_status"]["state"] == "online"
-
-        llm.exc = RuntimeError("secret sk_bad_key")
-        failed = client.post(
-            "/settings/control-plane/test",
-            headers={**_portal_headers(), "Accept": "application/json"},
-            json={},
-        )
-        assert failed.status_code == 503
-        failed_payload = failed.json()
-        assert failed_payload["passed"] is False
-        assert failed_payload["status"]["state"] == "offline"
-
-        read3 = client.get("/api/settings/control-plane", headers=_portal_headers())
-        read3_payload = read3.json()
-        assert read3_payload["connection_status"]["state"] == "offline"
-        assert "sk_bad_key" not in read3.text
+    assert read.json()["connection_status"]["state"] == "needs_verification"
 
 
 def test_react_control_plane_save_json_outcome_key_free_and_persistence(
@@ -2691,30 +2662,30 @@ def test_react_control_plane_save_json_outcome_key_free_and_persistence(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     monkeypatch.setenv("TEST_CONTROL_PLANE_KEY", "sk_real_key_999")
-    with _client_with_control_plane_llm(tmp_path, FakeControlPlaneLLM()) as client:
+    monkeypatch.setattr(
+        portal,
+        "discover_orchestrator_models",
+        lambda _p: OrchestratorModelDiscoveryResult(
+            state="ready", models=["openai-codex/gpt-5.4"], reasons=[], evidence={}
+        ),
+    )
+    with _client(tmp_path) as client:
         response = client.post(
             "/settings/control-plane",
             headers={**_portal_headers(), "Accept": "application/json"},
-            json={
-                "control_plane_provider": "openai",
-                "control_plane_model": "gpt-5.5",
-                "control_plane_base_url": "",
-                "control_plane_api_key_env": "TEST_CONTROL_PLANE_KEY",
-                "control_plane_api_key": "sk_new_key_999",
-                "apply_to_estimator_breakdown": True,
-            },
+            json={"control_plane_model": "openai-codex/gpt-5.4"},
         )
     assert response.status_code == 200
     payload = response.json()
-    assert set(payload) == {"ok", "error", "settings", "status", "shadowed_settings"}
+    assert set(payload) == {"ok", "error", "settings", "status", "shadowed_settings", "diverging_jobs"}
     assert payload["ok"] is True
     assert payload["error"] is None
-    assert payload["settings"]["control_plane_model"] == "gpt-5.5"
-    assert payload["status"]["state"] == "needs_test"
-    assert payload["shadowed_settings"] == {}
-    assert "sk_new_key_999" not in str(payload)
+    assert payload["settings"]["orchestrator_model"] == "openai-codex/gpt-5.4"
+    assert payload["status"]["state"] == "needs_verification"
+    # The env override is exported here, so the save reports itself as shadowed by it
+    # rather than silently disagreeing with the environment.
+    assert payload["shadowed_settings"] == {"orchestrator_model": "FOREMAN_AI_HQ_ORCHESTRATOR_MODEL"}
     assert "sk_real_key_999" not in str(payload)
-    assert os.getenv("TEST_CONTROL_PLANE_KEY") == "sk_new_key_999"
 
 
 def test_react_control_plane_save_error_sanitized(tmp_path, monkeypatch):
@@ -2725,20 +2696,22 @@ def test_react_control_plane_save_error_sanitized(tmp_path, monkeypatch):
         raise OSError("disk full at /secret/path")
 
     monkeypatch.setattr(portal, "update_operator_config", fail_write)
-    with _client_with_control_plane_llm(tmp_path, FakeControlPlaneLLM()) as client:
+    monkeypatch.setattr(
+        portal,
+        "discover_orchestrator_models",
+        lambda _p: OrchestratorModelDiscoveryResult(
+            state="ready", models=[TEST_ORCHESTRATOR_MODEL], reasons=[], evidence={}
+        ),
+    )
+    with _client(tmp_path) as client:
         response = client.post(
             "/settings/control-plane",
             headers={**_portal_headers(), "Accept": "application/json"},
-            json={
-                "control_plane_provider": "anthropic",
-                "control_plane_model": "claude-sonnet-4-6",
-                "control_plane_base_url": "",
-                "control_plane_api_key_env": "TEST_CONTROL_PLANE_KEY",
-            },
+            json={"control_plane_model": TEST_ORCHESTRATOR_MODEL},
         )
     assert response.status_code == 500
     payload = response.json()
-    assert set(payload) == {"ok", "error", "settings", "status", "shadowed_settings"}
+    assert set(payload) == {"ok", "error", "settings", "status", "shadowed_settings", "diverging_jobs"}
     assert payload["ok"] is False
     assert payload["error"]
     assert "secret" not in payload["error"]
@@ -2749,29 +2722,36 @@ def test_react_control_plane_save_error_sanitized(tmp_path, monkeypatch):
 def test_react_control_plane_save_html_redirect_preserved(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    monkeypatch.setattr(
+        portal,
+        "discover_orchestrator_models",
+        lambda _p: OrchestratorModelDiscoveryResult(
+            state="ready", models=[TEST_ORCHESTRATOR_MODEL], reasons=[], evidence={}
+        ),
+    )
     with _client(tmp_path) as client:
         response = client.post(
             "/settings/control-plane",
             headers={**_portal_headers(), "Accept": "text/html"},
-            data={
-                "control_plane_provider": "openai",
-                "control_plane_model": "gpt-5.5",
-                "control_plane_base_url": "",
-                "control_plane_api_key_env": "OPENAI_API_KEY",
-                "apply_to_estimator_breakdown": "on",
-            },
+            data={"control_plane_model": TEST_ORCHESTRATOR_MODEL},
             follow_redirects=False,
         )
     assert response.status_code == 303
     assert response.headers["location"] == "/settings/control-plane"
 
 
-def test_react_control_plane_test_html_redirect_preserved(tmp_path, monkeypatch):
+def test_react_control_plane_verify_html_redirect_preserved(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeControlPlaneLLM()
-    with _client_with_control_plane_llm(tmp_path, llm) as client:
+    monkeypatch.setattr(
+        portal,
+        "verify_orchestrator_model",
+        lambda _p, model, **kw: OrchestratorVerificationResult(
+            passed=True, model=model, session_id="sess_x", reasons=[], evidence={}
+        ),
+    )
+    with _client(tmp_path) as client:
         response = client.post(
-            "/settings/control-plane/test",
+            "/settings/control-plane/verify",
             headers={**_portal_headers(), "Accept": "text/html"},
             follow_redirects=False,
         )
@@ -2791,24 +2771,20 @@ def test_canonical_settings_control_plane_route_serves_react_when_built(
     assert 'id="root"' in response.text
 
 
-def test_react_control_plane_curated_list_single_source(tmp_path, monkeypatch):
-    """The curated list has one authoritative source.
+def test_react_control_plane_offers_no_harness_authored_model_list(tmp_path, monkeypatch):
+    """Every offered choice originates from pi's inventory.
 
-    This used to compare the JSON read against the Jinja page's rendered
-    dropdown. That page is retired, so the assertion moves onto the source of
-    truth itself: the handoff must project CURATED_CONTROL_PLANE_MODELS exactly,
-    with no independent copy.
+    This used to assert the handoff projected CURATED_CONTROL_PLANE_MODELS exactly.
+    That list is deleted: a harness-authored catalogue is precisely what let a model
+    be offered that pi could not run.
     """
 
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    assert not hasattr(portal, "CURATED_CONTROL_PLANE_MODELS")
     with _client(tmp_path) as client:
-        json_response = client.get("/api/settings/control-plane", headers=_portal_headers())
-    assert json_response.status_code == 200
-    payload = json_response.json()
-    assert payload["curated_models"] == [
-        {"provider": provider, "model": model, "label": label}
-        for provider, model, label in portal.CURATED_CONTROL_PLANE_MODELS
-    ]
+        payload = client.get("/api/settings/control-plane", headers=_portal_headers()).json()
+    assert "curated_models" not in payload
+    assert payload["inventory"]["models"] == [TEST_ORCHESTRATOR_MODEL]
 
 
 def test_react_control_plane_settings_source_contract():
@@ -2817,7 +2793,6 @@ def test_react_control_plane_settings_source_contract():
     routes_source = Path("frontend/src/routes.js").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/components/Shell.jsx").read_text(encoding="utf-8")
     source = Path("frontend/src/views/ControlPlaneSettings.jsx").read_text(encoding="utf-8")
-    api_source = Path("frontend/src/api.js").read_text(encoding="utf-8")
 
     assert 'view: "controlPlaneSettings"' in routes_source
     assert "<ControlPlaneSettings />" in app_source
@@ -2825,27 +2800,14 @@ def test_react_control_plane_settings_source_contract():
     assert 'to="/settings/control-plane"' in shell_source
     assert 'useResource("/api/settings/control-plane"' in source
     assert 'postJSON("/settings/control-plane"' in source
-    assert 'postJSON("/settings/control-plane/test"' in source
-    for field in (
-        "provider",
-        "model",
-        "base_url",
-        "api_key_env",
-        "api_key_present",
-        "estimator_model",
-        "task_breakdown_model",
-        "legacy_api_key_configured",
-        "shadowed_settings",
-        "curated_models",
-        "connection_status",
-    ):
-        assert field in source, f"{field} missing from ControlPlaneSettings.jsx"
-    assert "aria-live" in source
-    assert "htmlFor" in source
-    assert "Save before testing" in source
-    assert "Test control-plane connection" in source
-    assert "disabled={busy || isDirty}" in source
-    assert 'Accept: "application/json"' in api_source
+    assert 'postJSON("/settings/control-plane/discover"' in source
+    assert 'postJSON("/settings/control-plane/verify"' in source
+    # The retired connection test must not survive anywhere in the view.
+    assert "/settings/control-plane/test" not in source
+    for field in ("inventory", "verification", "diverging_jobs", "configured", "connection_status"):
+        assert field in source
+    for retired in ("api_key", "base_url", "curated_models", "control_plane_provider"):
+        assert retired not in source
 
 
 def _seeded_adapter(database_path, adapter_id):
@@ -3370,7 +3332,7 @@ def test_react_project_settings_archive_html_redirects_preserved(tmp_path, monke
     assert blocked.headers["location"].startswith("/settings/project?error=")
 
 
-def test_react_project_settings_connect_restore_proof_json_shapes_unchanged(tmp_path, monkeypatch):
+def test_react_project_settings_connect_restore_json_shapes_unchanged(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     database_path = tmp_path / "harness.db"
     headers = {**_portal_headers(), "Accept": "application/json", "Content-Type": "application/json"}
@@ -3397,14 +3359,11 @@ def test_react_project_settings_connect_restore_proof_json_shapes_unchanged(tmp_
         assert restored_payload["ok"] is True
         assert restored_payload["project"] == {"id": project["id"], "archived": False}
 
-        proof = client.post(
+        retired_proof = client.post(
             f"/settings/project/{project['id']}/read-only-proof",
             headers=headers,
         )
-        assert proof.status_code == 409
-        proof_payload = proof.json()
-        assert "detail" in proof_payload
-        assert "capability" in proof_payload
+        assert retired_proof.status_code == 404
 
 
 def test_react_project_settings_is_build_aware(tmp_path, monkeypatch):
@@ -3450,7 +3409,7 @@ def test_react_project_settings_source_contract():
     assert 'postJSON("/settings/project/connect"' in source
     assert 'postJSON(`/projects/${' in source
     assert 'postJSON(`/projects/${' in source
-    assert 'read-only-proof' in source
+    assert 'read-only-proof' not in source
     for field in (
         "local_runner_enabled",
         "backend_status",
@@ -3650,3 +3609,47 @@ def test_react_setup_source_contract():
     assert "active_adapter" in source
     assert "setup" in app_source
     assert 'Accept: "application/json"' in api_source
+
+
+def test_chat_front_door_has_no_legacy_intake_form_and_pane_state_matches_surface():
+    """9.6: The board no longer exposes a short-task intake form. The Planning
+    Chat pane is expanded by default on the Pipeline and collapsed by default
+    on the Execution Floor."""
+    board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
+    assert "board-intake" not in board_source
+    assert "estimate-form" not in board_source
+    assert '"/tasks/estimate-form"' not in board_source
+    assert "PlanningChat" in board_source
+    assert "function PipelineSurface(" in board_source
+    assert "function FloorSurface(" in board_source
+    assert "function PlanningPane(" in board_source
+    assert "defaultExpanded" in board_source
+    assert "aria-expanded={expanded}" in board_source
+    assert "is-collapsed" in board_source
+    app_source = Path("frontend/src/App.jsx").read_text(encoding="utf-8")
+    assert 'route.view === "planningChat"' in app_source
+    assert 'surface="pipeline"' in app_source
+
+
+def test_floor_evidence_drawer_retains_fixed_width_beside_collapsed_pane():
+    """4.5: The Evidence Drawer is a fixed overlay so its width is unaffected by
+    the Floor planning rail. Its width is expressed in viewport units, not a
+    percentage of the board layout."""
+    css_source = Path("frontend/src/tokens.css").read_text(encoding="utf-8")
+    assert ".evidence-drawer {" in css_source
+    assert "position: fixed" in css_source
+    assert "width: min(760px, 92vw)" in css_source
+    board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
+    # EvidenceDrawer is a top-level sibling, not nested inside the floor layout.
+    assert "<EvidenceDrawer" in board_source
+    assert "<EvidenceDrawer" in board_source.split("function FloorSurface")[0]
+
+
+def test_completed_turn_reloads_board_without_starting_background_polling():
+    """9.7: A planning turn completion calls the same load() used on mount, and
+    the live-refresh effect returns early when the backend reports it disabled."""
+    board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
+    assert "onTurnComplete={load}" in board_source
+    assert "onTurnComplete={onTurnComplete}" in board_source
+    assert "if (!state.data?.automation?.live_refresh_enabled) return undefined;" in board_source
+    assert "window.setInterval" in board_source

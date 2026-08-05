@@ -109,9 +109,10 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 )
                 page.locator("h1.page-title").wait_for(timeout=30000)
 
-                task_kind = page.locator('select[name="task_kind"]')
-                expect(task_kind).to_be_visible()
-                select_layout = task_kind.evaluate(
+                # Drive intake through the sole public task-creation surface.
+                intake = page.get_by_placeholder("Describe the task or goal…")
+                expect(intake).to_be_visible()
+                input_layout = intake.evaluate(
                     """element => {
                         const control = element.getBoundingClientRect();
                         const track = element.parentElement.getBoundingClientRect();
@@ -126,14 +127,14 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                         };
                     }"""
                 )
-                assert select_layout["controlLeft"] >= select_layout["trackLeft"] - 0.5
-                assert select_layout["controlRight"] <= select_layout["trackRight"] + 0.5
-                assert select_layout["minWidth"] == "0px"
-                assert select_layout["maxWidth"] == "100%"
+                assert input_layout["controlLeft"] >= input_layout["trackLeft"] - 0.5
+                assert input_layout["controlRight"] <= input_layout["trackRight"] + 0.5
+                assert input_layout["minWidth"] == "0px"
+                assert input_layout["maxWidth"] == "100%"
 
-                task_kind.focus()
-                assert task_kind.evaluate("element => element.matches(':focus-visible')")
-                focus_style = task_kind.evaluate(
+                intake.focus()
+                assert intake.evaluate("element => element.matches(':focus-visible')")
+                focus_style = intake.evaluate(
                     """element => {
                         const style = getComputedStyle(element);
                         return {
@@ -150,7 +151,24 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 }
                 assert page.locator(".panel .panel").count() == 0
 
-                card = page.locator("article.task").filter(has_text=demo.task_id)
+                intake.fill(
+                    "DEMO 999 read-only md link check fixture"
+                )
+                with page.expect_response(
+                    lambda response: "/planning/intake" in response.url and response.status == 200
+                ) as response_info:
+                    page.get_by_role("button", name="Create governed work").click()
+                outcome = response_info.value.json()["outcome"]
+                task_id = outcome["task_id"]
+                assert task_id
+
+                # The chat creates an implementation task by default; flip it to the
+                # read-only demo kind without another full run through the UI.
+                demo.set_task_kind_acceptance_verification(task_id)
+
+                # Wait for the new card to appear after the board refreshes.
+                card = page.locator("article.task").filter(has_text=task_id)
+                card.wait_for(timeout=30000)
                 card.locator("button:has-text('Launch')").click()
 
                 assert demo.entered.wait(timeout=15), "runner did not reach gate"
@@ -172,7 +190,7 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
 
                 running_card = page.locator(
                     "section.floor-section:has(h3:has-text('Active Worker Runs')) article.task"
-                ).filter(has_text=demo.task_id)
+                ).filter(has_text=task_id)
                 running_card.wait_for(timeout=30000)
 
                 page.emulate_media(reduced_motion="reduce")
@@ -191,7 +209,7 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 # the columns, so no disclosure has to be opened to see it.
                 dock = page.locator("section.live-run-dock")
                 dock.wait_for(timeout=30000)
-                expect(dock).to_contain_text(demo.task_id)
+                expect(dock).to_contain_text(task_id)
 
                 dock.get_by_text(DEMO_SENTINEL).wait_for(timeout=15000)
 
@@ -223,7 +241,7 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 )
                 page.locator("h1.page-title").wait_for(timeout=30000)
 
-                card = page.locator("article.task").filter(has_text=demo.task_id)
+                card = page.locator("article.task").filter(has_text=task_id)
                 page.get_by_text("Actual 15").wait_for(timeout=30000)
 
                 # Open the shared Evidence Drawer, then follow its full-report permalink.
@@ -245,14 +263,14 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                     f"{demo.base_url}/projects/{demo.project_id}/floor",
                     wait_until="networkidle",
                 )
-                card = page.locator("article.task").filter(has_text=demo.task_id)
+                card = page.locator("article.task").filter(has_text=task_id)
                 card.locator("button:has-text('View evidence')").click()
                 drawer = page.locator("aside.evidence-drawer")
                 drawer.locator("button:has-text('Mark Done')").click()
                 drawer.locator("button:has-text('Close')").click()
 
                 page.locator("div.floor-finished-trail article.task").filter(
-                    has_text=demo.task_id
+                    has_text=task_id
                 ).wait_for(timeout=15000)
 
                 context.tracing.stop()

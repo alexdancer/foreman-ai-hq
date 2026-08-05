@@ -1,9 +1,15 @@
 import json
+import time
+from pathlib import Path
 
 import pytest
 
 from foreman_ai_hq import db
+from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.routes import react_shell
+from foreman_ai_hq.task_kind import with_task_kind
+from foreman_ai_hq.task_launch import launch_task
+from tests.conftest import git_project_profile
 from tests.portal.helpers import PORTAL_TOKEN, _client, _portal_headers, _project_metadata
 
 
@@ -548,3 +554,134 @@ def test_session_report_missing_session_returns_404(tmp_path, monkeypatch):
         response = client.get("/sessions/missing", headers=_portal_headers())
 
     assert response.status_code == 404
+
+
+def _make_runner(database_path: Path):
+    def runner(plan):
+        db.record_token_turn(
+            database_path,
+            session_id=plan.metadata["session_id"],
+            usage_kind="task_execution",
+            model="opencode/gpt-5.1",
+            prompt_tokens=10,
+            completion_tokens=5,
+            cost=0,
+            raw_usage={"total_tokens": 15},
+        )
+        return {"returncode": 0, "stdout": "done", "stderr": ""}
+
+    return runner
+
+
+def _wait_for_worker_run_status(database_path: Path, task_id: str, status: str):
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        runs = db.list_worker_runs(database_path, task_id=task_id)
+        if runs and runs[-1]["status"] == status:
+            return runs[-1]
+        time.sleep(0.01)
+    raise AssertionError(f"worker run did not reach status {status}")
+
+
+def _launchable_read_only_task(database_path: Path, project_root: Path):
+    profile = git_project_profile(project_root)
+    project = db.upsert_connected_project(
+        database_path,
+        name="Session Checkpoint Project",
+        root_path=str(project_root.resolve()),
+        profile=profile,
+        capability={"state": "launch_ready", "can_launch": True},
+    )
+    db.update_worker_adapter(
+        database_path,
+        "opencode",
+        workdir=str(project_root),
+        config={"launch_template": ["python", "-c", "print('worker')"]},
+        supported_models=["opencode/gpt-5.1"],
+        is_default=True,
+    )
+    db.mark_worker_adapter_verification(database_path, "opencode", verified=True, evidence={"ok": True})
+    return db.create_task(
+        database_path,
+        description="Session checkpoint test",
+        status="Ready",
+        estimate_tokens=1000,
+        recommended_model="opencode/gpt-5.1",
+        metadata=with_task_kind({**project_task_metadata(project)}, "acceptance_verification"),
+    )
+
+
+def test_manual_checkpoint_evaluate_replaces_results_after_guardrail_change(tmp_path, monkeypatch):
+    """2.3 The manual endpoint re-evaluates and overwrites results after guardrail config changes."""
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    project_root = tmp_path / "checkpoint-project"
+    with _client(tmp_path) as client:
+        database_path = client.app.state.settings.database_path
+        task = _launchable_read_only_task(database_path, project_root)
+        launch_task(
+            database_path,
+            task["id"],
+            adapter_id="opencode",
+            model=None,
+            proxy_url=None,
+            runner=_make_runner(database_path),
+            guardrail_config=client.app.state.guardrails,
+        )
+        worker_run = _wait_for_worker_run_status(database_path, task["id"], "completed")
+        session_id = worker_run["session_id"]
+
+        first = client.post(f"/session/{session_id}/checkpoint/evaluate", headers=_portal_headers()).json()
+        assert first["checkpoint_results"]
+        first_budget = next(result for result in first["checkpoint_results"] if result["name"] == "budget_health")
+        assert first_budget["passed"] is True
+
+        # Re-evaluate with a much lower session cap so the same token spend fails budget health.
+        from dataclasses import replace
+
+        strict_config = replace(
+            client.app.state.guardrails,
+            session_cap=replace(client.app.state.guardrails.session_cap, tokens=10),
+        )
+        client.app.state.guardrails = strict_config
+
+        second = client.post(f"/session/{session_id}/checkpoint/evaluate", headers=_portal_headers()).json()
+        assert second["session_id"] == session_id
+        second_budget = next(result for result in second["checkpoint_results"] if result["name"] == "budget_health")
+        assert second_budget["passed"] is False
+        assert second_budget["details"]["session_cap_tokens"] == 10
+
+        artifact = db.build_session_artifact(database_path, session_id)
+        budget_results = [result for result in artifact["checkpoint_results"] if result["name"] == "budget_health"]
+        assert len(budget_results) == 1
+
+
+def test_session_report_renders_checkpoints_for_ordinary_completed_run(tmp_path, monkeypatch):
+    """2.4 The Session Report Checkpoints section renders for an ordinary completed run."""
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    project_root = tmp_path / "checkpoint-project"
+    with _client(tmp_path) as client:
+        database_path = client.app.state.settings.database_path
+        task = _launchable_read_only_task(database_path, project_root)
+        launch_task(
+            database_path,
+            task["id"],
+            adapter_id="opencode",
+            model=None,
+            proxy_url=None,
+            runner=_make_runner(database_path),
+            guardrail_config=client.app.state.guardrails,
+        )
+        worker_run = _wait_for_worker_run_status(database_path, task["id"], "completed")
+        session_id = worker_run["session_id"]
+
+        response = client.get(f"/api/sessions/{session_id}/report", headers=_portal_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["checkpoints"]["items"]
+    assert {item["name"] for item in payload["checkpoints"]["items"]} == {
+        "budget_health",
+        "stuck_loop_score",
+        "tool_diversity",
+        "timeout_respect",
+    }

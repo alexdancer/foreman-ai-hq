@@ -20,7 +20,8 @@ router = APIRouter()
 @router.post("/v1/chat/completions")
 async def chat_completions(payload: dict[str, Any], request: Request):
     session = _session_from_auth(request)
-    database_path = request.app.state.settings.database_path
+    settings = request.app.state.settings
+    database_path = settings.database_path
     config = request.app.state.guardrails
     budget = session.get("guardrail_overrides", {}).get("budget", {})
 
@@ -104,6 +105,7 @@ def _persist_turn(
     db.record_token_turn(
         database_path,
         session_id=session["id"],
+        usage_kind=db.read_session_kind(session),
         model=model,
         prompt_tokens=usage["prompt_tokens"],
         completion_tokens=usage["completion_tokens"],

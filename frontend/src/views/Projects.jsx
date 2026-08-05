@@ -31,6 +31,8 @@ export default function Projects() {
 
 export function ProjectsState({ data, error, loading, onRefresh }) {
   const [rootPath, setRootPath] = useState("");
+  const [testCommand, setTestCommand] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
   const [status, setStatus] = useState(null);
   const [inlineError, setInlineError] = useState(null);
   const [activeAction, setActiveAction] = useState(null);
@@ -50,12 +52,15 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
     clearMessages();
     setActiveAction({ projectId: null, kind: "connect" });
     try {
-      const outcome = await postJSON("/settings/project/connect", {
-        root_path: rootPath.trim(),
-      });
+      const body = { root_path: rootPath.trim() };
+      if (testCommand.trim()) body.test_command = testCommand.trim();
+      if (baseBranch.trim()) body.base_branch = baseBranch.trim();
+      const outcome = await postJSON("/settings/project/connect", body);
       if (outcome?.project) {
         setStatus("Project connected.");
         setRootPath("");
+        setTestCommand("");
+        setBaseBranch("");
         onRefresh();
       } else {
         setInlineError("Could not connect project.");
@@ -161,6 +166,26 @@ export function ProjectsState({ data, error, loading, onRefresh }) {
                 required
                 disabled={busy}
                 aria-describedby={busyReasonId}
+              />
+            </div>
+            <div className="project-settings-field">
+              <label htmlFor="test-command">Verification command (optional)</label>
+              <input
+                id="test-command"
+                value={testCommand}
+                onChange={(e) => setTestCommand(e.target.value)}
+                placeholder="e.g. pytest"
+                disabled={busy}
+              />
+            </div>
+            <div className="project-settings-field">
+              <label htmlFor="base-branch">Base branch (optional)</label>
+              <input
+                id="base-branch"
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                placeholder="e.g. main"
+                disabled={busy}
               />
             </div>
             <button

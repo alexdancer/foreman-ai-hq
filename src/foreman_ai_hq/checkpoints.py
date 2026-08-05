@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from foreman_ai_hq import db
 from foreman_ai_hq.guardrails import GuardrailConfig
 
 
@@ -24,6 +26,24 @@ def evaluate_checkpoints(artifact: dict[str, Any], config: GuardrailConfig) -> l
         _tool_diversity(artifact, config),
         _timeout_respect(artifact),
     ]
+
+
+def evaluate_and_record_checkpoints(
+    database_path: Path | str,
+    session_id: str,
+    config: GuardrailConfig,
+    artifact: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Evaluate checkpoints against a Session Artifact and persist the results, replacing any prior run.
+
+    Callers may supply an already-built artifact so the route and the Worker Run
+    completion path share the same evaluation without re-querying the database.
+    """
+    if artifact is None:
+        artifact = db.build_session_artifact(database_path, session_id)
+    results = [result.as_dict() for result in evaluate_checkpoints(artifact, config)]
+    db.replace_checkpoint_results(database_path, session_id=session_id, checkpoints=results)
+    return results
 
 
 def _budget_health(artifact: dict[str, Any], config: GuardrailConfig) -> CheckpointResult:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -13,7 +14,6 @@ from zoneinfo import ZoneInfo
 
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
 from foreman_ai_hq.native_usage import token_usage_components
-from foreman_ai_hq.task_kind import read_task_kind
 from foreman_ai_hq.worker_model_allowlist import SEEDED_WORKER_ADAPTER_MODELS
 
 SCHEMA = """
@@ -76,6 +76,18 @@ create table if not exists worker_run_events (
 );
 create index if not exists idx_worker_run_events_run on worker_run_events(worker_run_id, created_at, id);
 create index if not exists idx_worker_run_events_session on worker_run_events(session_id, created_at, id);
+
+create table if not exists planning_turn_events (
+    id integer primary key autoincrement,
+    session_id text not null references sessions(id) on delete cascade,
+    layer text not null default 'planning',
+    kind text not null,
+    level text not null,
+    title text not null,
+    detail_json text not null default '{}',
+    created_at text not null
+);
+create index if not exists idx_planning_turn_events_session on planning_turn_events(session_id, created_at, id);
 
 create table if not exists token_turns (
     id integer primary key autoincrement,
@@ -476,9 +488,13 @@ def create_session(
     session_key_hash: str,
     guardrail_overrides: dict[str, Any],
     status: str = "running",
+    session_kind: str | None = None,
 ) -> dict[str, Any]:
     session_id = f"sess_{uuid.uuid4().hex}"
     started_at = _now_iso()
+    guardrail_overrides = dict(guardrail_overrides)
+    if session_kind is not None:
+        guardrail_overrides["session_kind"] = session_kind
     with connect(path) as conn:
         conn.execute(
             """
@@ -497,6 +513,36 @@ def create_session(
             ),
         )
     return get_session(path, session_id)
+
+
+def create_planning_session(
+    path: Path | str,
+    *,
+    task_description: str,
+    model: str,
+    tracking_mode: str = "proxy_governed",
+) -> tuple[dict[str, Any], str]:
+    """Create a planning-kind metering-anchor session and return (session, bearer_key).
+
+    A ``native_usage`` planning session never authenticates to the proxy, so no bearer
+    is minted for it and its key hash is a marker no bearer can hash to.
+    """
+    if tracking_mode == "native_usage":
+        bearer_key = ""
+        session_key_hash = f"native-planning:{uuid.uuid4().hex}"
+    else:
+        bearer_key = f"sk_plan_{uuid.uuid4().hex}"
+        session_key_hash = hashlib.sha256(bearer_key.encode("utf-8")).hexdigest()
+    session = create_session(
+        path,
+        task_description=task_description,
+        model=model,
+        session_key_hash=session_key_hash,
+        guardrail_overrides={"tracking_mode": tracking_mode},
+        status="running",
+        session_kind="planning",
+    )
+    return session, bearer_key
 
 
 def get_session(path: Path | str, session_id: str) -> dict[str, Any]:
@@ -635,6 +681,31 @@ def record_checkpoint_result(
                 _now_iso(),
             ),
         )
+
+
+def replace_checkpoint_results(
+    path: Path | str,
+    *,
+    session_id: str,
+    checkpoints: list[dict[str, Any]],
+) -> None:
+    """Replace all checkpoint results for a session in one transaction."""
+    with connect(path) as conn:
+        conn.execute("delete from checkpoint_results where session_id = ?", (session_id,))
+        for checkpoint in checkpoints:
+            conn.execute(
+                """
+                insert into checkpoint_results (session_id, name, passed, details_json, created_at)
+                values (?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    checkpoint["name"],
+                    1 if checkpoint["passed"] else 0,
+                    _to_json(checkpoint.get("details", {})),
+                    _now_iso(),
+                ),
+            )
 
 
 def create_task(
@@ -1265,6 +1336,69 @@ def list_worker_run_events(
     return [_worker_run_event_from_row(row) for row in rows]
 
 
+def record_planning_turn_event(
+    path: Path | str,
+    *,
+    session_id: str,
+    operator_message: str,
+    agent_response: str,
+    stop_reason: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist one sanitized planning turn to the pollable feed."""
+    now = _now_iso()
+    merged_detail = _sanitize_evidence(
+        {
+            "text": agent_response,
+            "operator_message": operator_message,
+            **({"stop_reason": stop_reason} if stop_reason is not None else {}),
+            **(detail or {}),
+        }
+    )
+    with connect(path) as conn:
+        cursor = conn.execute(
+            """
+            insert into planning_turn_events (
+                session_id, layer, kind, level, title, detail_json, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                "planning",
+                "turn",
+                "info",
+                "Planning turn",
+                _to_json(merged_detail),
+                now,
+            ),
+        )
+        row = conn.execute("select * from planning_turn_events where id = ?", (cursor.lastrowid,)).fetchone()
+    return _planning_turn_event_from_row(row)
+
+
+def list_planning_turn_events(
+    path: Path | str,
+    *,
+    session_id: str,
+    since_id: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return planning turn events for a session after an optional cursor."""
+    clauses: list[str] = ["session_id = ?"]
+    params: list[Any] = [session_id]
+    if since_id is not None:
+        clauses.append("id > ?")
+        params.append(since_id)
+    where = f" where {' and '.join(clauses)}"
+    query = "select * from planning_turn_events" + where + " order by id"
+    if limit is not None:
+        query += " limit ?"
+        params.append(limit)
+    with connect(path) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_planning_turn_event_from_row(row) for row in rows]
+
+
 def mark_worker_run_running(path: Path | str, run_id: str) -> dict[str, Any]:
     now = _now_iso()
     with connect(path) as conn:
@@ -1399,10 +1533,23 @@ def list_task_ids_for_breakdown(path: Path | str, breakdown_id: str) -> list[str
     ]
 
 
-def list_sessions(path: Path | str) -> list[dict[str, Any]]:
+def read_session_kind(session: dict[str, Any]) -> str:
+    """Canonical session-kind reader. Legacy and Worker sessions default to 'worker'."""
+    return str((session.get("guardrail_overrides") or {}).get("session_kind") or "worker")
+
+
+def read_session_tracking_mode(session: dict[str, Any]) -> str:
+    """Canonical session tracking-mode reader. Legacy sessions default to 'proxy_governed'."""
+    return str((session.get("guardrail_overrides") or {}).get("tracking_mode") or "proxy_governed")
+
+
+def list_sessions(path: Path | str, *, kind: str | None = "worker") -> list[dict[str, Any]]:
     with connect(path) as conn:
         rows = conn.execute("select * from sessions order by started_at, id").fetchall()
-    return [_session_from_row(row) for row in rows]
+    sessions = [_session_from_row(row) for row in rows]
+    if kind is not None:
+        sessions = [session for session in sessions if read_session_kind(session) == kind]
+    return sessions
 
 
 def list_worker_adapters(path: Path | str) -> list[dict[str, Any]]:
@@ -1626,6 +1773,31 @@ def get_connected_project_by_path(path: Path | str, root_path: str) -> dict[str,
     if row is None:
         raise KeyError(f"connected project not found: {root_path}")
     return _connected_project_from_row(row)
+
+
+def update_connected_project_profile(
+    path: Path | str,
+    project_id: str,
+    *,
+    profile: dict[str, Any] | None = None,
+    updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    now = _now_iso()
+    with connect(path) as conn:
+        conn.execute("begin immediate")
+        row = conn.execute("select profile_json from connected_projects where id = ?", (project_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"connected project not found: {project_id}")
+        current = _from_json(row["profile_json"]) if row["profile_json"] is not None else {}
+        if updater is not None:
+            updated = updater(current)
+        else:
+            updated = {**current, **(profile or {})}
+        conn.execute(
+            "update connected_projects set profile_json = ?, updated_at = ? where id = ?",
+            (_to_json(updated), now, project_id),
+        )
+    return get_connected_project(path, project_id)
 
 
 def upsert_execution_backend_status(
@@ -1966,8 +2138,12 @@ def build_session_artifact(path: Path | str, session_id: str) -> dict[str, Any]:
             "select * from worker_run_events where session_id = ? order by created_at, id", (session_id,)
         ).fetchall()
 
+    session = _session_from_row(session_row)
     return {
-        "session": _session_from_row(session_row),
+        "session": session,
+        # How this session's spend was metered, so the evidence record states it even
+        # before any turn lands.
+        "tracking_mode": read_session_tracking_mode(session),
         "token_log": [_token_turn_from_row(row) for row in token_rows],
         "tool_trace": [_tool_trace_from_row(row) for row in tool_trace_rows],
         "alarms": [_alarm_from_row(row) for row in alarm_rows],
@@ -1996,11 +2172,10 @@ def budgeted_token_usage(path: Path | str, *, since: str | None = None) -> int:
 
 
 def estimation_accuracy(path: Path | str) -> dict[str, Any]:
-    """Compute estimation accuracy from completed implementation tasks.
+    """Compute estimation accuracy from completed tasks.
 
     Returns completed_count, median_error_ratio, within_2x_pct.
-    All values null when no completed implementation tasks with both estimate
-    and actual exist. Scout actuals are excluded from implementation aggregates.
+    All values null when no completed tasks with both estimate and actual exist.
     Error ratio = actual_tokens / estimate_tokens.
     """
     with connect(path) as conn:
@@ -2014,7 +2189,6 @@ def estimation_accuracy(path: Path | str) -> dict[str, Any]:
               and actual_tokens > 0
             """
         ).fetchall()
-    rows = [row for row in rows if read_task_kind(_from_json(row["metadata_json"])) == "implementation"]
     if not rows:
         return {
             "completed_count": None,
@@ -2082,6 +2256,8 @@ def _spend_category_for_usage_kind(usage_kind: str) -> str:
         return "adapter_verification"
     if usage_kind in {"reporting", "summary"}:
         return "reporting_summary"
+    if usage_kind == "planning":
+        return "planning"
     return "other"
 
 
@@ -2091,6 +2267,8 @@ def _usage_source_for_usage_kind(usage_kind: str, spend_category: str) -> str:
     if spend_category == "adapter_verification":
         return "harness_proxy"
     if usage_kind in {"worker", "task_execution"}:
+        return "harness_proxy"
+    if usage_kind == "planning" or spend_category == "planning":
         return "harness_proxy"
     return "unspecified"
 
@@ -2353,6 +2531,21 @@ def _worker_run_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "worker_run_id": row["worker_run_id"],
         "session_id": row["session_id"],
         "task_id": row["task_id"],
+        "layer": row["layer"],
+        "kind": row["kind"],
+        "level": row["level"],
+        "title": row["title"],
+        "detail": detail,
+        "detail_summary": _worker_run_event_detail_summary(detail),
+        "created_at": row["created_at"],
+    }
+
+
+def _planning_turn_event_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    detail = _from_json(row["detail_json"])
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
         "layer": row["layer"],
         "kind": row["kind"],
         "level": row["level"],

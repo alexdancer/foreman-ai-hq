@@ -58,3 +58,57 @@
   color: var(--accent);
   font: 700 16px/1.2 var(--mono);
 }
+
+.floor-planning-rail {
+  margin-bottom: 12px;
+}
+
+.planning-pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.planning-pane-shell {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.planning-pane-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.board-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.board-main {
+  flex: 1 1 600px;
+  min-width: min(100%, 560px);
+}
+
+.board-pane {
+  flex: 0 1 360px;
+  min-width: 280px;
+  max-width: 100%;
+}
+
+.board-pane.is-collapsed {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .board-pane {
+    flex: 1 1 100%;
+    min-width: auto;
+  }
+}

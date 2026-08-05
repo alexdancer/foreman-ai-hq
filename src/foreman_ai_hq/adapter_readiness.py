@@ -28,8 +28,6 @@ class AdapterReadiness:
     tracking_evidence: dict[str, Any]
     budget_authoritative: bool
     launchable_tracking: bool
-    read_only_launchable: bool
-    read_only_reasons: list[str]
     ui_launchable: bool
     launchable_for_board: bool
     reasons: list[str]
@@ -92,8 +90,6 @@ def evaluate_adapter_readiness(
     if include_launch_credentials and tracking.mode == PROXY_GOVERNED:
         launchable_for_board = launchable_for_board and bool(session_api_key) and bool(proxy_url)
 
-    read_only_launchable, read_only_reasons = _read_only_launchable(adapter, verified, launchable_tracking)
-
     return AdapterReadiness(
         adapter=adapter,
         configured=configured,
@@ -105,38 +101,14 @@ def evaluate_adapter_readiness(
         tracking_evidence=evidence,
         budget_authoritative=budget_authoritative,
         launchable_tracking=launchable_tracking,
-        read_only_launchable=read_only_launchable,
-        read_only_reasons=read_only_reasons,
         ui_launchable=ui_launchable,
         launchable_for_board=launchable_for_board,
         reasons=reasons,
     )
 
 
-def _read_only_launchable(adapter: dict[str, Any], verified: bool, launchable_tracking: bool) -> tuple[bool, list[str]]:
-    """Return whether this adapter has a verified adapter-enforced read-only launch profile."""
-    reasons: list[str] = []
-    if not verified:
-        reasons.append("Token tracking has not been verified for this adapter.")
-    if verified and not launchable_tracking:
-        reasons.append("Budget-authoritative Worker tracking has not been verified for this adapter.")
-    kind = str(adapter.get("kind") or "")
-    # Only Codex currently ships a verified read-only sandbox profile.
-    if kind != "codex":
-        reasons.append(f"{kind or 'This'} Worker Adapter does not have a verified read-only launch profile.")
-    config = adapter.get("config") or {}
-    template = config.get("native_launch_template")
-    bypass_flags = ("--full-auto", "--dangerously-bypass-approvals-and-sandbox")
-    if kind == "codex" and isinstance(template, list) and any(
-        str(part) == flag or str(part).startswith(f"{flag}=")
-        for part in template
-        for flag in bypass_flags
-    ):
-        reasons.append("Configured Codex launch flags bypass the verified read-only sandbox.")
-    return (not reasons and kind == "codex"), reasons
-
-
 def _is_configured(adapter: dict[str, Any]) -> bool:
+    """Return whether the adapter has enough configuration to be considered set up."""
     config = adapter.get("config") or {}
     return bool(
         config.get("command")

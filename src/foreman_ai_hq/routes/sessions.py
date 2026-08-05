@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from foreman_ai_hq import db
 from foreman_ai_hq.auth import require_portal_auth
-from foreman_ai_hq.checkpoints import evaluate_checkpoints
+from foreman_ai_hq.checkpoints import evaluate_and_record_checkpoints
 from foreman_ai_hq.guardrails import get_budget_zone
 
 router = APIRouter()
@@ -65,7 +65,7 @@ def start_session(payload: SessionStartRequest, request: Request) -> dict[str, A
     }
 
 
-@router.get("/session/{session_id}/report")
+@router.get("/session/{session_id}/report", dependencies=[Depends(require_portal_auth)])
 def session_report(session_id: str, request: Request) -> dict[str, Any]:
     artifact = _artifact_or_404(request, session_id)
     token_totals = _token_totals(artifact)
@@ -95,13 +95,17 @@ def session_artifact(session_id: str, request: Request) -> dict[str, Any]:
     return _artifact_or_404(request, session_id)
 
 
-@router.post("/session/{session_id}/checkpoint/evaluate")
+@router.post("/session/{session_id}/checkpoint/evaluate", dependencies=[Depends(require_portal_auth)])
 def evaluate_session_checkpoints(session_id: str, request: Request) -> dict[str, Any]:
     artifact = _artifact_or_404(request, session_id)
-    results = [result.as_dict() for result in evaluate_checkpoints(artifact, _guardrails(request))]
-    # Store checkpoint results so later reports and alarm views use the same evaluation.
-    for result in results:
-        db.record_checkpoint_result(_database_path(request), session_id=session_id, checkpoint=result)
+    # The manual re-evaluation path shares the same persistence logic as the automatic
+    # Worker Run completion path, so results always reflect the current guardrail config.
+    results = evaluate_and_record_checkpoints(
+        _database_path(request),
+        session_id,
+        _guardrails(request),
+        artifact=artifact,
+    )
     return {"session_id": session_id, "checkpoint_results": results}
 
 

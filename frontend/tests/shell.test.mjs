@@ -24,6 +24,7 @@ let loadEvidenceDrawer;
 let boardNoticeFromSearch;
 let mergeBoardStatus;
 let taskDisplayName;
+let investigationMessage;
 let parseRoute;
 let ProjectsState;
 let pollBoardStatus;
@@ -120,6 +121,7 @@ before(async () => {
     pollBoardStatus,
     submitBoardAction,
     taskDisplayName,
+    investigationMessage,
   } = await server.ssrLoadModule("/src/views/Board.jsx"));
   ({ WorkspaceState, submitProjectRestore } = await server.ssrLoadModule("/src/views/Workspace.jsx"));
   ({ SessionsState } = await server.ssrLoadModule("/src/views/Sessions.jsx"));
@@ -530,6 +532,10 @@ test("only exact React routes are parsed as owned views", () => {
     view: "floor",
     projectId: "demo-999",
   });
+  assert.deepEqual(parseRoute("/projects/demo-999/plan"), {
+    view: "planningChat",
+    projectId: "demo-999",
+  });
   assert.equal(parseRoute("/projects/demo-999/task-history").view, "taskHistory");
   assert.equal(parseRoute("/app/projects/demo-999/task-history").view, "notFound");
   for (const path of [
@@ -729,9 +735,7 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   assert.doesNotMatch(failed, /secret/);
 });
 
-test("Project Settings renders proof outcomes through its public interaction", async (t) => {
-  const originalFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+test("Project Settings does not expose the retired read-only proof task creator", () => {
   const data = {
     local_runner_enabled: true,
     backend_status: { online: true, name: "Local Runner" },
@@ -743,53 +747,14 @@ test("Project Settings renders proof outcomes through its public interaction", a
     }],
     archived_projects: [],
   };
-  const blocked = renderToStaticMarkup(React.createElement(ProjectSettingsState, {
-    data: {
-      ...data,
-      connected_projects: data.connected_projects.map((project) => ({
-        ...project,
-        capability: { state: "unknown", reasons: ["Capability probe unavailable."] },
-      })),
-    },
+  const markup = renderToStaticMarkup(React.createElement(ProjectSettingsState, {
+    data,
     error: null,
     loading: false,
     onRefresh: () => {},
   }));
-  assert.match(blocked, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
-
-  for (const testCase of [
-    { passed: true, tone: "success", label: "Read-only proof launched", reasons: [] },
-    { passed: false, tone: "warning", label: "Read-only proof blocked", reasons: ["Complete project setup."] },
-  ]) {
-    globalThis.fetch = async () => ({
-      ok: testCase.passed,
-      status: testCase.passed ? 200 : 409,
-      json: async () => ({ launch_guardrails: { reasons: testCase.reasons } }),
-    });
-    let renderer;
-    await act(async () => {
-      renderer = create(React.createElement(ProjectSettingsState, {
-        data,
-        error: null,
-        loading: false,
-        onRefresh: () => {},
-      }));
-    });
-    const proofButton = renderer.root.findAllByType("button")
-      .find((button) => button.children.join("") === "Run read-only proof");
-    await act(async () => { await proofButton.props.onClick(); });
-
-    const label = renderer.root.findAllByProps({ className: "status-pill-label" })
-      .find((node) => node.children.join("") === testCase.label);
-    assert.ok(label);
-    const pill = label.parent;
-    assert.equal(pill.props.className, `status-pill status-pill-${testCase.tone}`);
-    assert.ok(pill.findByProps({ className: "status-pill-glyph" }).children.join(""));
-    assert.equal(pill.parent.parent.type, "p");
-    assert.equal(pill.parent.parent.props.className, undefined);
-    if (testCase.reasons.length) assert.match(JSON.stringify(renderer.toJSON()), /Complete project setup\./);
-    await act(async () => { renderer.unmount(); });
-  }
+  assert.match(markup, /DEMO project 999/);
+  assert.doesNotMatch(markup, /Run read-only proof|Read-only proof launched|Read-only proof blocked/);
 });
 
 test("Alarms sidebar and list render from available_actions and bookmarkable filters", () => {
@@ -1167,7 +1132,7 @@ test("archived Pipeline is restore-first and does not expose active workflow con
   }));
   assert.match(markup, /Restore project/);
   assert.match(markup, /Archived project/);
-  assert.doesNotMatch(markup, /Short task intake|Active Worker Runs|Execution Floor<\/a>/);
+  assert.doesNotMatch(markup, /Planning Chat|Active Worker Runs|Execution Floor<\/a>/);
 });
 
 test("Pipeline renders project readiness, Needs You, planning, intake, and Estimated work only", () => {
@@ -1212,7 +1177,7 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     "Review proposed Task Breakdown",
     "DEMO_INTAKE_2099_999.md · 1 candidate",
     "Planning Inbox",
-    "Short task intake",
+    "Planning Chat",
     "Filter loaded tasks",
     "Codex",
     "gpt-5.4",
@@ -1230,6 +1195,8 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
   assert.match(pipeline, /type="file"/);
   assert.match(pipeline, /type="number"/);
   assert.match(pipeline, /type="checkbox"/);
+  assert.match(pipeline, /aria-expanded="true"/);
+  assert.match(pipeline, />Collapse</);
   assert.doesNotMatch(pipeline, /Active Worker Runs|Review queue|Recently finished|Server board/);
 
   const emptyData = boardData();
@@ -1273,6 +1240,97 @@ test("Pipeline profile renders typed unavailable and empty states", () => {
   assert.doesNotMatch(markup, /undefined|\[object Object\]/);
 });
 
+test("Planning pane disclosure survives a board refresh", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (url) => {
+    if (url.includes("/planning/start")) {
+      return new Response(JSON.stringify({ planning_session_id: "sess-plan-999" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ events: [], next_since_id: 0, has_more: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const data = boardData();
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
+    }));
+  });
+  const disclosure = () => renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-pipeline" });
+  await act(async () => { disclosure().props.onClick(); });
+  assert.equal(disclosure().props["aria-expanded"], false);
+
+  await act(async () => {
+    renderer.update(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: true,
+    }));
+  });
+  assert.equal(renderer.root.findByProps({ className: "spinner" }).children.join(""), "Loading Pipeline…");
+  await act(async () => {
+    renderer.update(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
+    }));
+  });
+  assert.equal(disclosure().props["aria-expanded"], false);
+  await act(async () => { renderer.unmount(); });
+});
+
+test("Narrow viewport collapses Planning on Pipeline and Floor", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  });
+  let mediaListener;
+  globalThis.window = {
+    matchMedia: () => ({
+      matches: false,
+      addEventListener: (_type, listener) => { mediaListener = listener; },
+      removeEventListener: () => {},
+    }),
+  };
+  globalThis.fetch = async (url) => {
+    if (url.includes("/planning/start")) {
+      return new Response(JSON.stringify({ planning_session_id: "sess-plan-999" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ events: [], next_since_id: 0, has_more: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const data = boardData();
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "floor", data, error: null, loading: false,
+    }));
+  });
+  const floorDisclosure = () => renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-floor" });
+  await act(async () => { floorDisclosure().props.onClick(); });
+  assert.equal(floorDisclosure().props["aria-expanded"], true);
+
+  await act(async () => { mediaListener({ matches: true }); });
+  assert.equal(floorDisclosure().props["aria-expanded"], false);
+  await act(async () => {
+    renderer.update(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
+    }));
+  });
+  const pipelineDisclosure = renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-pipeline" });
+  assert.equal(pipelineDisclosure.props["aria-expanded"], false);
+  await act(async () => { renderer.unmount(); });
+});
+
 test("Execution Floor renders active runs, Review queue, and recently-finished trail", () => {
   const floor = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
@@ -1300,8 +1358,27 @@ test("Execution Floor renders active runs, Review queue, and recently-finished t
   assert.match(floor, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
   assert.match(floor, /class="token-comparison finished-token-comparison" aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
   assert.match(floor, /status-pill-glyph[^>]*aria-hidden="true">▮<\/span><span class="status-pill-label">Queue idle<\/span>/);
+  assert.match(floor, /aria-expanded="false"/);
+  assert.match(floor, />Expand</);
   assert.ok(floor.indexOf("finished-token-comparison") < floor.indexOf("Done DEMO task"));
-  assert.doesNotMatch(floor, /Short task intake|Planning Inbox|Estimated DEMO task|Task details/);
+  assert.doesNotMatch(floor, /Planning Chat|Planning Inbox|Estimated DEMO task|Task details/);
+});
+
+test("Planning Chat investigation links prefill bounded Task context", () => {
+  const tasks = Object.values(boardData().tasks_by_status).flat();
+  assert.equal(
+    investigationMessage(tasks, "task-estimated-999"),
+    "Investigate Task task-estimated-999 before re-estimation:\nEstimated DEMO task",
+  );
+  const markup = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    surface: "pipeline",
+    data: boardData(),
+    error: null,
+    loading: false,
+    investigateTaskId: "task-estimated-999",
+  }));
+  assert.match(markup, />Investigate Task task-estimated-999 before re-estimation:\nEstimated DEMO task<\/textarea>/);
 });
 
 test("Evidence Drawer fetches its Session Report handoff and reuses bounded evidence components", async () => {
@@ -1359,29 +1436,6 @@ test("legacy form errors survive the canonical Pipeline redirect", () => {
   assert.equal(boardNoticeFromSearch(""), null);
 });
 
-test("board intake shows progress while task estimation is running", () => {
-  const idle = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999", data: boardData(), error: null, loading: false, action: () => {},
-  }));
-  assert.match(idle, /Estimate task/);
-  assert.doesNotMatch(idle, /Estimating…/);
-  assert.doesNotMatch(idle, /role="progressbar"/);
-
-  const busy = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999", data: boardData(), error: null, loading: false, action: () => {}, estimating: true,
-  }));
-  assert.match(busy, /Estimating…/);
-  assert.match(busy, /Preparing Task Breakdown Review/);
-  assert.match(busy, /Estimating and breaking down the task/);
-  assert.match(busy, /role="progressbar"/);
-  assert.match(busy, /aria-valuetext="Estimating task and preparing review"/);
-  assert.match(busy, /aria-busy="true"/);
-  assert.equal((busy.match(/aria-describedby="board-estimating-reason"/g) || []).length, 3);
-  assert.match(busy, /Task estimation is already in progress\./);
-  assert.match(busy, /disabled=""/);
-  assertDisabledControlsHaveReasons(busy);
-});
-
 test("board cards derive short names from long task descriptions", () => {
   assert.equal(taskDisplayName({ summary: { text: "# Dashboard card cleanup\nMake every card easier to scan." } }), "Dashboard card cleanup");
   assert.equal(taskDisplayName({ summary: { text: "Please update the dashboard so that card titles read like short names and preserve the full task body." } }), "Update the dashboard");
@@ -1419,7 +1473,7 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
   assert.doesNotMatch(populated, /href="\/app\/projects\/demo-999\/board"/);
 });
 
-test("React task history renders Scout and blocked-condition labels", () => {
+test("React task history does not render a Scout label", () => {
   const markup = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
     data: { filters: [], tasks: [
@@ -1434,7 +1488,7 @@ test("React task history renders Scout and blocked-condition labels", () => {
     onUnarchive: () => {},
     notice: null,
   }));
-  assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
+  assert.doesNotMatch(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
   assertStatusPillsHaveGlyphs(markup);
   assert.match(markup, /class="status-pill-label">Done<\/span>/);
   assert.match(markup, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
@@ -1471,7 +1525,7 @@ test("board action controller negotiates JSON, reloads, reports failures, and na
 
   let destination = null;
   const navigated = await submitBoardAction({
-    url: "/projects/demo-999/tasks/estimate-form",
+    url: "/api/projects/demo-999/planning/intake",
     body,
     fetchImpl: async () => ({
       ok: true,
@@ -1594,6 +1648,14 @@ test("project Pipeline and Floor active states follow the selected route", () =>
   });
   assert.match(floor, /class="project-item active"/);
   assert.match(floor, /class="project-board active" href="\/projects\/demo-999\/floor"/);
+
+  const plan = renderSidebar({
+    activeProjectId: "demo-999",
+    activeView: "planningChat",
+    data,
+  });
+  assert.match(plan, /class="project-item active"/);
+  assert.match(plan, /class="project-board active" href="\/projects\/demo-999\/plan"/);
 });
 
 test("canonical project routes highlight the project while aliases remain server-owned", () => {
@@ -1605,6 +1667,7 @@ test("canonical project routes highlight the project while aliases remain server
     "/app/projects/demo-999",
     "/app/projects/demo-999/board",
     "/app/projects/demo-999/floor",
+    "/app/projects/demo-999/plan",
   ]) {
     assert.equal(parseRoute(path).view, "notFound");
   }
@@ -1660,6 +1723,8 @@ function breakdownReviewData(status = "proposed") {
     review: {
       id: "breakdown-demo-999", status, decision: "proposed_task_breakdown",
       model: bounded("DEMO-model-999"), session_id: "session-demo-999",
+      intake_decision: "needs_breakdown",
+      intake_decision_reason: bounded("DEMO intake reason 999"),
       session_href: "/sessions/session-demo-999", rationale: bounded("DEMO rationale 999"),
       source_text: bounded("DEMO source 2099", { truncated: true, full_href: "/api/task-breakdowns/demo/text/source" }),
       failure_type: status === "failed" ? bounded("provider_error") : null,
@@ -1741,6 +1806,7 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
     "Task Breakdown Review", "DEMO title 999", "Candidate kind", "Execution mode",
     "Acceptance criteria", "Candidate proof / verification path", "Task slicing evidence",
     "Global contract summary", "Rejected as Tasks", "Repo Context Brief",
+    "Intake decision", "needs_breakdown", "Intake reason", "DEMO intake reason 999",
     "Accept selected and estimate", "Unsaved browser-local edits",
   ]) assert.match(markup, new RegExp(text));
   assert.match(markup, /Load full text before editing/);
@@ -1820,10 +1886,12 @@ test("rendered Portal surfaces preserve focus, motion, select, and panel contrac
     onRefresh: () => {},
   }));
 
-  assert.match(board, /<select[^>]*name="task_kind"/);
+  assert.doesNotMatch(board, /<select[^>]*name="task_kind"/);
+  assert.match(board, /Describe the task or goal…/);
   assert.match(review, /<select[^>]*>.*?<option value="implementation"[^>]*>/s);
-  assert.match(board, /class="board-intake-progress-bar"/);
+  assert.doesNotMatch(board, /class="board-intake-progress-bar"/);
   assert.match(floor, /class="live-pulse-dot"/);
+  assertDisabledControlsHaveReasons(board);
   for (const markup of [board, floor, review, accepted, budget]) assertNoNestedPanels(markup);
 });
 
@@ -2170,7 +2238,7 @@ test("Settings views show a fixed message when their handoff fails", () => {
   const cases = [
     ["BudgetSettings", () => BudgetSettingsState, /Could not load budget settings\. Retry\./, /Budget settings require sign-in\./],
     ["WorkerSettings", () => WorkerSettingsState, /Could not load worker adapters\. Retry\./, /Worker adapters require sign-in\./],
-    ["ControlPlaneSettings", () => ControlPlaneSettingsState, /Could not load control-plane settings\. Retry\./, /Control-plane settings require sign-in\./],
+    ["ControlPlaneSettings", () => ControlPlaneSettingsState, /Could not load orchestrator settings\. Retry\./, /Orchestrator settings require sign-in\./],
     ["ProjectSettings", () => ProjectSettingsState, /Could not load project settings\. Retry\./, /Project settings require sign-in\./],
     ["Alarms", () => AlarmsState, /Could not load Alarms\. Retry\./, /Alarms require sign-in\./],
   ];
@@ -2194,32 +2262,29 @@ test("Settings views show a fixed message when their handoff fails", () => {
   }
 });
 
-// Curated models mirror CURATED_CONTROL_PLANE_MODELS in routes/portal.py so the
-// dropdown cannot drift between the two surfaces.
+// Mirrors the /api/settings/control-plane handoff in routes/react_shell.py: the
+// dropdown is pi's discovered inventory, never a harness-authored list.
 function controlPlaneData(overrides = {}) {
   return {
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    base_url: null,
-    api_key_env: "TEST_CONTROL_PLANE_KEY",
-    api_key_present: true,
-    estimator_model: "claude-sonnet-4-6",
-    task_breakdown_model: "claude-sonnet-4-6",
-    legacy_api_key_configured: false,
+    model: "anthropic/claude-sonnet-5",
+    configured: true,
+    inventory: {
+      models: ["anthropic/claude-sonnet-5", "openai-codex/gpt-5.4"],
+      discovered_at: "2099-01-01T00:00:00+00:00",
+      state: "ready",
+      needs_authentication: false,
+      reasons: [],
+    },
+    verification: {
+      passed: true,
+      verified_at: "2099-01-01T00:00:00+00:00",
+      model: "anthropic/claude-sonnet-5",
+      stale: false,
+      reasons: [],
+    },
+    diverging_jobs: {},
     shadowed_settings: {},
-    curated_models: [
-      { provider: "openai", model: "gpt-5.6-sol", label: "OpenAI · gpt-5.6-sol" },
-      { provider: "openai", model: "gpt-5.6-terra", label: "OpenAI · gpt-5.6-terra" },
-      { provider: "openai", model: "gpt-5.6-luna", label: "OpenAI · gpt-5.6-luna" },
-      { provider: "anthropic", model: "claude-fable-5", label: "Anthropic · Claude Fable 5" },
-      { provider: "anthropic", model: "claude-sonnet-5", label: "Anthropic · Claude Sonnet 5" },
-      { provider: "anthropic", model: "claude-opus-4-8", label: "Anthropic · Claude Opus 4.8" },
-      { provider: "anthropic", model: "claude-haiku-4-5", label: "Anthropic · Claude Haiku 4.5" },
-      { provider: "openrouter", model: "anthropic/claude-sonnet-5", label: "OpenRouter · Claude Sonnet 5 (recommended)" },
-      { provider: "openrouter", model: "openai/gpt-5.6-terra", label: "OpenRouter · GPT-5.6 Terra (recommended)" },
-      { provider: "openrouter", model: "google/gemini-3.5-flash", label: "OpenRouter · Gemini 3.5 Flash (recommended)" },
-    ],
-    connection_status: { state: "needs_test", checked_at: null, details: null },
+    connection_status: { state: "online", checked_at: null, details: null },
     ...overrides,
   };
 }
@@ -2228,7 +2293,9 @@ test("ControlPlaneSettings renders untested connections as attention statuses", 
   let renderer;
   await act(async () => {
     renderer = create(React.createElement(ControlPlaneSettingsState, {
-      data: controlPlaneData(),
+      data: controlPlaneData({
+        connection_status: { state: "needs_test", checked_at: null, details: null },
+      }),
       error: null,
       loading: false,
       onRefresh: () => {},
@@ -2243,81 +2310,7 @@ test("ControlPlaneSettings renders untested connections as attention statuses", 
   await act(async () => { renderer.unmount(); });
 });
 
-// This is the client-side replacement for the retired Jinja
-// <option selected>/hidden/disabled markup: dataToForm() in
-// ControlPlaneSettings.jsx now decides "is this model custom" itself, by
-// checking whether the stored (provider, model) pair is in curated_models.
-// Table-driven over curated cases plus stored model/provider pairs that must
-// remain reachable through Custom model.
-test("ControlPlaneSettings dataToForm resolves curated vs. custom models by provider+model pair", async () => {
-  const cases = [
-    {
-      name: "a curated model for its own provider renders selected, not custom",
-      provider: "anthropic",
-      model: "claude-sonnet-5",
-      expectCustom: false,
-    },
-    {
-      name: "an openai-compatible model is never curated for any provider",
-      provider: "openai-compatible",
-      model: "openai-compatible/custom-control-plane-999",
-      expectCustom: true,
-    },
-    {
-      name: "a curated model name reused under the wrong provider is custom",
-      provider: "openai",
-      model: "claude-sonnet-5",
-      expectCustom: true,
-    },
-    {
-      name: "a stale provider-prefixed model id is custom",
-      provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-20250514",
-      expectCustom: true,
-    },
-    {
-      name: "a curated OpenRouter model renders selected, not custom",
-      provider: "openrouter",
-      model: "anthropic/claude-sonnet-5",
-      expectCustom: false,
-    },
-    {
-      name: "an uncurated OpenRouter model remains available through Custom model",
-      provider: "openrouter",
-      model: "meta-llama/custom-demo-999",
-      expectCustom: true,
-    },
-  ];
-
-  for (const testCase of cases) {
-    const data = controlPlaneData({ provider: testCase.provider, model: testCase.model });
-    let renderer;
-    await act(async () => {
-      renderer = create(
-        React.createElement(ControlPlaneSettingsState, {
-          data, error: null, loading: false, onRefresh: () => {},
-        }),
-      );
-    });
-
-    const modelSelect = renderer.root.findByProps({ id: "control-plane-model" });
-    if (testCase.expectCustom) {
-      assert.equal(modelSelect.props.value, "__custom__", testCase.name);
-      const customInput = renderer.root.findByProps({ id: "control-plane-custom-model" });
-      assert.equal(customInput.props.value, testCase.model, testCase.name);
-    } else {
-      assert.equal(modelSelect.props.value, testCase.model, testCase.name);
-      assert.throws(
-        () => renderer.root.findByProps({ id: "control-plane-custom-model" }),
-        testCase.name,
-      );
-    }
-
-    await act(async () => { renderer.unmount(); });
-  }
-});
-
-test("ControlPlaneSettings saves an uncurated OpenRouter model ID unchanged", async (t) => {
+test("ControlPlaneSettings offers only inventory models and saves the qualified id", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   let posted = null;
@@ -2330,82 +2323,91 @@ test("ControlPlaneSettings saves an uncurated OpenRouter model ID unchanged", as
   await act(async () => {
     renderer = create(
       React.createElement(ControlPlaneSettingsState, {
-        data: controlPlaneData({
-          provider: "openrouter",
-          model: "meta-llama/custom-demo-999",
-          base_url: "https://openrouter.ai/api/v1",
-          api_key_env: "OPENROUTER_API_KEY",
-        }),
-        error: null,
-        loading: false,
-        onRefresh: () => {},
+        data: controlPlaneData(), error: null, loading: false, onRefresh: () => {},
       }),
     );
   });
 
+  const select = renderer.root.findByProps({ id: "orchestrator-model" });
+  const offered = select.props.children[1].map((option) => option.props.value);
+  assert.deepEqual(offered, ["anthropic/claude-sonnet-5", "openai-codex/gpt-5.4"]);
+  // No provider, base URL, or API key field survives on this surface.
+  assert.throws(() => renderer.root.findByProps({ id: "control-plane-provider" }));
+  assert.throws(() => renderer.root.findByProps({ id: "control-plane-base-url" }));
+  assert.throws(() => renderer.root.findByProps({ id: "control-plane-api-key-env" }));
+
   const form = renderer.root.findByProps({ className: "control-plane-form" });
   await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
-
   assert.equal(posted.url, "/settings/control-plane");
-  assert.equal(posted.body.control_plane_provider, "openrouter");
-  assert.equal(posted.body.control_plane_model, "meta-llama/custom-demo-999");
-  assert.equal(posted.body.control_plane_base_url, "https://openrouter.ai/api/v1");
-  assert.equal(posted.body.control_plane_api_key_env, "OPENROUTER_API_KEY");
+  assert.equal(posted.body.control_plane_model, "anthropic/claude-sonnet-5");
+  assert.deepEqual(Object.keys(posted.body), ["control_plane_model"]);
   await act(async () => { renderer.unmount(); });
 });
 
-test("ControlPlaneSettings renders reported cost and unavailable cost distinctly", async () => {
-  for (const [cost, expected] of [[0.0042, "$0.004200"], [null, "unavailable"]]) {
-    let renderer;
-    await act(async () => {
-      renderer = create(
-        React.createElement(ControlPlaneSettingsState, {
-          data: controlPlaneData({
-            connection_status: {
-              state: "online",
-              checked_at: "2099-01-01T00:00:00Z",
-              details: {
-                provider: "openrouter",
-                model: "anthropic/claude-sonnet-5",
-                usage: { total_tokens: 10 },
-                cost,
-              },
-            },
-          }),
-          error: null,
-          loading: false,
-          onRefresh: () => {},
-        }),
-      );
-    });
-    assert.match(JSON.stringify(renderer.toJSON()), new RegExp(expected.replace("$", "\\$")));
-    await act(async () => { renderer.unmount(); });
-  }
-});
-
-test("ControlPlaneSettings clears OpenRouter connection defaults when switching providers", async () => {
+test("ControlPlaneSettings shows the authenticate-with-pi state instead of an empty dropdown", async () => {
   let renderer;
   await act(async () => {
     renderer = create(
       React.createElement(ControlPlaneSettingsState, {
-        data: controlPlaneData({ provider: "openrouter", model: "anthropic/claude-sonnet-5" }),
-        error: null,
-        loading: false,
-        onRefresh: () => {},
+        data: controlPlaneData({
+          model: null,
+          configured: false,
+          inventory: { models: [], discovered_at: null, state: "needs_authentication", needs_authentication: true, reasons: [] },
+        }),
+        error: null, loading: false, onRefresh: () => {},
       }),
     );
   });
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /pi \/login/);
+  assert.throws(() => renderer.root.findByProps({ id: "orchestrator-model" }));
+  await act(async () => { renderer.unmount(); });
+});
 
+test("ControlPlaneSettings surfaces stale verification and diverging per-job models", async () => {
+  let renderer;
   await act(async () => {
-    renderer.root.findByProps({ id: "control-plane-provider" }).props.onChange({ target: { value: "openai" } });
+    renderer = create(
+      React.createElement(ControlPlaneSettingsState, {
+        data: controlPlaneData({
+          verification: {
+            passed: true,
+            verified_at: "2099-01-01T00:00:00+00:00",
+            model: "openai-codex/gpt-5.4",
+            stale: true,
+            reasons: [],
+          },
+          diverging_jobs: { estimator_model: "openai-codex/gpt-5.4" },
+        }),
+        error: null, loading: false, onRefresh: () => {},
+      }),
+    );
   });
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /Verify again/);
+  assert.match(markup, /estimator_model = openai-codex\/gpt-5\.4/);
+  assert.match(markup, /ignored legacy settings do not select runtime models/);
+  assert.match(markup, /Saving the Orchestrator Model removes them/);
+  assert.doesNotMatch(markup, /pinned to a different model/);
+  await act(async () => { renderer.unmount(); });
+});
 
-  assert.equal(renderer.root.findByProps({ id: "control-plane-base-url" }).props.value, "");
-  assert.equal(
-    renderer.root.findByProps({ id: "control-plane-api-key-env" }).props.value,
-    "FOREMAN_AI_HQ_CONTROL_API_KEY",
-  );
-  assert.equal(renderer.root.findByProps({ id: "control-plane-model" }).props.value, "gpt-5.6-sol");
+test("ControlPlaneSettings blocks Verify until a model is configured", async () => {
+  let renderer;
+  await act(async () => {
+    renderer = create(
+      React.createElement(ControlPlaneSettingsState, {
+        data: controlPlaneData({ model: null, configured: false }),
+        error: null, loading: false, onRefresh: () => {},
+      }),
+    );
+  });
+  const verify = renderer.root
+    .findAllByType("button")
+    .find((b) => b.props.children === "Verify");
+  assert.equal(verify.props.disabled, true);
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /Orchestrator is not configured/);
   await act(async () => { renderer.unmount(); });
 });
 
@@ -2463,33 +2465,7 @@ function scoutBoardData(overrides = {}) {
   };
 }
 
-function lowConfidenceItem(decisionState, overrides = {}) {
-  const base = "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision";
-  const rev = "?estimate_revision=1";
-  const actionsByState = {
-    decision_required: [
-      { kind: "acknowledge_estimate", label: "Acknowledge estimate", method: "POST", href: `${base}/acknowledge${rev}` },
-      { kind: "manual_estimate", label: "Enter manual estimate", method: "POST", href: `${base}/manual${rev}` },
-      { kind: "create_scout", label: "Create linked Scout", method: "POST", href: `${base}/scout${rev}` },
-    ],
-    scout_pending: [
-      { kind: "view_scout", label: "View linked Scout", method: "GET", href: "/projects/demo-999#task-scout-1" },
-    ],
-    findings_ready: [
-      { kind: "view_scout_report", label: "View Scout report", method: "GET", href: "/sessions/sess-scout" },
-      { kind: "request_reestimate", label: "Request re-estimate", method: "POST", href: `${base}/scout/reestimate${rev}` },
-    ],
-    reestimate_ready: [
-      { kind: "view_scout_report", label: "View Scout report", method: "GET", href: "/sessions/sess-scout" },
-      { kind: "apply_reestimate", label: "Apply re-estimate", method: "POST", href: `${base}/scout/reestimate/apply?estimate_revision=1&attempt_id=att-1` },
-      { kind: "dismiss_reestimate", label: "Dismiss re-estimate", method: "POST", href: `${base}/scout/reestimate/dismiss?estimate_revision=1&attempt_id=att-1` },
-    ],
-    reestimate_failed: [
-      { kind: "view_scout_report", label: "View Scout report", method: "GET", href: "/sessions/sess-scout" },
-      { kind: "retry_reestimate", label: "Retry re-estimate", method: "POST", href: `${base}/scout/reestimate/retry?estimate_revision=1&attempt_id=att-1` },
-      { kind: "dismiss_reestimate", label: "Dismiss re-estimate", method: "POST", href: `${base}/scout/reestimate/dismiss?estimate_revision=1&attempt_id=att-1` },
-    ],
-  };
+function lowConfidenceItem(overrides = {}) {
   return {
     id: "task:task-estimated-999:low_confidence_estimate",
     kind: "low_confidence_estimate",
@@ -2499,30 +2475,15 @@ function lowConfidenceItem(decisionState, overrides = {}) {
     task_kind: "implementation",
     advisory: true,
     confidence: 0.5,
-    decision_state: decisionState,
-    scout_task_id: decisionState === "decision_required" ? null : "scout-1",
-    session_href: decisionState.startsWith("reestimate") || decisionState === "findings_ready" ? "/sessions/sess-scout" : null,
-    actions: actionsByState[decisionState] || [],
+    href: "/projects/demo-999/plan?question=low%20confidence%20estimate&task_id=task-estimated-999",
+    action_label: "Investigate in chat",
     ...overrides,
   };
 }
 
-test("Pipeline intake selector defaults to implementation", () => {
-  const markup = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999",
-    surface: "pipeline",
-    data: boardData(),
-    error: null,
-    loading: false,
-    action: () => {},
-  }));
-  assert.match(markup, /<select[^>]*name="task_kind"[^>]*>\s*<option value="implementation">/);
-  assert.match(markup, /<option value="scout">/);
-  assert.doesNotMatch(markup, /<option value="acceptance_verification">/);
-});
-
-test("TaskCard renders bounded Scout kind label and launch controls", () => {
-  const data = scoutBoardData();
+test("TaskCard does not render a Scout kind label", () => {
+  const data = boardData();
+  data.tasks_by_status.Estimated[0].task_kind = "scout";
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
     surface: "pipeline",
@@ -2531,14 +2492,12 @@ test("TaskCard renders bounded Scout kind label and launch controls", () => {
     loading: false,
     action: () => {},
   }));
-  assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
-  assert.match(markup, /Launch/);
+  assert.doesNotMatch(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
 });
 
-test("Needs You renders three initial low-confidence choices", () => {
-  const data = scoutBoardData({
-    needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem("decision_required")] },
-  });
+test("TaskCard renders an acceptance_verification kind label", () => {
+  const data = boardData();
+  data.tasks_by_status.Estimated[0].task_kind = "acceptance_verification";
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
     surface: "pipeline",
@@ -2547,18 +2506,12 @@ test("Needs You renders three initial low-confidence choices", () => {
     loading: false,
     action: () => {},
   }));
-  assert.match(markup, /Acknowledge estimate/);
-  assert.match(markup, /<form[^>]*class="needs-you-inline"[^>]*>.*?<input[^>]*type="number"/s);
-  assert.match(markup, /Create linked Scout/);
-  const needsYouSection = markup.match(/<section class="panel needs-you"[^>]*>.*?<\/section>/s)?.[0] ?? "";
-  const buttons = [...needsYouSection.matchAll(/<button[^>]*class="[^"]*btn[^"]*"/g)];
-  assert.equal(buttons.length, 3);
+  assert.match(markup, /<span[^>]*class="[^"]*pill[^"]*"[^>]*>acceptance_verification<\/span>/);
 });
 
-test("Needs You renders a visible Scout label for Scout decisions", () => {
-  const data = scoutBoardData({
-    needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem("decision_required", { task_kind: "scout" })] },
-  });
+test("Needs You renders the investigate-in-chat low-confidence choice", () => {
+  const data = boardData();
+  data.needs_you = { project_id: "demo-999", count: 1, items: [lowConfidenceItem()] };
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
     surface: "pipeline",
@@ -2567,79 +2520,6 @@ test("Needs You renders a visible Scout label for Scout decisions", () => {
     loading: false,
     action: () => {},
   }));
-  const needsYouSection = markup.match(/<section class="panel needs-you"[^>]*>.*?<\/section>/s)?.[0] ?? "";
-  assert.match(needsYouSection, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
-});
-
-test("Needs You GET action renders a safe anchor", () => {
-  const data = scoutBoardData({
-    needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem("scout_pending")] },
-  });
-  const markup = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999",
-    surface: "pipeline",
-    data,
-    error: null,
-    loading: false,
-    action: () => {},
-  }));
-  assert.match(markup, /<a[^>]*class="[^"]*btn[^"]*secondary[^"]*"[^>]*href="\/projects\/demo-999#task-scout-1"[^>]*>View linked Scout<\/a>/);
-});
-
-test("Needs You linked Scout re-estimation states render Apply, Dismiss, and duplicate-spend Retry", () => {
-  for (const [state, expected] of [
-    ["findings_ready", ["View Scout report", "Request re-estimate"]],
-    ["reestimate_ready", ["View Scout report", "Apply re-estimate", "Dismiss re-estimate"]],
-    ["reestimate_failed", ["View Scout report", "Retry re-estimate", "Dismiss re-estimate"]],
-  ]) {
-    const data = scoutBoardData({
-      needs_you: { project_id: "demo-999", count: 1, items: [lowConfidenceItem(state)] },
-    });
-    const markup = renderToStaticMarkup(React.createElement(BoardState, {
-      projectId: "demo-999",
-      surface: "pipeline",
-      data,
-      error: null,
-      loading: false,
-      action: () => {},
-    }));
-    for (const text of expected) {
-      assert.match(markup, new RegExp(text));
-    }
-  }
-});
-
-test("submitBoardAction sends re-estimate retry with duplicate-spend acknowledgement", async () => {
-  let request;
-  const result = await submitBoardAction({
-    url: "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/scout/reestimate/retry?estimate_revision=1&attempt_id=att-1",
-    body: JSON.stringify({ acknowledge_possible_duplicate_spend: true }),
-    fetchImpl: async (url, options) => {
-      request = { url, options };
-      return { ok: true, json: async () => ({ ok: true, next_href: null }) };
-    },
-    navigate: () => assert.fail("successful action must not navigate"),
-    reload: async () => {},
-    onNotice: () => {},
-  });
-  assert.equal(result, "reloaded");
-  assert.equal(request.url, "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/scout/reestimate/retry?estimate_revision=1&attempt_id=att-1");
-  assert.equal(request.options.body, JSON.stringify({ acknowledge_possible_duplicate_spend: true }));
-});
-
-test("submitBoardAction failure preserves backend error and setup href", async () => {
-  let notice;
-  const result = await submitBoardAction({
-    url: "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/scout/reestimate/apply?estimate_revision=1&attempt_id=att-1",
-    body: JSON.stringify({}),
-    fetchImpl: async () => ({
-      ok: false,
-      json: async () => ({ ok: false, error: "Stale re-estimate.", setup_href: "/settings/workers" }),
-    }),
-    navigate: () => assert.fail("failure must not navigate"),
-    reload: async () => {},
-    onNotice: (n) => { notice = n; },
-  });
-  assert.equal(result, "failed");
-  assert.deepEqual(notice, { message: "Stale re-estimate.", setupHref: "/settings/workers" });
+  assert.match(markup, /Investigate in chat/);
+  assert.match(markup, /href="\/projects\/demo-999\/plan\?question/);
 });

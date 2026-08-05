@@ -1,4 +1,7 @@
+import pytest
+
 from foreman_ai_hq import db
+from tests.conftest import seed_orchestrator_inventory
 from tests.portal.helpers import PORTAL_TOKEN, _client, _connect_project, _portal_headers, _project_metadata
 
 
@@ -92,7 +95,9 @@ def test_setup_rejects_blocked_project_and_preserves_earlier_blocker_priority(tm
         _prepare_ready_setup(database_path, tmp_path, monkeypatch)
         _connect_invalid_project(database_path, tmp_path / "missing-project")
         blocked = client.get("/api/setup", headers=_portal_headers())
-        monkeypatch.delenv("FOREMAN_AI_HQ_CONTROL_API_KEY")
+        # Un-ready the orchestrator the only way that now means anything: the
+        # configured model stops appearing in pi's discovered inventory.
+        seed_orchestrator_inventory(database_path, model="anthropic/claude-opus-5")
         earlier_blocker = client.get("/api/setup", headers=_portal_headers())
 
     assert blocked.status_code == 200
@@ -151,8 +156,10 @@ def test_setup_ignores_stale_launch_ready_capability_when_local_runner_disabled(
     projects_step = next(step for step in payload["steps"] if step["name"] == "Projects")
     assert projects_step["state"] == "needs setup"
 
+@pytest.mark.unconfigured_orchestrator
 def test_setup_overview_and_budget_settings_flow(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    # A genuine first run: no Orchestrator Model has been chosen from pi's inventory.
     with _client(tmp_path) as client:
         setup = client.get("/api/setup", headers=_portal_headers())
         assert setup.status_code == 200

@@ -14,5 +14,5 @@ Do not include API keys, portal tokens, bearer tokens, `.foreman/secrets.env`, r
 
 - `.foreman/config.toml` is non-secret operator config.
 - `.foreman/secrets.env` is ignored local secret storage.
-- The Portal writes submitted control-plane API key values only to ignored local secret storage and does not show them again.
+- Harness Proxy upstream API credentials, when configured, stay in ignored local secret storage or environment variables and are never exposed as Orchestrator settings.
 - Native Worker CLIs such as OpenCode, Claude Code, and Codex keep their own auth/config unless explicitly routed through the Harness Proxy.

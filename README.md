@@ -8,6 +8,7 @@ Use it when you want a coding agent workflow that is easier to inspect:
 
 - estimate work before launch
 - break larger plans into smaller governed slices
+- investigate bounded repository uncertainty in Planning Chat before creating work
 - plan work in a project Pipeline and run coding agents from its Execution Floor
 - keep long-running agent work from turning into one polluted mega-thread: each slice gets its own scoped Worker run, while the Harness preserves the plan, budget, evidence, and review state
 - record Worker Run evidence, stdout/stderr, token usage, and review state
@@ -25,7 +26,7 @@ installed foremanctl CLI
   -> session report and token evidence
 ```
 
-The Worker CLI keeps its own auth/config. Foreman AI HQ configures the control-plane model separately for estimates, planning, recommendations, summaries, and reports.
+The Worker CLI keeps its own auth/config. Foreman AI HQ configures one Orchestrator Model for planning, intake judgment, estimation, task breakdown, and Agent Review.
 
 Foreman AI HQ only governs work launched through its own board and a verified Worker Adapter. It does not govern arbitrary external agent spend.
 
@@ -78,10 +79,10 @@ This updates the global `foremanctl` CLI and preserves repo-local `.foreman/` st
 ```
 2. Open `http://localhost:8000/`.
 3. Open `/settings/control-plane`.
-4. Pick a control-plane provider/model, paste the provider API key, save, then test the connection.
+4. Run `pi /login` to authenticate with your provider, then choose an Orchestrator Model from pi's inventory and verify it.
 5. Connect a local repository from `/projects`.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify token tracking.
-7. Open the project's Pipeline at `/projects/{project_id}`, estimate a tiny task, and launch it.
+7. Open the project's Pipeline at `/projects/{project_id}`, shape a tiny task in Planning Chat, select **Create governed work**, and launch the resulting Estimated Task.
 8. Follow the run on `/projects/{project_id}/floor`; open its Evidence Drawer before marking the task done.
 
 Default loopback `foremanctl serve` opens the local Portal without a login token. If you bind the Portal to `0.0.0.0`, run it behind a proxy, or use Docker/shared access, keep the portal token from ignored `.foreman/secrets.env` and sign in through `/login`.
@@ -107,8 +108,8 @@ Representative local Portal screens using synthetic/public-safe data:
 
 ## How the workflow works
 
-1. **Create a task** in the project Pipeline.
-2. **Estimate** with the control-plane model.
+1. **Shape work** in Planning Chat, then explicitly submit it as governed intake. The recorded `single_task` or `needs_breakdown` decision and reason determine the next step.
+2. **Estimate** with the Orchestrator Model.
 3. **Launch** through a verified Worker Adapter.
 4. **Run async** on the Execution Floor while the Portal stays responsive.
 5. **Review evidence** in the card's side drawer: command plan, Worker events, token usage, checkpoints, and Agent Review; the Session Report remains the full permalink.
@@ -120,11 +121,23 @@ Task lifecycle states are:
 Estimated -> Running -> Review -> Done
 ```
 
-Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while Needs You explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, and budget overrides at the top of the Pipeline.
+Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while Needs You explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, budget overrides, and advisory low-confidence estimates at the top of the Pipeline.
+
+Task kind is explicit: `implementation` or `acceptance_verification`. An implementation Task delivers a change, while Acceptance Verification proves an integrated result against its source contract.
+
+### When an estimate is uncertain
+
+An automatic estimate below `0.60` confidence creates an advisory Needs You item. It does not move the Task, block launch by itself, or silently spend more tokens. The operator can:
+
+- acknowledge the current estimate;
+- enter a manual estimate; or
+- open Planning Chat to investigate the repository facts needed for an honest estimate.
+
+Planning Chat investigation is orchestration work, not a separate Task. After refining the contract, use **Create governed work** to record a fresh structured intake decision and reason.
 
 ### With a Markdown file
 
-For a larger `.md` plan, paste the Markdown into the Pipeline or upload the file instead of turning every bullet into a task yourself:
+For a larger `.md` plan, paste the Markdown into Planning Chat or upload the file, then select **Create governed work** instead of turning every bullet into a task yourself:
 
 ```text
 .md plan
@@ -155,11 +168,9 @@ There are two model layers:
 
 | Layer                   | Used for                                                      | Auth/config                                                     |
 | ----------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Control Plane model** | estimates, planning, task breakdown, recommendations, reports | configured in `/settings/control-plane` or local config/secrets |
+| **Orchestrator model** | planning, intake judgment, estimation, task breakdown, Agent Review | selected from pi inventory; provider auth via `pi /login`       |
 | **Worker model**        | the actual coding task                                        | configured by the native Worker CLI                             |
 
-
-Pasting a control-plane API key does not configure OpenCode, Claude Code, Codex, or another Worker CLI.
 
 ## Local files and configuration
 
@@ -170,12 +181,12 @@ Run it from the repository you want Foreman AI HQ to govern. If you run it from 
 | File                   | Purpose                                                        |
 | ---------------------- | -------------------------------------------------------------- |
 | `.foreman/config.toml`     | non-secret local config                                        |
-| `.foreman/secrets.env`     | ignored portal token and control-plane API key storage         |
+| `.foreman/secrets.env`     | ignored portal token storage                                  |
 | `.foreman/guardrails.yaml` | ignored default guardrail config                               |
 | `.foreman/harness.db`      | default SQLite database, created or migrated by `foremanctl init`     |
 
 
-For normal local use, prefer the Portal settings screens. Environment variables are mainly for CI, headless runs, or compatibility.
+For normal local use, prefer the Portal settings screens. Environment variables are mainly for CI, headless runs, or compatibility. Config files may use either `orchestrator_model` or the legacy `control_plane_model`; both resolve to the same setting.
 
 Common environment variables:
 
@@ -183,13 +194,10 @@ Common environment variables:
 | Variable                        | Purpose                                                                       |
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `TOKEN_TRACKER_PORTAL_TOKEN`    | Portal login token for shared/non-loopback access                             |
-| `FOREMAN_AI_HQ_CONTROL_PROVIDER` | Control-plane provider, such as `openai`, `anthropic`, or `openai-compatible` |
-| `FOREMAN_AI_HQ_CONTROL_MODEL`    | Control-plane model                                                           |
-| `FOREMAN_AI_HQ_CONTROL_BASE_URL` | Base URL for OpenAI-compatible providers                                      |
-| `FOREMAN_AI_HQ_CONTROL_API_KEY`  | Control-plane provider API key                                                |
+| `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model chosen from pi's inventory                                 |
 
 
-The Portal writes submitted API keys only to ignored local secret storage and does not display raw key values again.
+The Orchestrator Model is selected from pi's discovered inventory, and its provider authentication belongs to pi. Worker CLI authentication remains in the installed Worker CLI.
 
 ## Current limits
 
@@ -200,6 +208,7 @@ The Portal writes submitted API keys only to ignored local secret storage and do
 ## More docs
 
 - [Getting started](docs/GETTING_STARTED.md)
+- [Harness architecture and workflow](docs/HARNESS.md)
 - [Install options](docs/INSTALL.md)
 - [Worker Adapter setup](docs/WORKER_ADAPTER_SETUP.md)
 - [Setup support checklist](docs/SETUP_SUPPORT_CHECKLIST.md)

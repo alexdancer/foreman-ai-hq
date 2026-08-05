@@ -24,6 +24,9 @@ flowchart LR
         board --> breakdown[Task Breakdown Agent]
         board --> estimation[Task Estimation]
         breakdown -->|accepted candidates| estimation
+        estimation -->|confidence below 0.60| decisions[Needs You]
+        decisions -->|investigate in chat| planning[Planning Chat]
+        planning --> breakdown
         estimation --> routing[Deterministic Model Routing]
         routing --> launch[Launch Guardrails]
         budget[Token Budget] --> launch
@@ -42,7 +45,7 @@ flowchart LR
 
     launch -->|verified project, adapter, model, and tracking| backend
     worker -->|proxy_governed or native_usage evidence| evidence
-    review -->|Done or Blocked| board
+    review -->|Done or Blocked Condition| board
     alarms --> operatorAction[Operator action]
 ```
 
@@ -72,6 +75,8 @@ Operator reviews, marks Done, or Blocks with a reason
 Acceptance Verification proves the combined result when a plan was split
 ```
 
+When automatic estimate confidence is below `0.60`, Needs You adds an advisory branch without changing the Task lifecycle or blocking launch by itself. The operator may acknowledge the estimate, replace it manually, or open the Planning Chat to investigate the task before re-estimating.
+
 ## Control Plane and execution backends
 
 The harness tracks project capability explicitly:
@@ -84,20 +89,23 @@ The harness tracks project capability explicitly:
 | Launch-ready via Hosted Workspace/Sandbox | A hosted execution environment is sandboxed, configured, and verified. |
 | Blocked | The project exists, but no backend satisfies launch requirements. |
 
-The current operator path is local-first: `foremanctl init`, `foremanctl serve`, connect a local project, configure the control-plane model, verify a Worker Adapter, then launch from the project board.
+The current operator path is local-first: `foremanctl init`, `foremanctl serve`, connect a local project, run `pi /login` and choose the orchestrator model from pi's inventory, verify a Worker Adapter, then launch from the project board.
 
 Hosted workspaces are useful for analysis and estimation before they are launch-ready. Hosted Worker execution requires a verified sandbox, credentials policy, and Worker Adapter installation before it should be presented as launchable.
 
 ## Task intake and slicing
 
-The board is not a backlog dump. Work enters through **Estimate task**:
+The board is not a backlog dump. Planning Chat is the sole public Task intake:
 
-- Short plain-text tasks may go straight to estimation.
-- Markdown uploads, Markdown paste, and clearly oversized tasks go through the **Task Breakdown Agent** first.
+- The operator can converse and investigate without creating a Task.
+- **Create governed work** records a structured `single_task` or `needs_breakdown` decision and reason.
+- `single_task` intake proceeds to estimation; `needs_breakdown`, Markdown uploads, and Markdown paste go through the **Task Breakdown Agent** first.
 - Breakdown is semantic, not bullet-count based.
 - Proposed tasks should be narrow vertical slices that are independently grabbable, demoable or verifiable, dependency-aware, and small enough for one Worker run.
 - Each proposed slice carries enough policy evidence to review it: objective, proof path, split/merge rationale, dependencies, likely entry points when known, and whether it is AFK-launchable or HITL.
 - Constraints, non-goals, and verification notes are preserved as task metadata or rejected as non-tasks; they should not become fake implementation tasks.
+
+Every Task has an explicit kind: `implementation` or `acceptance_verification`. Planning Chat investigation does not produce a separate Task.
 
 For integrated work, the breakdown should include a final **Acceptance Verification** task. That task checks the combined result against the original source contract instead of rerunning the whole implementation as one large task.
 
@@ -111,11 +119,10 @@ The canonical task states are:
 | Running | A Worker Run is active. |
 | Review | The Worker Run ended and needs operator disposition. |
 | Done | The operator accepted the result. |
-| Blocked | Estimation, safety, verification, dependency, or manual-review requirements prevent progress. |
 
-An estimated task with no verified Worker Adapter normally stays **Estimated** with launch guardrail failures shown. It is not automatically a Blocked task just because setup is incomplete.
+Blocked is a condition, not a lifecycle state or board column. A Task that cannot proceed stays in its canonical position with a bounded Blocked Condition reason. For example, a failed estimate remains on the Pipeline with manual-estimate recovery, while a review Block disposition remains in **Review**. An Estimated Task with no verified Worker Adapter likewise stays **Estimated** with launch guardrail failures shown.
 
-Review is human-owned. Agent Review can provide advisory findings, but it does not automatically mark work Done, Blocked, or repaired.
+Review is human-owned. Agent Review can provide advisory findings, but it does not automatically mark work Done, add or clear a Blocked Condition, or create repair work.
 
 ## Worker Adapters and tracking modes
 
@@ -131,6 +138,8 @@ The first verified local path is OpenCode through native usage import. Claude Co
 
 `proxy_governed` is a real architecture path for proxy-capable adapters, but it should not be presented as the default local proof unless a stock adapter is verified end-to-end through the proxy.
 
+Read-only capability is separate from tracking authority. A verified `native_usage` or `proxy_governed` adapter may launch compatible implementation Tasks without having an adapter-enforced read-only profile. `observed_only` remains non-launchable regardless of read-only command support.
+
 ## Launch guardrails
 
 Before a task can move from **Estimated** to **Running**, the harness checks:
@@ -142,9 +151,15 @@ Before a task can move from **Estimated** to **Running**, the harness checks:
 - any required session-key or proxy wiring exists;
 - budget override acknowledgement is recorded when the estimate exceeds remaining budget.
 
-Write-capable sessions also require a clean git working tree before launch. The harness creates the task branch, lets the Worker edit there, and owns the final commit only after configured verification passes. Read-only inspection sessions may run against a dirty repo.
+Launch mode is determined by canonical Task kind: `implementation` launches write-capable, `acceptance_verification` launches read-only. There is no third mode and no operator override.
 
-Operational launch failures such as CLI timeout, nonzero exit, or missing usage evidence return the task to **Estimated** with sanitized launch-error evidence so it can be retried. Hard safety or workflow failures move or keep the task **Blocked** with preserved evidence.
+Write-capable sessions require a detected git repository, a clean working tree before launch, an operator-confirmed base branch, and an operator-confirmed test command when one is used. A dirty working tree is refused and the offending paths are named; the Harness does not stash or commit operator changes unasked. The harness creates the task branch from the confirmed base branch, lets the Worker edit there, and owns the final commit only after configured verification passes. When no test command is configured or verification fails, the Task stays in Review and the operator must explicitly Approve commit.
+
+Read-only inspection sessions may run against a dirty repo and do not create a branch or commit.
+
+Canonical Task kind forces `acceptance_verification` into read-only launch mode server-side, regardless of client input or stale metadata. Read-only Tasks never receive a Task branch or Harness-owned commit.
+
+Operational launch failures such as CLI timeout, nonzero exit, or missing usage evidence return the Task to **Estimated** with sanitized launch-error evidence so it can be retried. Hard safety or workflow failures preserve the canonical lifecycle state and record a Blocked Condition with evidence.
 
 ## Budgets, guardrails, and alarms
 
@@ -155,9 +170,13 @@ The harness tracks both:
 
 Both count against the daily budget, but they are labeled separately so operator overhead does not distort task execution actuals.
 
+Investigation in Planning Chat is orchestration spend, not Worker spend. It does not affect implementation estimate-accuracy aggregates or coefficient fitting.
+
 Budget governance is soft by design. Over-budget launches require explicit operator override and audit evidence; non-budget Launch Guardrail failures such as unverified tracking, invalid project setup, disallowed models, or missing required wiring remain non-launchable. The harness records overruns, raises alarms, and preserves evidence. It does not silently kill a running native-usage Worker mid-task.
 
 Common alarm classes include budget zone changes, daily cap exceeded, session timeout, repeated-loop detection, tool-category bias, and checkpoint failure. Alarms are structured records with context and recommended action; the operator decides whether to continue, abort, raise budget, or adjust guardrails.
+
+The `session_timeout` guardrail action `notify_and_checkpoint` currently records a `SESSION_TIMEOUT` alarm only; it does not trigger an independent checkpoint save. Checkpoints are evaluated automatically once a Worker Run completes and its Session Artifact is available, so a timeout that ends the run is still reflected in the checkpoint results for that completed Session.
 
 ## Session artifacts and review evidence
 
@@ -180,8 +199,9 @@ It does not auto-approve budget overrides, auto-mark tasks Done, run cross-proje
 ## Operator surfaces
 
 - **Portal** — primary user experience for setup, project connection, Orchestration Board, dashboard, alarms, review, and reports.
+- **Needs You** — project-scoped decisions and advisory low-confidence estimate work, with backend-authoritative recovery actions.
 - **`foremanctl` command** — administrative entrypoint for initialization, serving, checks, and demo setup.
-- **Settings** — source of truth for control-plane model connection, Worker Adapter setup, token budget, and project readiness.
+- **Settings** — source of truth for orchestrator model connection, Worker Adapter setup, token budget, and project readiness.
 - **REST API** — backing API for sessions, tasks, guardrails, alarms, dashboard data, and reports.
 
 Secrets are local and ignored. Operator config stores non-secret settings; provider keys, portal tokens, and CLI auth must not appear in support output, logs, or committed files.

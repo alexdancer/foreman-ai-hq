@@ -52,12 +52,17 @@ def test_pyproject_has_public_cli_package_metadata():
 def test_pyproject_packages_server_rendered_templates_and_defaults():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
 
-    # Server-rendered templates/defaults ship alongside the built React Portal
-    # shell assets so a packaged install can serve the migrated surface.
+    # Server-rendered templates/defaults, the tracked pi orchestrator profile, and the
+    # pinned Node bridge config ship alongside the built React Portal shell assets so a
+    # packaged install can serve them.
     assert pyproject["tool"]["setuptools"]["package-data"]["foreman_ai_hq"] == [
         "templates/*.html",
         "defaults/*.yaml",
         "data/*.json",
+        "orchestrator/pi/profile/*.md",
+        "orchestrator/pi/extensions/*.ts",
+        "orchestrator/pi/bridge/package.json",
+        "orchestrator/pi/bridge/package-lock.json",
         "static/react/*",
         "static/react/assets/*",
     ]
@@ -92,10 +97,9 @@ def test_readme_documents_portal_first_operator_flow():
     assert "docs/assets/screenshots/worker-adapter-setup.png" in readme
     assert "docs/assets/screenshots/sessions-token-ledger.png" in readme
     assert "environment variables" in readme.lower()
-    assert "FOREMAN_AI_HQ_CONTROL_API_KEY" in readme
-    assert "proxy_governed" not in readme
-    assert "proxy-governed" not in readme.lower()
+    assert "FOREMAN_AI_HQ_CONTROL_API_KEY" not in readme
     assert "Harness Proxy" not in readme
+    assert "proxy_governed" not in readme
 
 
 def test_install_docs_separate_operator_installs_from_contributor_uv_run():
@@ -119,6 +123,7 @@ def test_install_docs_separate_operator_installs_from_contributor_uv_run():
     assert "uv run foremanctl ...` is a contributor convenience" in getting_started
     assert "proxy_governed" not in getting_started
     assert "Harness Proxy" not in getting_started
+    assert "Pi orchestration and native Worker CLIs use separate authentication" in getting_started
     assert "assets/screenshots/dashboard-overview.png" in getting_started
     assert "assets/screenshots/project-board-review-workflow.png" in getting_started
     assert "assets/screenshots/control-plane-model-settings.png" in getting_started
@@ -128,19 +133,20 @@ def test_install_docs_separate_operator_installs_from_contributor_uv_run():
     assert "assets/screenshots/task-breakdown-manual-recovery.png" in getting_started
 
 
-def test_operator_docs_do_not_advertise_proxy_governed_mode():
+def test_public_operator_docs_do_not_advertise_unproven_proxy_mode():
     operator_docs = [
+        ROOT / "README.md",
         ROOT / "docs" / "GETTING_STARTED.md",
         ROOT / "docs" / "WORKER_ADAPTER_SETUP.md",
         ROOT / "docs" / "SETUP_SUPPORT_CHECKLIST.md",
-        ROOT / "docs" / "MCP_AGENT_HARNESS_TODO.md",
+        ROOT / ".github" / "ISSUE_TEMPLATE" / "setup_support.md",
+        ROOT / ".github" / "ISSUE_TEMPLATE" / "bug_report.md",
     ]
 
     for path in operator_docs:
         text = path.read_text()
+        assert "Harness Proxy" not in text, path
         assert "proxy_governed" not in text, path
-        assert "proxy-governed" not in text.lower(), path
-        assert "Governed via Harness Proxy" not in text, path
 
 
 def test_support_checklist_requests_bare_foremanctl_check_and_install_method():
@@ -175,11 +181,3 @@ def test_documented_screenshots_exist_and_skip_stale_dashboard_capture():
     assert "dashboard-stale-recent-alarms.png" not in readme
     assert "dashboard-stale-recent-alarms.png" not in getting_started
     assert "dashboard-stale-recent-alarms.png" not in checklist
-
-
-def test_local_readonly_demo_script_supports_loopback_without_portal_token():
-    script = (ROOT / "scripts" / "local-opencode-readonly-demo.sh").read_text()
-
-    assert "before running" not in script
-    assert "AUTH_HEADERS=()" in script
-    assert "Authorization: Bearer $PORTAL_TOKEN" in script

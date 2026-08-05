@@ -1,0 +1,12 @@
+{
+  "name": "foreman-ai-hq-pi-acp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned Node bridge for the foreman-ai-hq pi ACP conversational runtime. This package tracks only product configuration; node_modules is installed at runtime.",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "pi-acp": "0.0.31"
+  }
+}

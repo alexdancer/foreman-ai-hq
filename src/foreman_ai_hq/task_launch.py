@@ -15,11 +15,14 @@ from typing import Any, Callable
 
 from foreman_ai_hq import db
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
+from foreman_ai_hq.checkpoints import evaluate_and_record_checkpoints
+from foreman_ai_hq.guardrails import GuardrailConfig, load_guardrails
 from foreman_ai_hq.launch_guardrails import evaluate_launch_guardrails
 from foreman_ai_hq.native_cli_diagnostics import native_cli_diagnostic, redact_native_cli_text
 from foreman_ai_hq.native_usage import NativeUsageEvidence, parse_native_usage_evidence
 from foreman_ai_hq.project_context import project_task_metadata, resolve_task_project
 from foreman_ai_hq.repo_context import build_repo_context_brief, repo_context_prompt
+from foreman_ai_hq.settings import Settings
 from foreman_ai_hq.task_kind import read_task_kind
 from foreman_ai_hq.stream_events import streaming_runner
 from foreman_ai_hq.tracking_modes import NATIVE_USAGE, PROXY_GOVERNED
@@ -101,6 +104,7 @@ def launch_task(
     native_budget_acknowledged: bool = False,
     budget_since: str | None = None,
     runner: Runner | None = None,
+    guardrail_config: GuardrailConfig | None = None,
 ) -> TaskLaunchResult:
     # Claiming a task and creating its Worker Run must be single-threaded inside this process.
     with _LAUNCH_START_LOCK:
@@ -116,6 +120,7 @@ def launch_task(
             native_budget_acknowledged=native_budget_acknowledged,
             budget_since=budget_since,
             runner=runner,
+            guardrail_config=guardrail_config,
         )
 
 
@@ -132,9 +137,15 @@ def _launch_task_unlocked(
     native_budget_acknowledged: bool = False,
     budget_since: str | None = None,
     runner: Runner | None = None,
+    guardrail_config: GuardrailConfig | None = None,
 ) -> TaskLaunchResult:
     db.mark_stale_worker_runs_interrupted(database_path)
     task = db.get_task(database_path, task_id)
+    if guardrail_config is None:
+        # Every request path passes the app's guardrails explicitly, and the background run
+        # thread carries them through. This fallback is for direct callers (tests, scripts),
+        # which have no app state to read them from.
+        guardrail_config = load_guardrails(Settings().guardrails_path)
     manual_estimate_requested = estimate_tokens is not None and bool(model)
 
     if project_id:
@@ -188,8 +199,10 @@ def _launch_task_unlocked(
 
     metadata = task.get("metadata") or {}
     task_kind = read_task_kind(metadata)
-    read_only = task_kind == "scout" or bool(metadata.get("read_only")) or metadata.get("launch_mode") == "read_only"
-    write_capable = task_kind != "scout" and (bool(metadata.get("write_capable")) or metadata.get("launch_mode") == "write_capable")
+    # Launch mode is derived from canonical task kind; stale metadata and client values are ignored.
+    # Legacy `scout` rows continue to launch read-only so historical Tasks stay safe.
+    write_capable = task_kind == "implementation"
+    read_only = task_kind in {"acceptance_verification", "scout"}
     selected_model = model or task.get("recommended_model")
     selected_adapter_id = adapter_id or _default_adapter_id(database_path)
     selected_proxy_url = proxy_url or DEFAULT_PROXY_URL
@@ -225,7 +238,6 @@ def _launch_task_unlocked(
         session_api_key=session_api_key,
         proxy_url=selected_proxy_url,
         read_only=read_only,
-        read_only_profile_required=task_kind == "scout",
     )
     if not guardrails.passed or guardrails.adapter is None:
         blocked = _mark_launch_blocked(database_path, task, guardrails.reasons)
@@ -255,16 +267,16 @@ def _launch_task_unlocked(
     task_prompt = repo_context_prompt(task["description"], repo_context)
     if read_only:
         task_prompt += (
-            "\n\nThis is a read-only Scout task. "
+            "\n\nThis is a read-only acceptance verification task. "
             "Use only file-read and analysis tools. "
             "Do not create, edit, move, delete, commit, or branch anything. "
             "Produce findings, risks, and a concise recommendation."
         )
     task_branch = None
     if write_capable:
-        cleanliness_reasons = _write_cleanliness_failures(project_root)
+        cleanliness_reasons, setup_href = _write_cleanliness_failures(project_root, project.get("profile"))
         if cleanliness_reasons:
-            blocked = _mark_write_launch_blocked(database_path, task, cleanliness_reasons)
+            blocked = _mark_write_launch_blocked(database_path, task, cleanliness_reasons, setup_href=setup_href)
             raise TaskLaunchBlocked(blocked, cleanliness_reasons)
 
     session = db.create_session(
@@ -284,7 +296,7 @@ def _launch_task_unlocked(
         status="running",
     )
     if write_capable:
-        task_branch = _create_task_branch(project_root, task)
+        task_branch, original_branch = _create_task_branch(project_root, task, project.get("profile"))
 
     builder = get_adapter_builder(guardrails.adapter)
     if tracking_mode == NATIVE_USAGE:
@@ -309,7 +321,7 @@ def _launch_task_unlocked(
             **plan.metadata,
             "session_id": session["id"],
             "task_id": task_id,
-            "launch_mode": "write_capable" if write_capable else "read_only" if read_only else "standard",
+            "launch_mode": "write_capable" if write_capable else "read_only",
             **({"task_branch": task_branch} if task_branch else {}),
         },
     )
@@ -331,10 +343,10 @@ def _launch_task_unlocked(
                     "launch_command_plan": command_plan,
                     "repo_context_brief": repo_context,
                     "launch_project_root": project_root,
-                    "launch_mode": "write_capable" if write_capable else "read_only" if read_only else "standard",
+                    "launch_mode": "write_capable" if write_capable else "read_only",
                     "budget_check": budget_check,
                     **({"budget_override": {"approved": True, "reason": "operator_approved_launch"}} if budget_override else {}),
-                    **({"task_branch": task_branch} if task_branch else {}),
+                    **({"task_branch": task_branch, "operator_branch": original_branch} if task_branch else {}),
                 }
             ),
         },
@@ -350,12 +362,12 @@ def _launch_task_unlocked(
         command_plan=command_plan,
         metadata={
             "usage_source": usage_source,
-            "launch_mode": "write_capable" if write_capable else "read_only" if read_only else "standard",
+            "launch_mode": "write_capable" if write_capable else "read_only",
             "launch_project_root": project_root,
             "connected_project_id": project["id"],
             "project_profile": project.get("profile") or {},
             "repo_context_brief": repo_context,
-            **({"task_branch": task_branch} if task_branch else {}),
+            **({"task_branch": task_branch, "operator_branch": original_branch} if task_branch else {}),
         },
     )
     _record_worker_event(
@@ -415,6 +427,7 @@ def _launch_task_unlocked(
         read_only=read_only,
         write_capable=write_capable,
         runner=runner,
+        guardrail_config=guardrail_config,
     )
     return TaskLaunchResult(
         task=claimed,
@@ -463,6 +476,7 @@ def _start_background_worker_run(
     read_only: bool,
     write_capable: bool,
     runner: Runner | None,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     thread = threading.Thread(
         target=_execute_worker_run_safe,
@@ -482,6 +496,7 @@ def _start_background_worker_run(
             "read_only": read_only,
             "write_capable": write_capable,
             "runner": runner,
+            "guardrail_config": guardrail_config,
         },
         daemon=True,
         name=f"worker-run-{worker_run_id}",
@@ -506,6 +521,7 @@ def _execute_worker_run_safe(
     read_only: bool,
     write_capable: bool,
     runner: Runner | None,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     try:
         _execute_worker_run(
@@ -524,6 +540,7 @@ def _execute_worker_run_safe(
             read_only=read_only,
             write_capable=write_capable,
             runner=runner,
+            guardrail_config=guardrail_config,
         )
     except Exception as exc:
         reason = f"Worker Run failed unexpectedly: {type(exc).__name__}"
@@ -568,6 +585,7 @@ def _execute_worker_run(
     read_only: bool,
     write_capable: bool,
     runner: Runner | None,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     worker_run = db.mark_worker_run_running(database_path, worker_run_id)
     _record_worker_event(
@@ -623,6 +641,7 @@ def _execute_worker_run(
         write_capable=write_capable,
         result=result,
         outcome=outcome,
+        guardrail_config=guardrail_config,
     )
 
 
@@ -830,28 +849,36 @@ def _classify_worker_run_result(
             readonly_diff_evidence={"before": before_tree, "after": after_tree},
         )
 
-    if (
-        tracking_mode == NATIVE_USAGE
-        and (getattr(plan, "metadata", {}) or {}).get("kind") == "codex"
-        and not read_only
-        and project_root
-        and before_tree == after_tree
-    ):
-        # Native Codex can report success without touching the requested repo; treat that as retryable.
-        reason = "Worker completed but produced no filesystem changes in the connected project."
-        return WorkerRunOutcome(
-            kind="recoverable_failure",
-            error_type="no_workdir_changes",
-            reason=reason,
-            native_evidence=native_evidence,
-            workdir_evidence=workdir_evidence,
-            marker_stdout=result.stdout,
-            marker_stderr=result.stderr,
-            guardrail_reasons=(reason,),
-            evidence={"workdir_evidence": workdir_evidence},
-        )
-
+    # The write-capable path already returned; read-only mutation is checked above.
+    # Any adapter reporting success without filesystem changes is covered by the
+    # adapter-agnostic diff_summary check in _finalize_write_capable_launch.
     return WorkerRunOutcome(kind="completed", native_evidence=native_evidence, workdir_evidence=workdir_evidence)
+
+
+def _evaluate_and_record_worker_checkpoints(
+    database_path: Path | str,
+    *,
+    session_id: str,
+    task_id: str,
+    worker_run_id: str,
+    guardrail_config: GuardrailConfig,
+) -> None:
+    """Evaluate checkpoints once a Worker Run completes and record failures without failing the run."""
+    try:
+        evaluate_and_record_checkpoints(database_path, session_id, guardrail_config)
+    except Exception as exc:
+        # Checkpoints are advisory; a failure to evaluate them must not discard run evidence.
+        # `record_worker_run_event` sanitizes `detail` on the way in, so it is passed raw here.
+        db.record_worker_run_event(
+            database_path,
+            worker_run_id=worker_run_id,
+            session_id=session_id,
+            task_id=task_id,
+            kind="checkpoint",
+            title="Checkpoint evaluation failed",
+            level="error",
+            detail={"error": str(exc), "error_type": type(exc).__name__},
+        )
 
 
 def _apply_worker_run_outcome(
@@ -870,6 +897,7 @@ def _apply_worker_run_outcome(
     write_capable: bool,
     result: WorkerProcessResult,
     outcome: WorkerRunOutcome,
+    guardrail_config: GuardrailConfig,
 ) -> None:
     if outcome.native_evidence is not None:
         db.record_token_turn(
@@ -969,6 +997,15 @@ def _apply_worker_run_outcome(
                 metadata={"task_status": exc.task["status"]},
             )
             return
+        # A completed Worker Run is the observable completion barrier; checkpoint
+        # evidence (or its failure event) must be durable before readers see it.
+        _evaluate_and_record_worker_checkpoints(
+            database_path,
+            session_id=session["id"],
+            task_id=task["id"],
+            worker_run_id=worker_run_id,
+            guardrail_config=guardrail_config,
+        )
         db.mark_worker_run_completed(
             database_path,
             worker_run_id,
@@ -1035,6 +1072,13 @@ def _apply_worker_run_outcome(
                 **(_read_only_report_metadata(task) if read_only else {}),
             },
         },
+    )
+    _evaluate_and_record_worker_checkpoints(
+        database_path,
+        session_id=session["id"],
+        task_id=task["id"],
+        worker_run_id=worker_run_id,
+        guardrail_config=guardrail_config,
     )
     db.mark_worker_run_completed(
         database_path,
@@ -1122,20 +1166,28 @@ def _mark_launch_blocked(database_path: Path | str, task: dict[str, Any], reason
     return db.update_task(database_path, task["id"], {"status": status, "metadata": metadata})
 
 
-def _mark_write_launch_blocked(database_path: Path | str, task: dict[str, Any], reasons: list[str]) -> dict[str, Any]:
+def _mark_write_launch_blocked(
+    database_path: Path | str,
+    task: dict[str, Any],
+    reasons: list[str],
+    setup_href: str | None = None,
+) -> dict[str, Any]:
     reason = reasons[0] if reasons else "Write-capable launch guardrails failed."
+    metadata: dict[str, Any] = {
+        **task.get("metadata", {}),
+        "launch_blocked_reason": reason,
+        "launch_guardrail_reasons": list(reasons),
+        "blocked_reason": reason,
+        "blocked_condition": _blocked_condition(reason, "write_launch_guardrail"),
+    }
+    if setup_href:
+        metadata["launch_diagnostic"] = {"setup_href": setup_href}
     return db.update_task(
         database_path,
         task["id"],
         {
             "status": "Estimated",
-            "metadata": {
-                **task.get("metadata", {}),
-                "launch_blocked_reason": reason,
-                "launch_guardrail_reasons": list(reasons),
-                "blocked_reason": reason,
-                "blocked_condition": _blocked_condition(reason, "write_launch_guardrail"),
-            },
+            "metadata": metadata,
         },
     )
 
@@ -1437,28 +1489,91 @@ def detect_pr_capability(root_path: Path | str) -> dict[str, Any]:
     }
 
 
-def _write_cleanliness_failures(root_path: str | None) -> list[str]:
+def _write_cleanliness_failures(root_path: str | None, project_profile: dict[str, Any] | None = None) -> tuple[list[str], str | None]:
     if not root_path:
-        return ["Connected project path is required for write-capable launch."]
+        return (["Connected project path is required for write-capable launch."], None)
     root = Path(root_path)
     if not (root / ".git").exists():
-        return ["Write-capable launch requires a git repository."]
+        return (["Write-capable launch requires a git repository."], None)
     branch = _current_branch(root)
     if not branch:
-        return ["Write-capable launch requires a visible current git branch."]
+        return (["Write-capable launch requires a visible current git branch."], None)
     status = _git_porcelain(str(root))
     if status:
-        return ["Write-capable launch requires a clean working tree before launch."]
-    return []
+        lines = [line.strip() for line in status.splitlines() if line.strip()]
+        paths = [line[3:].strip() if len(line) > 3 else line for line in lines]
+        return (
+            [
+                "Write-capable launch requires a clean working tree before launch.",
+                f"Offending paths: {', '.join(paths[:20])}",
+            ],
+            None,
+        )
+    profile = project_profile or {}
+    if profile.get("test_command_suggested") and not profile.get("test_command_confirmed"):
+        return (
+            [
+                "Write-capable launch is blocked until the suggested verification command is confirmed.",
+                f"Suggested command: {profile['test_command_suggested']}",
+            ],
+            "/settings/project",
+        )
+    if profile.get("base_branch_suggested") and not profile.get("base_branch_confirmed"):
+        return (
+            [
+                "Write-capable launch is blocked until the suggested base branch is confirmed.",
+                f"Suggested base branch: {profile['base_branch_suggested']}",
+            ],
+            "/settings/project",
+        )
+    if profile.get("base_branch") and not _branch_exists(root, str(profile["base_branch"])):
+        return (
+            [f"Write-capable launch requires the configured base branch '{profile['base_branch']}' to exist."],
+            "/settings/project",
+        )
+    # Legacy profiles created before the base-branch confirm flow must confirm it.
+    if not profile.get("base_branch_confirmed"):
+        return (
+            [
+                "Write-capable launch requires a confirmed base branch.",
+                "Open Project Settings to confirm.",
+            ],
+            "/settings/project",
+        )
+    return ([], None)
 
 
-def _create_task_branch(root_path: str | None, task: dict[str, Any]) -> str:
+def _create_task_branch(
+    root_path: str | None,
+    task: dict[str, Any],
+    project_profile: dict[str, Any] | None = None,
+) -> tuple[str, str]:
     root = Path(str(root_path))
     branch = f"foremanctl/task-{task['id'].replace('task_', '')[:8]}-{_slug(task['description'])}"
-    result = subprocess.run(["git", "checkout", "-b", branch], cwd=str(root), capture_output=True, text=True, check=False, timeout=10)
+    profile = project_profile or {}
+    base_branch = profile.get("base_branch") or profile.get("base_branch_suggested")
+    if not base_branch:
+        raise RuntimeError("failed to determine base branch for task branch")
+    if not _branch_exists(root, base_branch):
+        raise TaskLaunchBlocked(
+            task,
+            [f"Write-capable launch requires the configured base branch '{base_branch}' to exist."],
+        )
+    original_branch = _current_branch(root)
+    # `-B` so relaunching a Task whose earlier run failed resets its branch to the base
+    # instead of failing on the leftover branch. A Task that already committed is in
+    # Review and cannot launch, so nothing committed is ever discarded here.
+    result = subprocess.run(
+        ["git", "checkout", "-B", branch, base_branch],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
     if result.returncode != 0:
         raise RuntimeError(f"failed to create task branch: {_safe_text(result.stderr or result.stdout)}")
-    return branch
+    return branch, original_branch or base_branch
 
 
 def _finalize_write_capable_launch(
@@ -1474,7 +1589,8 @@ def _finalize_write_capable_launch(
 ) -> dict[str, Any]:
     project, _ = resolve_task_project(database_path, claimed)
     profile = (project or {}).get("profile") or {}
-    test_command = profile.get("test_command")
+    # Only operator-confirmed configuration is used for verification.
+    test_command = profile.get("test_command") if profile.get("test_command_confirmed") else None
     diff_summary = _git_diff_summary(project_root)
     _record_budget_overrun_if_needed(database_path, session["id"])
     base_metadata = {
@@ -1516,8 +1632,12 @@ def _finalize_write_capable_launch(
                 "actual_tokens": actual_tokens,
                 "metadata": {
                     **base_metadata,
-                    "post_run_verification": {"passed": False, "reason": "No test command configured."},
-                    "manual_commit_approval_required": True,
+                    "post_run_verification": {"passed": False, "reason": "No test command confirmed."},
+                    "review_disposition_state": {
+                        "pending_decision": True,
+                        "reason": "verification_command_missing",
+                        "available_actions": ["approve_commit"],
+                    },
                 },
             },
         )
@@ -1525,7 +1645,7 @@ def _finalize_write_capable_launch(
     verification = _run_test_command(project_root, str(test_command))
     if not verification["passed"]:
         db.update_session_status(database_path, session["id"], "failed")
-        failed = db.update_task(
+        return db.update_task(
             database_path,
             task_id,
             {
@@ -1534,19 +1654,19 @@ def _finalize_write_capable_launch(
                 "metadata": {
                     **base_metadata,
                     "post_run_verification": verification,
-                    "launch_blocked_reason": "Post-run verification failed.",
-                    "launch_guardrail_reasons": ["Post-run verification failed."],
-                    "blocked_condition": _blocked_condition(
-                        "Post-run verification failed.", "post_run_verification"
-                    ),
+                    "review_disposition_state": {
+                        "pending_decision": True,
+                        "reason": "verification_failed",
+                        "available_actions": ["approve_commit", "block"],
+                    },
                 },
             },
         )
-        raise TaskLaunchBlocked(failed, ["Post-run verification failed."])
 
-    commit = _create_harness_commit(project_root, task, session) if diff_summary["has_changes"] else None
+    commit = _create_harness_commit(project_root, task, session, verification_result=verification)
+    _restore_operator_branch(project_root, claimed.get("metadata", {}).get("operator_branch"))
     db.update_session_status(database_path, session["id"], "completed")
-    return db.update_task(
+    updated = db.update_task(
         database_path,
         task_id,
         {
@@ -1557,9 +1677,25 @@ def _finalize_write_capable_launch(
                 **base_metadata,
                 "post_run_verification": verification,
                 **({"harness_commit": commit} if commit else {}),
+                "review_disposition_state": _review_disposition_state_after_commit(commit, base_metadata["pr_capability"]),
             },
         },
     )
+    return updated
+
+
+def _review_disposition_state_after_commit(commit: dict[str, Any] | None, pr_capability: dict[str, Any]) -> dict[str, Any]:
+    actions: list[str] = []
+    reason = None
+    if not pr_capability.get("available"):
+        reason = pr_capability.get("reason") or "Pull request capability is not available."
+    elif commit is not None:
+        actions.append("open_pr")
+    return {
+        "pending_decision": False,
+        "available_actions": actions,
+        "pr_unavailable_reason": reason,
+    }
 
 
 def _run_test_command(root_path: str | None, command: str) -> dict[str, Any]:
@@ -1571,6 +1707,18 @@ def _run_test_command(root_path: str | None, command: str) -> dict[str, Any]:
         "stdout": _safe_text(result.stdout, limit=1000),
         "stderr": _safe_text(result.stderr, limit=1000),
     }
+
+
+def _restore_operator_branch(project_root: str | None, operator_branch: str | None) -> None:
+    if not project_root or not operator_branch:
+        return
+    subprocess.run(
+        ["git", "checkout", operator_branch],
+        cwd=str(project_root),
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
 
 
 def _git_diff_summary(root_path: str | None) -> dict[str, Any]:
@@ -1589,8 +1737,19 @@ def _git_diff_summary(root_path: str | None) -> dict[str, Any]:
     return {"has_changes": bool(files), "files_changed": files, "stat": stat, "porcelain": porcelain}
 
 
-def _create_harness_commit(root_path: str | None, task: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
+def _create_harness_commit(
+    root_path: str | None,
+    task: dict[str, Any],
+    session: dict[str, Any],
+    *,
+    verification_result: dict[str, Any] | None = None,
+    authorization: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     root = Path(str(root_path))
+    # A second approval on an already-committed task must not create an empty commit.
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=str(root), capture_output=True, text=True, check=False, timeout=10).stdout.strip()
+    if not status:
+        return None
     subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True, timeout=10)
     message = f"harness: complete {task['id']}\n\nSession: {session['id']}\nTask: {task['description']}"
     subprocess.run(
@@ -1602,13 +1761,30 @@ def _create_harness_commit(root_path: str | None, task: dict[str, Any], session:
         timeout=20,
     )
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True, timeout=10).stdout.strip()
-    return {"sha": sha, "message": message}
+    return {
+        "sha": sha,
+        "message": message,
+        "verification_result": verification_result,
+        "authorization": authorization,
+    }
 
 
 def _current_branch(root: Path) -> str | None:
     result = subprocess.run(["git", "branch", "--show-current"], cwd=str(root), capture_output=True, text=True, check=False, timeout=10)
     branch = result.stdout.strip()
     return branch or None
+
+
+def _branch_exists(root: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", branch],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    return result.returncode == 0
 
 
 def _git_lines(root: Path, args: list[str]) -> list[str]:
@@ -1844,12 +2020,70 @@ def _read_only_report_metadata(task: dict[str, Any]) -> dict[str, Any]:
     return {
         "session_report": {
             "language": profile.get("language_hints", []),
-            "test_command": profile.get("test_command"),
+            # Descriptive project context, so the detected command still shows before
+            # the operator has confirmed it for execution.
+            "test_command": profile.get("test_command") or profile.get("test_command_suggested"),
             "run_command": profile.get("run_command"),
             "top_level_structure": profile.get("top_level_folders", []),
             "relevant_docs": profile.get("relevant_docs", []),
         }
     }
+
+
+def _git_rev(root: Path, ref: str) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", ref],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _git_merge_base(root: Path, a: str, b: str) -> str | None:
+    result = subprocess.run(
+        ["git", "merge-base", a, b],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _fast_forward_base(root: Path, base_branch: str, commit_sha: str) -> tuple[bool, str | None]:
+    base_sha = _git_rev(root, base_branch)
+    if base_sha is None:
+        return False, f"base branch '{base_branch}' does not exist"
+    merge_base = _git_merge_base(root, base_branch, commit_sha)
+    if merge_base != base_sha:
+        return False, f"base branch '{base_branch}' has diverged; manual integration required"
+    result = subprocess.run(
+        ["git", "checkout", base_branch],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        return False, _safe_text(result.stderr or result.stdout)
+    result = subprocess.run(
+        ["git", "merge", "--ff-only", commit_sha],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        # Restore the commit on the task branch and leave the task branch intact.
+        subprocess.run(["git", "checkout", commit_sha], cwd=str(root), capture_output=True, check=False, timeout=10)
+        return False, f"base branch '{base_branch}' could not fast-forward: {_safe_text(result.stderr or result.stdout)}"
+    return True, None
 
 
 def _safe_text(value: str, *, limit: int = 500) -> str:
