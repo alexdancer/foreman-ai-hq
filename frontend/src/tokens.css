@@ -311,6 +311,27 @@ code,
     justify-items: center;
     padding: 7px 4px;
   }
+  .sidebar [data-rail-link]:hover .rail-label,
+  .sidebar [data-rail-link]:focus-visible .rail-label {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: calc(100% + 8px);
+    width: max-content;
+    max-width: min(240px, calc(100vw - 96px));
+    height: auto;
+    margin: 0;
+    padding: 6px 8px;
+    overflow: visible;
+    clip: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    white-space: normal;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
   .nav-badge {
     position: absolute;
     top: 3px;

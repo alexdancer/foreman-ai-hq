@@ -18,6 +18,7 @@ let server;
 let browserBaseUrl;
 let Shell;
 let Sidebar;
+let App;
 let DashboardState;
 let BoardState;
 let EvidenceDrawerState;
@@ -110,6 +111,7 @@ before(async () => {
   });
   await server.listen();
   browserBaseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
+  ({ default: App } = await server.ssrLoadModule("/src/App.jsx"));
   ({ default: Shell, Sidebar } = await server.ssrLoadModule("/src/components/Shell.jsx"));
   ({ DashboardState } = await server.ssrLoadModule("/src/views/Dashboard.jsx"));
   ({ ProjectsState } = await server.ssrLoadModule("/src/views/Projects.jsx"));
@@ -613,8 +615,8 @@ test("grouped rail keeps project switching, active state, semantic badges, and k
   }
   assert.match(markup, /<select[^>]*aria-label="Switch project"[^>]*>/);
   assert.match(markup, /href="\/projects\/demo-999"[^>]*aria-current="page"/);
-  assert.match(markup, /aria-label="3 Needs You"/);
-  assert.match(markup, /aria-label="2 open alarms"/);
+  assert.match(markup, /href="\/projects\/demo-999"[^>]*aria-label="Pipeline, 3 Needs You"/);
+  assert.match(markup, /href="\/alarms"[^>]*aria-label="Alarms, 2 open alarms"/);
   assert.match(markup, /action="\/logout"/);
   assert.doesNotMatch(markup, /└/);
 
@@ -647,6 +649,97 @@ test("grouped rail keeps project switching, active state, semantic badges, and k
   }
 });
 
+test("project switching preserves App Back and Forward history", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const originalActFlag = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = originalActFlag;
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const location = { origin: "http://portal.test", pathname: "/app", search: "" };
+  const entries = ["/app"];
+  let entryIndex = 0;
+  let popstate;
+  const applyLocation = (to) => {
+    const next = new URL(to, location.origin);
+    location.pathname = next.pathname;
+    location.search = next.search;
+  };
+  const history = {
+    pushState: (_state, _title, to) => {
+      entries.splice(entryIndex + 1);
+      entries.push(String(to));
+      entryIndex = entries.length - 1;
+      applyLocation(to);
+    },
+    back: () => {
+      if (entryIndex === 0) return;
+      entryIndex -= 1;
+      applyLocation(entries[entryIndex]);
+      popstate();
+    },
+    forward: () => {
+      if (entryIndex >= entries.length - 1) return;
+      entryIndex += 1;
+      applyLocation(entries[entryIndex]);
+      popstate();
+    },
+    replaceState: () => {},
+  };
+  globalThis.window = {
+    location,
+    history,
+    addEventListener: (name, listener) => { if (name === "popstate") popstate = listener; },
+    removeEventListener: () => {},
+    setInterval,
+    clearInterval,
+    confirm: () => true,
+  };
+
+  const navigation = {
+    portal_auth_required: true,
+    sidebar_projects: [
+      { id: "demo-999", name: "DEMO 999", task_count: 1, needs_you_count: 3 },
+      { id: "other-999", name: "Other DEMO 999", task_count: 0, needs_you_count: 0 },
+    ],
+  };
+  const otherBoard = boardData();
+  otherBoard.project = { id: "other-999", name: "Other DEMO 999" };
+  otherBoard.workspace = workspaceData({ project: otherBoard.project });
+  otherBoard.automation.live_refresh_enabled = false;
+  globalThis.fetch = async (url) => {
+    if (url === "/api/portal/nav") return { ok: true, json: async () => navigation };
+    if (url === "/api/dashboard") return { ok: true, json: async () => dashboardData() };
+    if (url === "/api/projects/other-999/workspace") return { ok: true, json: async () => otherBoard.workspace };
+    if (url === "/api/projects/other-999/board") return { ok: true, json: async () => otherBoard };
+    if (url === "/api/projects/other-999/needs-you") return { ok: true, json: async () => otherBoard.needs_you };
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  let renderer;
+  await act(async () => { renderer = create(React.createElement(App)); });
+  const activeHref = () => renderer.root.findAllByType("a").find((link) => link.props["aria-current"] === "page")?.props.href;
+  assert.equal(activeHref(), "/app");
+
+  const switcher = renderer.root.findByProps({ "aria-label": "Switch project" });
+  await act(async () => { switcher.props.onChange({ target: { value: "other-999" } }); });
+  assert.equal(location.pathname, "/projects/other-999");
+  assert.equal(activeHref(), "/projects/other-999");
+
+  await act(async () => { history.back(); });
+  assert.equal(location.pathname, "/app");
+  assert.equal(activeHref(), "/app");
+
+  await act(async () => { history.forward(); });
+  assert.equal(location.pathname, "/projects/other-999");
+  assert.equal(activeHref(), "/projects/other-999");
+  await act(async () => { renderer.unmount(); });
+});
+
 test("authenticated shell supplies per-page context without retired brand chrome", () => {
   const markup = renderToStaticMarkup(
     React.createElement(Shell, { activeView: "dashboard", activeProjectId: null }, "Dashboard content"),
@@ -675,6 +768,16 @@ test("grouped rail Configure links stay in-shell while login remains a recovery 
     assert.equal(typeof byHref[href].props.onClick, "function", `expected in-shell link for ${href}`);
   }
   assert.equal(byHref["/board"], undefined);
+});
+
+test("Projects and project settings mark only their canonical rail entries active", () => {
+  const projects = renderSidebar({ activeView: "projects" });
+  assert.match(projects, /href="\/projects"[^>]*aria-current="page"/);
+  assert.doesNotMatch(projects, /href="\/settings\/project"[^>]*aria-current="page"/);
+
+  const settings = renderSidebar({ activeView: "projectSettings" });
+  assert.match(settings, /href="\/settings\/project"[^>]*aria-current="page"/);
+  assert.doesNotMatch(settings, /href="\/projects"[^>]*aria-current="page"/);
 });
 
 test("Projects view renders empty, active, archived, and disabled runner states", () => {
@@ -868,6 +971,54 @@ test("Alarms sidebar and list render from available_actions and bookmarkable fil
   assert.match(populated, /class="status-pill-label">HIGH<\/span>/);
   assert.doesNotMatch(populated, /Abort/);
   assert.doesNotMatch(populated, /adjust_guardrail/);
+});
+
+test("resolving an alarm refreshes both the list and shell badge", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalActFlag = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = originalActFlag;
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "/alarms/alarm-demo-999/resolve");
+    assert.equal(options.method, "POST");
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+  const data = {
+    filters: [],
+    alarms: [{
+      id: "alarm-demo-999",
+      type: "DAILY_CAP_EXCEEDED",
+      severity: "HIGH",
+      session_id: null,
+      context: { text: "DEMO", truncated: false },
+      recommended_action: "Continue.",
+      available_actions: [{ action: "continue" }],
+      resolved_at: null,
+    }],
+  };
+  let listRefreshes = 0;
+  let shellRefreshes = 0;
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(AlarmsState, {
+      data,
+      error: null,
+      loading: false,
+      filter: "open",
+      onFilter: () => {},
+      onRefresh: async () => { listRefreshes += 1; },
+      onStateChanged: () => { shellRefreshes += 1; },
+      retry: () => {},
+    }));
+  });
+  const continueButton = renderer.root.findAllByType("button").find((button) => button.children.join("") === "Continue");
+  await act(async () => { await continueButton.props.onClick(); });
+  assert.equal(listRefreshes, 1);
+  assert.equal(shellRefreshes, 1);
+  await act(async () => { renderer.unmount(); });
 });
 
 test("Session Report renders compact governance plus every bounded evidence path", () => {
@@ -1701,7 +1852,7 @@ test("project Pipeline, Floor, and Planning active states follow canonical route
     data,
   });
   assert.match(pipeline, /href="\/projects\/demo-999"[^>]*aria-current="page"/);
-  assert.match(pipeline, /aria-label="3 Needs You"/);
+  assert.match(pipeline, /aria-label="Pipeline, 3 Needs You"/);
   assert.match(pipeline, /href="\/projects\/demo-999\/floor"/);
   assert.doesNotMatch(pipeline, /href="\/app\/projects\/demo-999"/);
 

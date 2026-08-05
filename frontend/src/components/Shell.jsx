@@ -1,6 +1,6 @@
 import React from "react";
 
-import { AppLink, NavContext, OwnedLink } from "../nav.jsx";
+import { AppLink, NavContext } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
 const PAGE_CONTEXT = {
@@ -45,17 +45,21 @@ function NavBadge({ count: badgeCount, kind, label }) {
 }
 
 function RailLink({ active, badge, children, glyph, to }) {
+  const badgeCount = count(badge?.count);
+  const accessibleLabel = badgeCount
+    ? `${children}, ${badgeCount} ${badge.label}`
+    : children;
   return (
     <AppLink
       to={to}
       className={active ? "active" : undefined}
       data-rail-link="true"
       aria-current={active ? "page" : undefined}
-      aria-label={children}
+      aria-label={accessibleLabel}
     >
       <span className="nav-glyph" aria-hidden="true">{glyph}</span>
       <span className="rail-label">{children}</span>
-      {badge}
+      {badgeCount > 0 && <NavBadge count={badgeCount} kind={badge.kind} label={badge.label} />}
     </AppLink>
   );
 }
@@ -165,7 +169,7 @@ export function Sidebar({ activeView, activeProjectId, data, error, loading, ala
           <>
             <RailLink
               active={activeView === "pipeline"}
-              badge={<NavBadge count={needsYouCount} kind="needs-you" label="Needs You" />}
+              badge={{ count: needsYouCount, kind: "needs-you", label: "Needs You" }}
               glyph="P"
               to={`/projects/${activeProject.id}`}
             >
@@ -181,7 +185,7 @@ export function Sidebar({ activeView, activeProjectId, data, error, loading, ala
         ) : hasLoadedProjects && projects.length > 0 ? (
           <span className="sidebar-empty">Select a project to open its Pipeline.</span>
         ) : null}
-        <OwnedLink to="/projects" className="sidebar-action">Open local repo</OwnedLink>
+        <RailLink active={activeView === "projects"} glyph="R" to="/projects">Open local repo</RailLink>
       </RailGroup>
 
       <RailGroup label="Governance">
@@ -189,7 +193,7 @@ export function Sidebar({ activeView, activeProjectId, data, error, loading, ala
         <RailLink active={activeView === "sessions" || activeView === "sessionReport"} glyph="S" to="/sessions">Sessions</RailLink>
         <RailLink
           active={activeView === "alarms"}
-          badge={<NavBadge count={count(alarmCount)} kind="alarm" label="open alarms" />}
+          badge={{ count: alarmCount, kind: "alarm", label: "open alarms" }}
           glyph="A"
           to="/alarms"
         >
@@ -201,7 +205,7 @@ export function Sidebar({ activeView, activeProjectId, data, error, loading, ala
         <RailLink active={activeView === "setup"} glyph="F" to="/setup">First-run setup</RailLink>
         <RailLink active={activeView === "controlPlaneSettings"} glyph="C" to="/settings/control-plane">Control plane model</RailLink>
         <RailLink active={activeView === "budgetSettings"} glyph="B" to="/settings/budget">Token budget</RailLink>
-        <RailLink active={activeView === "projectSettings" || activeView === "projects"} glyph="P" to="/settings/project">Projects</RailLink>
+        <RailLink active={activeView === "projectSettings"} glyph="P" to="/settings/project">Projects</RailLink>
         <RailLink active={activeView === "workerSettings"} glyph="W" to="/settings/workers">Worker adapters</RailLink>
       </RailGroup>
 

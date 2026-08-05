@@ -19,8 +19,9 @@ function ContractSurface() {
           <section className="rail-group" aria-label="Project">
             <h2 className="rail-group-title">Project</h2>
             <nav>
-              <a id="rail-contract-link" data-rail-link="true" aria-label="Pipeline" href="/projects/demo-999">
+              <a id="rail-contract-link" data-rail-link="true" aria-label="Pipeline, 3 Needs You" href="/projects/demo-999">
                 <span className="nav-glyph" aria-hidden="true">P</span><span className="rail-label">Pipeline</span>
+                <span className="nav-badge nav-badge-needs-you" aria-label="3 Needs You"><span aria-hidden="true">3</span></span>
               </a>
             </nav>
           </section>
@@ -120,7 +121,9 @@ async function inspect() {
   requireContract(getComputedStyle(railLabel).position === "absolute", "collapsed rail still renders full-width labels");
   railLink.focus();
   requireContract(railLink.matches(":focus-visible"), "collapsed rail link is not keyboard focusable");
-  requireContract(railLink.getAttribute("aria-label") === "Pipeline", "collapsed rail link loses its accessible label");
+  requireContract(railLink.getAttribute("aria-label") === "Pipeline, 3 Needs You", "collapsed rail link loses its badge state");
+  requireContract(getComputedStyle(railLabel).clip === "auto", "focused collapsed rail label stays clipped");
+  requireContract(railLabel.getBoundingClientRect().width > 1, "focused collapsed rail label is not visible");
 
   const live = document.querySelector(".live-pulse-dot");
   const liveStyle = getComputedStyle(live);
