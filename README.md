@@ -26,7 +26,7 @@ installed foremanctl CLI
   -> session report and token evidence
 ```
 
-The Worker CLI keeps its own auth/config. Foreman AI HQ configures the orchestrator model separately for estimates, planning, recommendations, summaries, and reports.
+The Worker CLI keeps its own auth/config. Foreman AI HQ configures one Orchestrator Model for planning, intake judgment, estimation, task breakdown, and Agent Review.
 
 Foreman AI HQ only governs work launched through its own board and a verified Worker Adapter. It does not govern arbitrary external agent spend.
 
@@ -168,7 +168,7 @@ There are two model layers:
 
 | Layer                   | Used for                                                      | Auth/config                                                     |
 | ----------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Orchestrator model** | estimates, planning, task breakdown, recommendations, reports | selected from pi inventory; provider auth via `pi /login`       |
+| **Orchestrator model** | planning, intake judgment, estimation, task breakdown, Agent Review | selected from pi inventory; provider auth via `pi /login`       |
 | **Worker model**        | the actual coding task                                        | configured by the native Worker CLI                             |
 
 

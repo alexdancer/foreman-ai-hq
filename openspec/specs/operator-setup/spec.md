@@ -131,12 +131,13 @@ The system SHALL preserve existing startup precedence while making portal-edited
 - **THEN** the portal SHALL show or report that the environment value is the effective runtime value
 - **AND** the system SHALL NOT silently claim the shadowed config value is active
 
-### Requirement: Docker setup uses operator setup semantics
-The system SHALL document Docker startup as an operator setup path that preserves pi-backed orchestration, optional Harness Proxy upstream configuration, and secret boundaries.
+### Requirement: Docker setup preserves operator setup boundaries
+The system SHALL document Docker startup as a Portal and evidence path whose stock image cannot orchestrate because it contains no Node, pi, or pi provider authentication. The documentation SHALL preserve optional Harness Proxy upstream configuration and secret boundaries without implying that those credentials configure orchestration.
 
 #### Scenario: Docker docs preserve the orchestration boundary
 - **WHEN** an operator reads Docker setup documentation
 - **THEN** the documentation SHALL describe pi inventory and `pi /login` as the Orchestrator Model and authentication path
+- **AND** it SHALL state that the stock image does not provide pi-backed orchestration
 - **AND** it SHALL describe direct provider settings only as optional Harness Proxy upstream configuration for `proxy_governed` Workers
 
 #### Scenario: Docker docs keep secrets out of committed files

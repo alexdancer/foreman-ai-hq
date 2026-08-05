@@ -1,7 +1,7 @@
 # ADR-0011: The Planning Chat is the only intake front door, and the Scout Task retires
 
 **Date**: 2026-07-25
-**Status**: proposed
+**Status**: accepted
 **Supersedes**: ADR-0005 (Scout Tasks replace Spike).
 **Amends**: ADR-0009 decision 4 — the Scout *boundary* holds, the Scout *Task* does not.
 

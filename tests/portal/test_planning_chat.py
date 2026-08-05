@@ -67,10 +67,16 @@ def test_only_planning_chat_can_create_tasks_with_intake_provenance(tmp_path, mo
     monkeypatch.setattr(intake, "_estimate_and_create_task", _create_estimated)
 
     with _client(tmp_path) as client:
+        planning_session, _ = db.create_planning_session(
+            client.app.state.settings.database_path,
+            task_description="Planning Chat intake test",
+            model=client.app.state.settings.orchestrator_model,
+            tracking_mode="native_usage",
+        )
         registry = client.app.state.planning_registry
         registry._live[project["id"]] = planning_conversation.LiveConversation(
             conv=SimpleNamespace(proc=SimpleNamespace(poll=lambda: None), close=lambda: None),
-            planning_session_id="sess_planning_intake",
+            planning_session_id=planning_session["id"],
             model=client.app.state.settings.orchestrator_model,
             last_used_at=time.monotonic(),
         )
@@ -93,7 +99,10 @@ def test_only_planning_chat_can_create_tasks_with_intake_provenance(tmp_path, mo
     task = db.list_tasks(tmp_path / "harness.db")[0]
     assert task["metadata"]["intake_decision"] == "single_task"
     assert task["metadata"]["intake_decision_reason"] == "One bounded vertical slice."
-    assert all(response.status_code == 404 for response in retired)
+    # `/tasks/estimate-form` also matches the surviving dynamic `/tasks/{task_id}`
+    # path, so FastAPI reports method-not-allowed rather than not-found for POST.
+    assert all(response.status_code in {404, 405} for response in retired)
+    assert len(db.list_tasks(tmp_path / "harness.db")) == 1
 
 
 def test_planning_start_surfaces_provider_auth_required_instead_of_a_dead_turn(tmp_path, monkeypatch):

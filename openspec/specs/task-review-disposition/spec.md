@@ -44,19 +44,19 @@ The system SHALL let an operator save a specific review prompt or focus while a 
 - **AND** the prompt is stored on the task
 - **AND** the Review task card displays the latest saved prompt
 
-### Requirement: Agent Review uses control-plane model
-The system SHALL perform Agent Review using the Foreman AI HQ control-plane/orchestrator model and SHALL NOT use the Worker Adapter model/auth as the review mechanism.
+### Requirement: Agent Review uses Orchestrator Model
+The system SHALL perform Agent Review through pi using the configured Orchestrator Model and pi authentication, and SHALL NOT use the Worker Adapter model/auth or Harness Proxy upstream connection as the review mechanism.
 
 #### Scenario: Agent Review runs with task evidence
 - **WHEN** a task is in Review
 - **AND** the operator chooses Agent Review
 - **THEN** the system builds a review request from task description, Worker Run evidence, session evidence, token evidence, launch metadata, and the latest operator review prompt when present
-- **AND** the system sends that request through the configured control-plane/orchestrator model connection
+- **AND** the system runs that request as a pi orchestration job on the configured Orchestrator Model
 - **AND** the task remains in Review
 
-#### Scenario: Control-plane model unavailable for Agent Review
+#### Scenario: Orchestrator Model unavailable for Agent Review
 - **WHEN** an operator requests Agent Review
-- **AND** no valid control-plane/orchestrator model connection is available
+- **AND** no verified Orchestrator Model is available from pi inventory
 - **THEN** the task remains in Review
 - **AND** the task records and displays a sanitized Agent Review failure reason
 - **AND** Mark Done and Block remain available
@@ -66,7 +66,7 @@ The system SHALL persist the latest Agent Review result on the task and display 
 
 #### Scenario: Agent Review completes
 - **WHEN** Agent Review completes successfully
-- **THEN** the task metadata records the review status, control-plane model, reviewed timestamp, summary, recommendation when available, findings when available, review session id, and Agent Review token totals when available
+- **THEN** the task metadata records the review status, Orchestrator Model identity, reviewed timestamp, summary, recommendation when available, findings when available, review session id, and Agent Review token totals when available
 - **AND** the Review task card displays a visible Agent Review completion line with the recommendation or summary
 - **AND** the Review task card shows or links the Agent Review session id and review token total when available
 - **AND** the Agent Review result does not automatically move the task to Done, Estimated, or Blocked
@@ -112,7 +112,7 @@ Automatic Agent Review SHALL be advisory evidence only and SHALL NOT replace ope
 - **AND** the operator SHALL still choose Block with a reason before a Blocked Condition is recorded
 
 #### Scenario: Auto review failure does not change task state
-- **WHEN** Auto Agent Review fails due to control-plane model or parsing errors
+- **WHEN** Auto Agent Review fails due to Orchestrator Model, pi runtime, or parsing errors
 - **THEN** the task SHALL remain in Review
 - **AND** the Review card SHALL show review failure evidence without moving the task to Done or recording a Blocked Condition
 

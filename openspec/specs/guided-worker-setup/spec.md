@@ -100,7 +100,7 @@ The Worker Setup page SHALL keep low-level diagnostics and evidence available un
 - **THEN** the page shows cached diagnostics, command/executable details, tracking mode details, model discovery evidence, and verification evidence when available
 
 ### Requirement: Worker Setup preserves model layer separation
-The Worker Setup page and public setup guidance SHALL configure Worker/coding harness adapters and SHALL NOT present the control-plane API key or any generic provider API key as native Worker Adapter authentication.
+The Worker Setup page and public setup guidance SHALL configure Worker/coding harness adapters and SHALL NOT present the Harness Proxy upstream API key, pi authentication, or any generic provider API key as native Worker Adapter authentication.
 
 #### Scenario: Operator configures OpenCode worker adapter
 - **WHEN** an operator selects OpenCode on the Worker Setup page

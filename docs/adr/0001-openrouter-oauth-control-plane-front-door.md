@@ -1,7 +1,7 @@
 # ADR-0001: OpenRouter + OAuth as the Control Plane model front door
 
 **Date**: 2026-07-16
-**Status**: proposed
+**Status**: superseded by [ADR-0010](0010-pi-inventory-is-the-sole-orchestrator-model-authority.md); the retained direct-provider connection serves only governed Worker proxy traffic
 
 ## Context
 

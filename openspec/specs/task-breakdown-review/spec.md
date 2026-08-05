@@ -5,11 +5,16 @@
 Define how Proposed Task Breakdown review preserves decomposition intent, global source-contract context, and acceptance-verification work before accepted candidates become estimated Orchestration Board Tasks.
 ## Requirements
 ### Requirement: Durable task breakdown review records
-The system SHALL persist Task Breakdown Agent output as a durable Proposed Task Breakdown review record before creating Orchestration Board Tasks from Markdown intake or oversized task intake.
+The system SHALL persist Task Breakdown Agent output as a durable Proposed Task Breakdown review record before creating Orchestration Board Tasks from Markdown intake or plain-text intake judged `needs_breakdown`.
 
 #### Scenario: Markdown intake creates review record before tasks
 - **WHEN** the operator submits Markdown upload or Markdown paste that requires Task Breakdown Agent interpretation
 - **THEN** the system creates a durable Proposed Task Breakdown review record
+- **AND** no Orchestration Board Task is created until the operator accepts one or more candidates from that review
+
+#### Scenario: Structured intake decision creates review record before tasks
+- **WHEN** the Planning Chat intake judgment returns `needs_breakdown` with a reason
+- **THEN** the system creates a durable Proposed Task Breakdown carrying that decision and reason
 - **AND** no Orchestration Board Task is created until the operator accepts one or more candidates from that review
 
 #### Scenario: Review record preserves breakdown evidence
@@ -253,8 +258,8 @@ The Task Breakdown Agent SHALL receive bounded Repo Context Brief information wh
 - **THEN** the Task Breakdown Agent request includes bounded repo context with available repo instructions, manifests, likely entry points, detected verification commands, and a repository file sample
 - **AND** the original source text remains a separate field from the repo context
 
-#### Scenario: Oversized project task breakdown includes repo context
-- **WHEN** an operator submits an oversized task from a connected project board that requires Task Breakdown review
+#### Scenario: Project task judged to need breakdown includes repo context
+- **WHEN** Planning Chat intake for a connected project is judged `needs_breakdown`
 - **AND** the connected project root can be read
 - **THEN** the Task Breakdown Agent request includes bounded repo context before proposing implementation and Acceptance Verification candidates
 
@@ -370,7 +375,7 @@ The system SHALL record pi-backed Task Breakdown Agent failures with safe diagno
 - **AND** retry, manual candidate creation, single manual candidate creation, and cancel actions SHALL remain available
 
 ### Requirement: Task Breakdown Review mutations remain backend-authoritative and idempotent
-FastAPI SHALL remain the sole domain authority for review status, presence-aware candidate/global edits, candidate validation, Task Estimation, Task creation, project binding, Retry, Manual Candidate recovery, and idempotency. Transport-specific JSON/HTML negotiation SHALL NOT redefine those domain outcomes.
+FastAPI SHALL remain the sole domain authority for review status, Planning Chat intake provenance, presence-aware candidate/global edits, candidate validation, Task Estimation, Task creation, project binding, Retry, Manual Candidate recovery, and idempotency. Acceptance SHALL fail closed when the durable review lacks a recorded `single_task` or `needs_breakdown` decision and non-empty reason. Transport-specific JSON/HTML negotiation SHALL NOT redefine those domain outcomes.
 
 #### Scenario: Valid acceptance materializes tasks once
 - **WHEN** an operator accepts one or more valid selected candidates from a proposed review
@@ -401,6 +406,11 @@ FastAPI SHALL remain the sole domain authority for review status, presence-aware
 - **THEN** FastAPI SHALL reject acceptance without marking the review accepted
 - **AND** it SHALL NOT create Tasks for a handled validation failure
 - **AND** the durable proposed/failed review evidence SHALL remain available for correction or recovery
+
+#### Scenario: Acceptance without Planning Chat provenance fails closed
+- **WHEN** Accept targets a review without a recorded `single_task` or `needs_breakdown` intake decision and non-empty reason
+- **THEN** FastAPI SHALL reject acceptance without estimating or creating Tasks
+- **AND** the operator SHALL be directed to start new intake in Planning Chat rather than fabricating provenance
 
 #### Scenario: Failed review cannot be accepted
 - **WHEN** Accept targets a review whose status is `failed`

@@ -1,7 +1,7 @@
 # ADR-0010: pi's inventory is the sole authority for the Orchestrator model
 
 **Date**: 2026-07-25
-**Status**: proposed
+**Status**: accepted
 **Builds on**: ADR-0009 (the Orchestrator is one native-provider agent runtime owning planning, estimation, and breakdown).
 
 ## Context
@@ -47,8 +47,8 @@ Everything the harness previously asserted about orchestration models and creden
 retired, and an Orchestrator that is not configured against that inventory does not
 operate.**
 
-1. **One model concept, one page.** A single **Orchestrator Model** setting drives all four
-   orchestration jobs — the Planning Chat, Task Estimation, Task Breakdown, and Agent Review.
+1. **One model concept, one page.** A single **Orchestrator Model** setting drives every
+   orchestration job — Planning Chat, intake judgment, Task Estimation, Task Breakdown, and Agent Review.
    The provider / base URL / API key trio stops being an operator-facing setting. Agent
    Review and the CLI health check move onto pi. `LLMClient` and the Harness Proxy remain in
    the codebase serving `proxy_governed` Workers, without a settings surface, until a stock
@@ -72,7 +72,7 @@ operate.**
    from pi's own `raw_usage` provider and model, falling back to the configured value only
    when pi emits no evidence.
 
-5. **Not configured means not operating.** The board, launches, and all four orchestration
+5. **Not configured means not operating.** The board, launches, and every orchestration
    jobs are gated on a configured Orchestrator. Login, every settings page, and read-only
    evidence — sessions, reports, alarms — stay reachable, so an expired provider token can
    never lock an operator out of their own audit trail or the pages needed to fix it.

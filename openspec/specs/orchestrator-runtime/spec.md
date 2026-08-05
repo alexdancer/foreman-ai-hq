@@ -143,4 +143,3 @@ When the configured provider's authentication is absent or expired, the system S
 - **WHEN** a planning turn is attempted while the configured provider's authentication is absent or expired
 - **THEN** the Planning Chat view SHALL render a clear authentication-required state referencing pi's provider sign-in
 - **AND** it SHALL NOT render a silent empty turn or a dead composer
-

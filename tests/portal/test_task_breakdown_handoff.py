@@ -467,7 +467,10 @@ def test_json_accept_is_presence_aware_and_idempotent(tmp_path, monkeypatch):
     stored = db.get_task_breakdown(path, breakdown["id"])
     assert stored["global_constraints"] == [] and stored["verification"] == []
     assert stored["candidates"][0]["constraints"] == []
-    assert len(db.list_tasks(path)) == 1
+    created_tasks = db.list_tasks(path)
+    assert len(created_tasks) == 1
+    assert created_tasks[0]["metadata"]["intake_decision"] == "needs_breakdown"
+    assert created_tasks[0]["metadata"]["intake_decision_reason"] == "DEMO work requires breakdown."
 
 
 def test_json_accept_partial_failure_keeps_immutable_claim_and_fails_closed(

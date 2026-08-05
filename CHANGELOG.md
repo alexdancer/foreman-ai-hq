@@ -11,7 +11,7 @@ All notable changes to Foreman AI HQ will be documented in this file.
 - Bounded authenticated JSON projections and negotiated action responses for React workflows, with lazy loading for full session, task, and review evidence.
 - Project Task History with archive filters, preserved evidence, and inline restore actions.
 - Adapter-aware model discovery, allow-listing, deterministic routing, launch selection, and launch-readiness guidance.
-- OpenRouter as a Control Plane provider over the existing OpenAI-compatible transport, including provider-reported request cost. OAuth connection and the dynamic model catalog remain future work.
+- OpenRouter support for governed Worker proxy upstream traffic over the existing OpenAI-compatible transport, including provider-reported request cost.
 - Dashboard USD spend reporting by Worker and orchestration category, with priced/unpriced coverage instead of treating unknown cost as zero.
 - Incremental Worker Run event capture for Claude Code, Codex, and OpenCode streaming output, normalized into bounded `agent_message`, `tool_call`, `token`, and `status` evidence.
 - A live Worker feed on the board, Evidence Drawer, and Session Report. In-run usage is labeled provisional; final accounting still comes from authoritative completion evidence.

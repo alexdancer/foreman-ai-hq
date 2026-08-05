@@ -77,6 +77,8 @@ An automatic estimate below `0.60` confidence appears in Needs You as an advisor
 
 Docker runs the containerized Control Plane/Portal and persists SQLite state at `/data/harness.db`. Docker publishes the Portal beyond loopback, so token login remains enabled there; the no-secret path proves image build/start, `/health`, `/login`, and persistence with the synthetic default Docker token.
 
+The stock image does not include Node, pi, or pi provider authentication, so it is a Portal and evidence surface rather than an orchestration runtime. Planning Chat, intake judgment, estimation, task breakdown, and Agent Review require the supported host-local setup with pi.
+
 Docker does not automatically receive host-installed OpenCode, Claude Code, Codex, local repo paths, or host credentials. Real Worker launch readiness still depends on Worker Adapter setup and tracking-mode verification.
 
 ## Portal screenshots

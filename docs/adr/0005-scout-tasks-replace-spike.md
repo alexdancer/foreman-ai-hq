@@ -1,7 +1,7 @@
 # ADR-0005: Scout Tasks replace Spike
 
 **Date**: 2026-07-20
-**Status**: accepted
+**Status**: superseded by [ADR-0011](0011-chat-is-the-front-door-and-scout-retires.md)
 
 ## Context
 

@@ -1,8 +1,9 @@
 # ADR-0009: The Orchestrator is one native-provider agent runtime that owns planning, estimation, and breakdown
 
 **Date**: 2026-07-24
-**Status**: proposed
+**Status**: accepted
 **Supersedes**: the `proxy_governed` transport decision of ADR-0007 (which otherwise stands: pi as the Orchestrator runtime, driven over ACP, profile-as-config, Scout boundary).
+**Amended by**: [ADR-0011](0011-chat-is-the-front-door-and-scout-retires.md), which preserves the curated-input boundary but replaces Scout Tasks with visible Planning Chat investigation.
 
 ## Context
 

@@ -47,6 +47,7 @@ def test_divergent_legacy_models_never_select_an_orchestration_job(tmp_path, mon
     settings = Settings(
         database_path=database_path,
         guardrails_path=tmp_path / "guardrails.yaml",
+        orchestrator_model=model,
         operator_config={
             "orchestrator_model": model,
             "estimator_model": "openai/gpt-4.1-estimator",

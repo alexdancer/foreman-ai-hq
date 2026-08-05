@@ -9,7 +9,8 @@ The Docker local run documentation SHALL provide a no-secret trial path that pro
 #### Scenario: Operator tries Docker without provider key
 - **WHEN** an operator follows the Docker no-secret trial path
 - **THEN** the documented path SHALL verify image build/start, `/health`, `/login`, and persisted SQLite state
-- **AND** it SHALL state that model-powered estimates, real provider tests, and real Worker verification require later credential setup
+- **AND** it SHALL state that the stock image has no Node, pi, or pi provider authentication and therefore cannot run Planning Chat, intake judgment, estimation, task breakdown, or Agent Review
+- **AND** real Worker verification SHALL require separate Worker Adapter availability and credentials
 
 ### Requirement: Docker Compose local Control Plane runtime
 The system SHALL provide a Docker Compose local runtime that builds and starts the Foreman AI HQ Control Plane/Portal as a single app service.
@@ -72,6 +73,7 @@ Docker documentation SHALL distinguish containerized Control Plane readiness fro
 #### Scenario: Docker quickstart preserves model-layer split
 - **WHEN** Docker docs describe Orchestrator Model or direct-provider configuration
 - **THEN** they SHALL identify pi inventory and `pi /login` as the orchestration model and authentication path
+- **AND** they SHALL state that the stock image does not include that runtime or authentication and is limited to Portal and evidence use
 - **AND** they SHALL scope direct-provider settings and API keys to optional Harness Proxy upstream traffic for `proxy_governed` Workers
 - **AND** they SHALL state that native Worker CLI auth remains separate
 

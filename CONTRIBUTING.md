@@ -7,7 +7,7 @@ Foreman AI HQ is a local, Portal-first Harness for governed coding agents. Keep 
 - Keep `main` releasable. Do not park half-built work there.
 - Ship narrow vertical slices. Avoid broad rewrites.
 - Keep product behavior, demo behavior, and internal architecture separate.
-- Do not blur Control Plane model config with Worker Adapter model/auth config.
+- Keep pi-backed Orchestrator Model configuration, Harness Proxy upstream configuration, and native Worker Adapter model/auth configuration distinct.
 - Do not document unproven governance modes as operator-ready.
 - Treat test, specification, and docs warnings as work to fix, not noise.
 

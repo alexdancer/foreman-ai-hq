@@ -1,7 +1,7 @@
 # ADR-0008: The Spec is a repo-committed artifact with a content/ledger split
 
 **Date**: 2026-07-21
-**Status**: proposed
+**Status**: superseded by the recorded intake provenance defined in [ADR-0011](0011-chat-is-the-front-door-and-scout-retires.md) and the canonical OpenSpec suite
 
 ## Context
 

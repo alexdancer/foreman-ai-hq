@@ -401,6 +401,11 @@ class RecordedDemo:
         self._original_planning_start = planning_conversation.PlanningConversationRegistry.start
 
         def _fake_start(self, project_id, database_path, model, cwd=None, timeout=60):
+            with self._lock:
+                live = self._live.get(project_id)
+                if live is not None and live.conv.proc.poll() is None and live.model == model:
+                    return live.planning_session_id
+
             session, _ = db.create_planning_session(
                 database_path,
                 task_description="Demo planning conversation",
