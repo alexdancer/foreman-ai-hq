@@ -8,8 +8,13 @@ The system SHALL expose portal-authenticated, project-scoped HTTP endpoints to d
 
 #### Scenario: Starting a planning conversation returns a usable session
 - **WHEN** an authenticated operator starts a planning conversation for a project
-- **THEN** the system SHALL hold a live governed pi conversation for that project and return its planning session id
-- **AND** starting again for the same project SHALL return the same live conversation rather than spawning a second pi subprocess
+- **THEN** the system SHALL hold a live governed pi conversation using the current Orchestrator Model for that project and return its planning session id
+- **AND** starting again for the same project while the Orchestrator Model is unchanged SHALL return the same live conversation rather than spawning a second pi subprocess
+
+#### Scenario: Changing the Orchestrator Model replaces a live conversation
+- **WHEN** an authenticated operator starts a planning conversation for a project whose live conversation uses a different Orchestrator Model
+- **THEN** the system SHALL terminate the existing pi subprocess and create a new governed pi conversation using the current Orchestrator Model
+- **AND** the system SHALL return the new planning session id
 
 #### Scenario: Sending a message drives exactly one metered planning turn
 - **WHEN** the operator sends one message to a started planning conversation
