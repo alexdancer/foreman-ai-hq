@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from foreman_ai_hq import db
+from foreman_ai_hq import checkpoints, db
 from foreman_ai_hq.guardrails import load_guardrails
 from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.task_kind import with_task_kind
@@ -72,6 +72,14 @@ def test_completed_worker_run_has_checkpoint_results(tmp_path, monkeypatch):
     db_path = tmp_path / "harness.db"
     db.init_db(db_path)
     task = _ready_read_only_task(db_path, tmp_path)
+    real_evaluate = checkpoints.evaluate_checkpoints
+
+    def delayed_evaluate(*args, **kwargs):
+        # Make the former completion-before-checkpoints race deterministic.
+        time.sleep(0.05)
+        return real_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(checkpoints, "evaluate_checkpoints", delayed_evaluate)
 
     launch_task(
         db_path,

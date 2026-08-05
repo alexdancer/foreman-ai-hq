@@ -206,15 +206,13 @@ def test_board_uses_verified_worker_adapter_status(tmp_path, monkeypatch):
     database_path = tmp_path / "harness.db"
     with _client(tmp_path) as client:
         metadata = _project_metadata(database_path, tmp_path / "connected-project")
-        client.post(
-            "/tasks",
-            json={
-                "description": "Launchable estimated task",
-                "status": "Estimated",
-                "estimate_tokens": 25000,
-                "recommended_model": "5.4",
-                "metadata": metadata,
-            },
+        db.create_task(
+            database_path,
+            description="Launchable estimated task",
+            status="Estimated",
+            estimate_tokens=25000,
+            recommended_model="5.4",
+            metadata=metadata,
         )
         db.update_worker_adapter(
             tmp_path / "harness.db",

@@ -45,9 +45,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 1;
+  flex: 1 1 100%;
+  min-width: 0;
 }
 
-.planning-chat-form .board-input {
+.planning-chat-form .board-input,
+.planning-chat-form .board-file {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
 }

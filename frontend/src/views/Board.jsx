@@ -473,7 +473,7 @@ export function PlanningPane({
 }) {
   const contentId = `planning-pane-${projectId}-${defaultExpanded ? "pipeline" : "floor"}`;
   return <section className={`board-pane planning-pane ${expanded ? "is-expanded" : "is-collapsed"}`}>
-    <Panel>
+    <div className="planning-pane-shell">
       <div className="panel-header planning-pane-header">
         <h3>Planning</h3>
         <Button
@@ -494,7 +494,7 @@ export function PlanningPane({
           initialMessage={initialMessage}
         />}
       </PanelBody>
-    </Panel>
+    </div>
   </section>;
 }
 

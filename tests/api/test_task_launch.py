@@ -247,36 +247,25 @@ def _client_with_llm(tmp_path, llm):
     )
     return TestClient(app)
 
-def test_direct_create_running_is_blocked_and_points_to_launch(tmp_path):
-    with _client(tmp_path) as client:
-        created = client.post(
-            "/tasks",
-            json={
-                "description": "Cannot directly run",
-                "status": "Running",
-                "estimate_tokens": 8_000,
-                "recommended_model": "claude-haiku",
-            },
-        )
 
-    assert created.status_code == 200
-    assert created.json()["status"] == "Estimated"
-    assert created.json()["session_id"] is None
-    assert created.json()["metadata"]["blocked_reason"] == "Use launch endpoint to start tasks."
+def _seed_project_task(tmp_path, **overrides):
+    project = db.list_connected_projects(tmp_path / "harness.db")[0]
+    values = {
+        "description": "Estimated task",
+        "status": "Estimated",
+        "estimate_tokens": 8_000,
+        "recommended_model": "gpt-5.6-terra",
+        "metadata": project_task_metadata(project),
+    }
+    values.update(overrides)
+    return db.create_task(tmp_path / "harness.db", **values)
 
 def test_launch_blocks_unverified_adapter_without_session_or_runner(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     runner_calls = []
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = runner_calls.append
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Launch only after token proof",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Launch only after token proof")
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -409,14 +398,7 @@ def test_launch_verified_adapter_creates_running_session_and_redacts_raw_session
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Implement launch button",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Implement launch button")
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -476,15 +458,7 @@ def test_launch_sanitizes_runner_output_everywhere(tmp_path, monkeypatch):
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
         project = db.list_connected_projects(tmp_path / "harness.db")[0]
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Do not leak runner output secrets",
-                "project_id": project["id"],
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Do not leak runner output secrets")
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -545,14 +519,7 @@ def test_board_form_launch_uses_default_proxy_for_verified_default_adapter(
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Launch from board form",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Launch from board form")
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -904,15 +871,10 @@ def test_board_form_recoverable_launch_error_stays_on_task_card_with_launch_form
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Retryable DEMO launch timeout 2099",
-                "status": "Ready",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(
+            tmp_path,
+            description="Retryable DEMO launch timeout 2099",
+        )
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -1048,14 +1010,7 @@ def test_project_board_status_endpoint_reports_terminal_worker_run_without_manua
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Launch for live refresh",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Launch for live refresh")
         project_id = task["metadata"]["connected_project_id"]
         db.update_worker_adapter(
             tmp_path / "harness.db",
@@ -1539,7 +1494,12 @@ def test_launch_accepts_manual_estimate_payload_before_guardrails(tmp_path, monk
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post("/tasks", json={"description": "Unestimated launch"}).json()
+        task = _seed_project_task(
+            tmp_path,
+            description="Unestimated launch",
+            estimate_tokens=None,
+            recommended_model=None,
+        )
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -1605,14 +1565,7 @@ def test_launch_second_call_after_running_claim_is_rejected_without_second_runne
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Launch once only",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Launch once only")
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",
@@ -1651,14 +1604,7 @@ def test_duplicate_launch_rejects_mismatched_project_before_active_run_reuse(tmp
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Launch only from bound board",
-                "estimate_tokens": 8000,
-                "recommended_model": "gpt-5.6-terra",
-            },
-        ).json()
+        task = _seed_project_task(tmp_path, description="Launch only from bound board")
         project_a = db.get_connected_project(tmp_path / "harness.db", task["metadata"]["connected_project_id"])
         project_b_root = tmp_path / "other-project"
         project_b_root.mkdir()
@@ -1700,7 +1646,12 @@ def test_duplicate_launch_rejects_mismatched_project_before_active_run_reuse(tmp
 def test_launch_rejects_invalid_manual_estimate_tokens(tmp_path, monkeypatch, estimate_tokens):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     with _client(tmp_path) as client:
-        task = client.post("/tasks", json={"description": "Bad launch estimate"}).json()
+        task = _seed_project_task(
+            tmp_path,
+            description="Bad launch estimate",
+            estimate_tokens=None,
+            recommended_model=None,
+        )
         response = client.post(
             f"/tasks/{task['id']}/launch",
             headers=_auth_headers(),
@@ -1792,10 +1743,7 @@ def test_fake_worker_token_row_after_launch_appears_in_session_report(tmp_path, 
 
     with _client(tmp_path) as client:
         client.app.state.task_launch_runner = fake_runner
-        task = client.post(
-            "/tasks",
-            json={"description": "Record worker tokens", "estimate_tokens": 8000, "recommended_model": "gpt-5.6-terra"},
-        ).json()
+        task = _seed_project_task(tmp_path, description="Record worker tokens")
         db.update_worker_adapter(
             tmp_path / "harness.db",
             "codex",

@@ -70,6 +70,14 @@
   gap: 12px;
 }
 
+.planning-pane-shell {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
 .planning-pane-body {
   max-height: 60vh;
   overflow-y: auto;

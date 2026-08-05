@@ -997,6 +997,15 @@ def _apply_worker_run_outcome(
                 metadata={"task_status": exc.task["status"]},
             )
             return
+        # A completed Worker Run is the observable completion barrier; checkpoint
+        # evidence (or its failure event) must be durable before readers see it.
+        _evaluate_and_record_worker_checkpoints(
+            database_path,
+            session_id=session["id"],
+            task_id=task["id"],
+            worker_run_id=worker_run_id,
+            guardrail_config=guardrail_config,
+        )
         db.mark_worker_run_completed(
             database_path,
             worker_run_id,
@@ -1004,13 +1013,6 @@ def _apply_worker_run_outcome(
             stdout=result.stdout,
             stderr=result.stderr,
             metadata={"task_status": write_result["status"], "workdir_evidence": outcome.workdir_evidence},
-        )
-        _evaluate_and_record_worker_checkpoints(
-            database_path,
-            session_id=session["id"],
-            task_id=task["id"],
-            worker_run_id=worker_run_id,
-            guardrail_config=guardrail_config,
         )
         return
 
@@ -1071,6 +1073,13 @@ def _apply_worker_run_outcome(
             },
         },
     )
+    _evaluate_and_record_worker_checkpoints(
+        database_path,
+        session_id=session["id"],
+        task_id=task["id"],
+        worker_run_id=worker_run_id,
+        guardrail_config=guardrail_config,
+    )
     db.mark_worker_run_completed(
         database_path,
         worker_run_id,
@@ -1078,13 +1087,6 @@ def _apply_worker_run_outcome(
         stdout=result.stdout,
         stderr=result.stderr,
         metadata={"task_status": launched["status"], "workdir_evidence": outcome.workdir_evidence},
-    )
-    _evaluate_and_record_worker_checkpoints(
-        database_path,
-        session_id=session["id"],
-        task_id=task["id"],
-        worker_run_id=worker_run_id,
-        guardrail_config=guardrail_config,
     )
 
 

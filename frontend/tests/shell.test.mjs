@@ -735,9 +735,7 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   assert.doesNotMatch(failed, /secret/);
 });
 
-test("Project Settings renders proof outcomes through its public interaction", async (t) => {
-  const originalFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+test("Project Settings does not expose the retired read-only proof task creator", () => {
   const data = {
     local_runner_enabled: true,
     backend_status: { online: true, name: "Local Runner" },
@@ -749,53 +747,14 @@ test("Project Settings renders proof outcomes through its public interaction", a
     }],
     archived_projects: [],
   };
-  const blocked = renderToStaticMarkup(React.createElement(ProjectSettingsState, {
-    data: {
-      ...data,
-      connected_projects: data.connected_projects.map((project) => ({
-        ...project,
-        capability: { state: "unknown", reasons: ["Capability probe unavailable."] },
-      })),
-    },
+  const markup = renderToStaticMarkup(React.createElement(ProjectSettingsState, {
+    data,
     error: null,
     loading: false,
     onRefresh: () => {},
   }));
-  assert.match(blocked, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
-
-  for (const testCase of [
-    { passed: true, tone: "success", label: "Read-only proof launched", reasons: [] },
-    { passed: false, tone: "warning", label: "Read-only proof blocked", reasons: ["Complete project setup."] },
-  ]) {
-    globalThis.fetch = async () => ({
-      ok: testCase.passed,
-      status: testCase.passed ? 200 : 409,
-      json: async () => ({ launch_guardrails: { reasons: testCase.reasons } }),
-    });
-    let renderer;
-    await act(async () => {
-      renderer = create(React.createElement(ProjectSettingsState, {
-        data,
-        error: null,
-        loading: false,
-        onRefresh: () => {},
-      }));
-    });
-    const proofButton = renderer.root.findAllByType("button")
-      .find((button) => button.children.join("") === "Run read-only proof");
-    await act(async () => { await proofButton.props.onClick(); });
-
-    const label = renderer.root.findAllByProps({ className: "status-pill-label" })
-      .find((node) => node.children.join("") === testCase.label);
-    assert.ok(label);
-    const pill = label.parent;
-    assert.equal(pill.props.className, `status-pill status-pill-${testCase.tone}`);
-    assert.ok(pill.findByProps({ className: "status-pill-glyph" }).children.join(""));
-    assert.equal(pill.parent.parent.type, "p");
-    assert.equal(pill.parent.parent.props.className, undefined);
-    if (testCase.reasons.length) assert.match(JSON.stringify(renderer.toJSON()), /Complete project setup\./);
-    await act(async () => { renderer.unmount(); });
-  }
+  assert.match(markup, /DEMO project 999/);
+  assert.doesNotMatch(markup, /Run read-only proof|Read-only proof launched|Read-only proof blocked/);
 });
 
 test("Alarms sidebar and list render from available_actions and bookmarkable filters", () => {
@@ -1927,10 +1886,12 @@ test("rendered Portal surfaces preserve focus, motion, select, and panel contrac
     onRefresh: () => {},
   }));
 
-  assert.match(board, /<select[^>]*name="task_kind"/);
+  assert.doesNotMatch(board, /<select[^>]*name="task_kind"/);
+  assert.match(board, /Describe the task or goal…/);
   assert.match(review, /<select[^>]*>.*?<option value="implementation"[^>]*>/s);
-  assert.match(board, /class="board-intake-progress-bar"/);
+  assert.doesNotMatch(board, /class="board-intake-progress-bar"/);
   assert.match(floor, /class="live-pulse-dot"/);
+  assertDisabledControlsHaveReasons(board);
   for (const markup of [board, floor, review, accepted, budget]) assertNoNestedPanels(markup);
 });
 

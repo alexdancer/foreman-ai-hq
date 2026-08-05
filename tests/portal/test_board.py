@@ -26,19 +26,23 @@ def test_board_shows_manual_estimate_blocked_condition(tmp_path, monkeypatch):
     db.init_db(tmp_path / "harness.db")
     project = _connect_project(tmp_path / "harness.db", tmp_path / "project")
     with _client(tmp_path) as client:
-        task = client.post(
-            "/tasks",
-            json={
-                "description": "Needs operator sizing",
-                "metadata": {
-                    **project_task_metadata(project),
-                    "launch_blocked_reason": "Daily budget exhausted",
-                    "launch_retryable": False,
-                    "blocked_reason": "Estimator unavailable: timeout",
-                    "requires_manual_estimate": True,
+        task = db.create_task(
+            tmp_path / "harness.db",
+            description="Needs operator sizing",
+            status="Estimated",
+            metadata={
+                **project_task_metadata(project),
+                "launch_blocked_reason": "Daily budget exhausted",
+                "launch_retryable": False,
+                "blocked_reason": "Estimator unavailable: timeout",
+                "requires_manual_estimate": True,
+                "blocked_condition": {
+                    "reason": "Estimate task before launch.",
+                    "origin": "estimation",
+                    "timestamp": "2099-01-01T00:00:00+00:00",
                 },
             },
-        ).json()
+        )
         response = client.get(f"/api/projects/{project['id']}/board", headers=_portal_headers())
 
     assert response.status_code == 200
@@ -47,7 +51,7 @@ def test_board_shows_manual_estimate_blocked_condition(tmp_path, monkeypatch):
     assert task_json["status"] == "Estimated"
     assert "Needs operator sizing" in task_json["summary"]["text"]
     assert task_json["blocked_condition"]["reason"] == "Estimate task before launch."
-    assert task_json["blocked_condition"]["origin"] == "task_create"
+    assert task_json["blocked_condition"]["origin"] == "estimation"
     assert task_json["blocked_condition"]["timestamp"]
     assert task_json["controls"]["requires_manual_estimate"] is True
     assert "details" not in task_json
@@ -113,17 +117,15 @@ def test_board_renders_columns_and_task_cards(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     with _client(tmp_path) as client:
         project = _connect_project(tmp_path / "harness.db", tmp_path / "connected-project")
-        created = client.post(
-            "/tasks",
-            json={
-                "description": "Add streaming proxy tests",
-                "status": "Estimated",
-                "estimate_tokens": 25000,
-                "recommended_model": "claude-sonnet",
-                "actual_tokens": 12000,
-                "metadata": project_task_metadata(project),
-            },
-        ).json()
+        created = db.create_task(
+            tmp_path / "harness.db",
+            description="Add streaming proxy tests",
+            status="Estimated",
+            estimate_tokens=25000,
+            recommended_model="claude-sonnet",
+            actual_tokens=12000,
+            metadata=project_task_metadata(project),
+        )
         response = client.get(f"/api/projects/{project['id']}/board", headers=_portal_headers())
 
     assert response.status_code == 200
@@ -302,14 +304,12 @@ def test_board_renders_unexpected_statuses_as_estimated_with_blocked_condition(t
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     with _client(tmp_path) as client:
         project = _connect_project(tmp_path / "harness.db", tmp_path / "connected-project")
-        created = client.post(
-            "/tasks",
-            json={
-                "description": "Odd status task",
-                "status": "Legacy Backlog",
-                "metadata": project_task_metadata(project),
-            },
-        ).json()
+        created = db.create_task(
+            tmp_path / "harness.db",
+            description="Odd status task",
+            status="Legacy Backlog",
+            metadata=project_task_metadata(project),
+        )
         response = client.get(f"/api/projects/{project['id']}/board", headers=_portal_headers())
 
     assert response.status_code == 200

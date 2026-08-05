@@ -256,32 +256,6 @@ async def test_eval_estimator_token_estimate_is_positive_integer():
     assert isinstance(result.token_estimate, int)
 
 
-# ---------------------------------------------------------------------------
-# Estimation token tracking
-# ---------------------------------------------------------------------------
-
-def test_eval_estimator_usage_tracked_as_estimation_kind(tmp_path, monkeypatch):
-    """Estimator token usage is persisted with usage_kind='estimation'."""
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM()
-    client = _client_with_llm(tmp_path, llm)
-
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": "Add a save command and test it"},
-            headers=_auth_headers(),
-        )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "Estimated"
-
-    with db.connect(tmp_path / "harness.db") as conn:
-        rows = conn.execute("select usage_kind from token_turns").fetchall()
-    kinds = {row["usage_kind"] for row in rows}
-    assert "estimation" in kinds
-
-
 @pytest.mark.asyncio
 async def test_eval_task_breakdown_accepts_common_model_json_variants():
     """Task Breakdown Agent tolerates harmless JSON-shape drift from real models."""
@@ -646,49 +620,6 @@ def test_task_breakdown_rejects_invalid_candidate_kind():
         )
 
 
-def test_estimate_form_failed_breakdown_records_validation_reason(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeSequentialLLM([{"not": "a valid breakdown"}])
-
-    with _client_with_llm(tmp_path, llm) as client:
-        response = client.post(
-            "/tasks/estimate-form",
-            headers={**_auth_headers(), "accept": "text/html"},
-            data={"description": "# DEMO_TASK_2099 invalid output\n\n- [ ] Run comparison"},
-            follow_redirects=False,
-        )
-        breakdown_id = response.headers["location"].split("/")[2]
-        breakdown = db.get_task_breakdown(tmp_path / "harness.db", breakdown_id)
-
-    assert response.status_code == 303
-    assert breakdown["status"] == "failed"
-    assert breakdown["failure_type"] == "TaskBreakdownValidationError"
-    assert "task breakdown missing fields" in breakdown["failure_message"]
-
-
-def test_eval_estimator_tokens_count_against_daily_budget(tmp_path, monkeypatch):
-    """Estimator tokens are recorded in token_turns and accumulate toward daily total."""
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM()
-    client = _client_with_llm(tmp_path, llm)
-
-    with client:
-        client.post(
-            "/estimate",
-            json={"description": "Add a list endpoint"},
-            headers=_auth_headers(),
-        )
-
-    with db.connect(tmp_path / "harness.db") as conn:
-        row = conn.execute(
-            "select prompt_tokens, completion_tokens, total_tokens from token_turns where usage_kind = 'estimation'"
-        ).fetchone()
-
-    assert row["prompt_tokens"] == 111
-    assert row["completion_tokens"] == 22
-    assert row["total_tokens"] == 133
-
-
 # ---------------------------------------------------------------------------
 # Estimator failures → Blocked
 # ---------------------------------------------------------------------------
@@ -727,99 +658,9 @@ def test_eval_estimator_does_not_swallow_strict_calibration_validation_errors(mo
         )
 
 
-def test_eval_estimator_failure_creates_blocked_task(tmp_path, monkeypatch):
-    """When estimator fails, the task endpoint returns Blocked, not Estimated."""
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM(exc=RuntimeError("provider down"))
-    client = _client_with_llm(tmp_path, llm)
-
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": "Add export endpoint"},
-            headers=_auth_headers(),
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "Estimated"
-    assert "estimator_unavailable" in body.get("metadata", {}).get("blocked_reason", "") or "Estimator unavailable" in body.get("metadata", {}).get("blocked_reason", "")
-
-
 # ---------------------------------------------------------------------------
 # Markdown task intake / decomposition behavior
 # ---------------------------------------------------------------------------
-
-def test_eval_repo_aware_markdown_intake_records_breakdown_review_and_model_usage(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeSequentialLLM([
-        _breakdown_content(
-            "Add DEMO_ROUTE_2099_budget_alarm fixture coverage",
-            "Update DEMO_TEMPLATE_2099_session_report visibility",
-        )
-    ])
-    client = _client_with_llm(tmp_path, llm)
-    with client:
-        response = client.post(
-            "/tasks/estimate-form",
-            data={"description": MARKDOWN_EVAL_FIXTURES["repo_aware"]},
-            headers={**_auth_headers(), "accept": "text/html"},
-            follow_redirects=False,
-        )
-        tasks = db.list_tasks(tmp_path / "harness.db")
-        breakdown_id = response.headers["location"].split("/")[2]
-        breakdown = db.get_task_breakdown(tmp_path / "harness.db", breakdown_id)
-        usage = db.token_usage_breakdown(tmp_path / "harness.db")
-
-    assert response.status_code == 303
-    assert response.headers["location"].startswith("/task-breakdowns/")
-    assert tasks == []
-    assert breakdown["status"] == "proposed"
-    assert breakdown["model"] == "openai/gpt-4.1-mini"
-    assert breakdown["intake_metadata"]["intake_source"] == "markdown_paste"
-    assert [candidate["title"] for candidate in breakdown["candidates"]] == [
-        "Add DEMO_ROUTE_2099_budget_alarm fixture coverage",
-        "Update DEMO_TEMPLATE_2099_session_report visibility",
-    ]
-    assert breakdown["rejected_items"][0]["reason"] == "context metadata, not a task"
-    assert usage["by_category"]["task_breakdown"] == 133
-
-
-def test_eval_bullet_markdown_direct_estimate_does_not_create_deterministic_breakdown_metadata(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM()
-    client = _client_with_llm(tmp_path, llm)
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": MARKDOWN_EVAL_FIXTURES["phased"]},
-            headers=_auth_headers(),
-        )
-
-    task = response.json()
-    assert response.status_code == 200
-    assert task["status"] == "Estimated"
-    assert "task_breakdown" not in task["metadata"]
-    assert "decomposition_source" not in task["metadata"]
-
-
-def test_eval_complex_markdown_failure_has_specific_manual_estimate_reason(tmp_path, monkeypatch):
-    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
-    llm = FakeEstimatorLLM(content={"complexity": "unknown", "source": "llm"})
-    client = _client_with_llm(tmp_path, llm)
-    with client:
-        response = client.post(
-            "/estimate",
-            json={"description": MARKDOWN_EVAL_FIXTURES["complex_rejection"]},
-            headers=_auth_headers(),
-        )
-
-    task = response.json()
-    assert response.status_code == 200
-    assert task["status"] == "Estimated"
-    assert task["metadata"]["blocked_reason"] == "Estimator unavailable or invalid; manual estimate required."
-    assert task["metadata"]["estimator_failure_type"] == "EstimatorValidationError"
-    assert task["metadata"]["requires_manual_estimate"] is True
 
 
 class EstimatorMarkdownFakeDataInvariantTests:

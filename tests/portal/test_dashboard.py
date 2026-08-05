@@ -76,14 +76,12 @@ def test_dashboard_next_actions_count_launch_and_review_tasks(tmp_path, monkeypa
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     database_path = tmp_path / "harness.db"
     with _client(tmp_path) as client:
-        client.post(
-            "/tasks",
-            json={
-                "description": "Ready launch task",
-                "status": "Estimated",
-                "estimate_tokens": 1000,
-                "recommended_model": "5.4",
-            },
+        db.create_task(
+            database_path,
+            description="Ready launch task",
+            status="Estimated",
+            estimate_tokens=1000,
+            recommended_model="5.4",
         )
         session = client.post(
             "/session/start",
@@ -91,15 +89,13 @@ def test_dashboard_next_actions_count_launch_and_review_tasks(tmp_path, monkeypa
             json={"task_description": "Completed Worker task", "model": "5.4"},
         ).json()
         db.update_session_status(database_path, session["session_id"], "completed")
-        client.post(
-            "/tasks",
-            json={
-                "description": "Needs review",
-                "status": "Review",
-                "estimate_tokens": 1000,
-                "recommended_model": "5.4",
-                "session_id": session["session_id"],
-            },
+        db.create_task(
+            database_path,
+            description="Needs review",
+            status="Review",
+            estimate_tokens=1000,
+            recommended_model="5.4",
+            session_id=session["session_id"],
         )
 
         response = client.get("/api/dashboard", headers=_portal_headers())

@@ -56,6 +56,21 @@ export function PlanningChatState({
   };
 
   const noticeVariant = error?.status === 503 ? "warning" : "danger";
+  const composerDisabledReason = !started
+    ? "Planning Chat is still starting."
+    : sending
+      ? "Wait for the current Planning Chat action to finish."
+      : null;
+  const sendDisabledReason = !started
+    ? "Planning Chat is still starting."
+    : sending
+      ? "Wait for the current Planning Chat action to finish."
+      : "Type a message before sending.";
+  const intakeDisabledReason = !started
+    ? "Planning Chat is still starting."
+    : sending
+      ? "Wait for the current Planning Chat action to finish."
+      : "Type a message or attach a Markdown file before creating governed work.";
 
   return (
     <>
@@ -108,6 +123,7 @@ export function PlanningChatState({
                 onChange={(event) => onMessageChange(event.target.value)}
                 placeholder="Describe the task or goal…"
                 disabled={!started || Boolean(sending)}
+                aria-describedby={composerDisabledReason ? "planning-composer-disabled-reason" : undefined}
                 rows={5}
               />
             </label>
@@ -118,16 +134,27 @@ export function PlanningChatState({
                 type="file"
                 accept=".md,text/markdown,text/plain"
                 disabled={!started || Boolean(sending)}
+                aria-describedby={composerDisabledReason ? "planning-composer-disabled-reason" : undefined}
                 onChange={(event) => onFileChange(event.target.files?.[0] || null)}
               />
             </label>
-            <Button type="submit" disabled={!started || Boolean(sending) || !message.trim()}>
+            {composerDisabledReason && (
+              <span className="disabled-reason" id="planning-composer-disabled-reason">
+                {composerDisabledReason}
+              </span>
+            )}
+            <Button
+              type="submit"
+              disabled={!started || Boolean(sending) || !message.trim()}
+              disabledReason={sendDisabledReason}
+            >
               {sending === "message" ? "Sending…" : "Send"}
             </Button>
             <Button
               type="button"
               variant="secondary"
               disabled={!started || Boolean(sending) || (!message.trim() && !attachment)}
+              disabledReason={intakeDisabledReason}
               onClick={handleIntake}
             >
               {sending === "intake" ? "Creating…" : "Create governed work"}
