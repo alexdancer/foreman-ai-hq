@@ -1927,47 +1927,52 @@ def test_portal_nav_auth_disabled_no_projects(tmp_path, monkeypatch):
     assert body["sidebar_projects"] == []
 
 
-def test_react_shell_chrome_contract():
-    """Frontend source-contract: Shell.jsx renders the full Portal chrome."""
-    shell_source = Path("frontend/src/components/Shell.jsx").read_text(encoding="utf-8")
-    # Sidebar groups and labels mirroring base.html.
-    assert "Projects" in shell_source
-    assert "+ Open local repo" in shell_source
-    assert "First-run setup" in shell_source
-    assert "Dashboard" in shell_source
-    assert "Sessions" in shell_source
-    assert "Alarms" in shell_source
-    assert "Control plane model" in shell_source
-    assert "Token budget" in shell_source
-    assert "Worker adapters" in shell_source
-    # Footer contract.
-    assert "Foreman AI HQ portal · operator-controlled budget governance" in shell_source
-    # Logout form posts to /logout.
-    assert 'action="/logout"' in shell_source
-    # Task board / No tasks subtitle contract.
-    assert "Task board" in shell_source
-    assert "No tasks" in shell_source
-    # Sidebar nav endpoint.
-    assert "/api/portal/nav" in shell_source
+def test_authenticated_shell_keeps_project_switching_logout_and_canonical_route_boundaries(
+    tmp_path, monkeypatch
+):
+    """The presentation shell keeps server-owned auth and project routes unchanged."""
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    build_dir = _build_react_assets(tmp_path)
+    monkeypatch.setattr(react_shell, "react_build_dir", lambda: build_dir)
+    database_path = tmp_path / "harness.db"
+
+    with _client(tmp_path) as client:
+        first = _connect_project(database_path, tmp_path / "first-shell-repo")
+        second = _connect_project(database_path, tmp_path / "second-shell-repo")
+        nav = client.get("/api/portal/nav", headers=_portal_headers())
+        direct_loads = [
+            client.get(f"/projects/{first['id']}", headers=_portal_headers()),
+            client.get(f"/projects/{second['id']}", headers=_portal_headers()),
+            client.get(f"/projects/{second['id']}/floor", headers=_portal_headers()),
+        ]
+        logout = client.post("/logout", follow_redirects=False)
+
+    assert nav.status_code == 200
+    assert {project["id"] for project in nav.json()["sidebar_projects"]} == {
+        first["id"], second["id"]
+    }
+    assert all(response.status_code == 200 for response in direct_loads)
+    assert all('id="root"' in response.text for response in direct_loads)
+    assert logout.status_code == 303
+    assert logout.headers["location"] == "/login"
 
 
-def test_react_shell_non_migrated_links_are_anchors():
-    """Genuinely server-rendered sidebar targets stay full-page <a href>; React-owned
-    targets navigate in-shell through the OwnedLink seam (reversed sidebar contract)."""
-    shell_source = Path("frontend/src/components/Shell.jsx").read_text(encoding="utf-8")
-    # Non-React-owned targets remain ordinary full-page anchors.
-    for server_href in ("/board", "/login"):
-        assert f'href="{server_href}"' in shell_source
-    # React-owned sidebar targets use OwnedLink for in-shell navigation, not raw href.
-    for owned_to in (
-        "/settings/control-plane",
-        "/settings/budget",
-        "/settings/project",
-        "/settings/workers",
-        "/projects",
-    ):
-        assert f'to="{owned_to}"' in shell_source
-        assert f'href="{owned_to}"' not in shell_source
+def test_legacy_aliases_remain_server_owned_redirects(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    build_dir = _build_react_assets(tmp_path)
+    monkeypatch.setattr(react_shell, "react_build_dir", lambda: build_dir)
+    database_path = tmp_path / "harness.db"
+
+    with _client(tmp_path) as client:
+        project = _connect_project(database_path, tmp_path / "legacy-shell-repo")
+        alias = client.get(
+            f"/app/projects/{project['id']}/floor",
+            headers=_portal_headers(),
+            follow_redirects=False,
+        )
+
+    assert alias.status_code == 301
+    assert alias.headers["location"] == f"/projects/{project['id']}/floor"
 
 
 def test_react_dashboard_source_contract():
@@ -1985,19 +1990,6 @@ def test_react_dashboard_source_contract():
     assert 'href={action.href}' in dashboard_source
     assert "<AppLink" in dashboard_source
     assert "/projects/${project.id}" in dashboard_source
-
-
-def test_css_shell_layout_present():
-    """tokens.css includes the .shell grid layout mirroring base.html."""
-    css_source = Path("frontend/src/tokens.css").read_text(encoding="utf-8")
-    assert ".shell" in css_source
-    assert ".sidebar" in css_source
-    assert ".project-item" in css_source
-    assert ".project-board" in css_source
-    assert ".sidebar-action" in css_source
-    assert ".shell-footer" in css_source
-    assert ".logout" in css_source
-    assert "@media (max-width: 900px)" in css_source
 
 
 def test_css_react_board_controls_and_details_present():

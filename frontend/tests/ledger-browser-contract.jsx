@@ -10,6 +10,23 @@ function ContractSurface() {
   const [confirming, setConfirming] = React.useState(false);
   return (
     <main>
+      <div className="shell" id="rail-contract-shell">
+        <aside className="sidebar">
+          <div className="project-switcher">
+            <label className="project-switcher-label" htmlFor="rail-contract-select">Project</label>
+            <select id="rail-contract-select" aria-label="Switch project" defaultValue="demo"><option value="demo">DEMO 999</option></select>
+          </div>
+          <section className="rail-group" aria-label="Project">
+            <h2 className="rail-group-title">Project</h2>
+            <nav>
+              <a id="rail-contract-link" data-rail-link="true" aria-label="Pipeline" href="/projects/demo-999">
+                <span className="nav-glyph" aria-hidden="true">P</span><span className="rail-label">Pipeline</span>
+              </a>
+            </nav>
+          </section>
+        </aside>
+        <div className="shell-workbench"><div className="context-bar" aria-label="Page context">Project / Pipeline</div><div className="main">Workbench content</div></div>
+      </div>
       <button id="confirm-opener" type="button" onClick={() => setConfirming(true)}>Open confirmation</button>
       <ConfirmSheet
         ref={confirmSheetRef}
@@ -94,6 +111,16 @@ async function inspect() {
   requireContract(selectStyle.outlineStyle === "solid" && selectStyle.outlineWidth === "2px", "focus outline is not visible");
   requireContract(selectStyle.minWidth === "0px" && selectStyle.maxWidth === "100%", "select sizing contract is missing");
   requireContract(selectBox.left >= trackBox.left - 0.5 && selectBox.right <= trackBox.right + 0.5, "select escapes its layout track");
+
+  const railShell = document.querySelector("#rail-contract-shell");
+  const railLink = document.querySelector("#rail-contract-link");
+  const railLabel = railLink.querySelector(".rail-label");
+  requireContract(matchMedia("(max-width: 1200px)").matches, "narrow desktop rail contract is not active");
+  requireContract(getComputedStyle(railShell).gridTemplateColumns.startsWith("72px"), "narrow desktop rail does not collapse");
+  requireContract(getComputedStyle(railLabel).position === "absolute", "collapsed rail still renders full-width labels");
+  railLink.focus();
+  requireContract(railLink.matches(":focus-visible"), "collapsed rail link is not keyboard focusable");
+  requireContract(railLink.getAttribute("aria-label") === "Pipeline", "collapsed rail link loses its accessible label");
 
   const live = document.querySelector(".live-pulse-dot");
   const liveStyle = getComputedStyle(live);

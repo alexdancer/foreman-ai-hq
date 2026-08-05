@@ -14,13 +14,13 @@ export function isReactOwnedPath(to) {
   return parseRoute(to.split(/[?#]/)[0]).view !== "notFound";
 }
 
-export function OwnedLink({ to, className, children }) {
+export function OwnedLink({ to, className, children, ...rest }) {
   return isReactOwnedPath(to)
-    ? <AppLink className={className} to={to}>{children}</AppLink>
-    : <a className={className} href={to}>{children}</a>;
+    ? <AppLink className={className} to={to} {...rest}>{children}</AppLink>
+    : <a className={className} href={to} {...rest}>{children}</a>;
 }
 
-export function AppLink({ to, className, children }) {
+export function AppLink({ to, className, children, ...rest }) {
   const navigate = React.useContext(NavContext);
   const onClick = (event) => {
     if (
@@ -37,7 +37,7 @@ export function AppLink({ to, className, children }) {
     navigate(to);
   };
   return (
-    <a className={className} href={to} onClick={onClick}>
+    <a className={className} href={to} {...rest} onClick={onClick}>
       {children}
     </a>
   );
