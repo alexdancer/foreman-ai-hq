@@ -33,13 +33,10 @@ Paste `foremanctl check` output here. If you are using a source checkout without
 - Does `command -v foremanctl` succeed?: yes / no
 - Docker or local Python:
 - Orchestrator Model and pi inventory state:
-- Optional Harness Proxy upstream configuration in use: yes / no
-- If yes, upstream key source: `.foreman/secrets.env` / environment variable
 - Worker Adapter: OpenCode / Claude Code / Codex / Hermes / other
-- Tracking mode: `proxy_governed` / `native_usage` / `observed_only` / unknown
+- Tracking mode: `native_usage` / `observed_only` / unknown
 
 ## What happened?
 
 
 ## Expected behavior
-

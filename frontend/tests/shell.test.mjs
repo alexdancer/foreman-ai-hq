@@ -1281,6 +1281,47 @@ test("Pipeline profile renders typed unavailable and empty states", () => {
   assert.doesNotMatch(markup, /undefined|\[object Object\]/);
 });
 
+test("Planning pane disclosure survives a board refresh", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (url) => {
+    if (url.includes("/planning/start")) {
+      return new Response(JSON.stringify({ planning_session_id: "sess-plan-999" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ events: [], next_since_id: 0, has_more: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const data = boardData();
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
+    }));
+  });
+  const disclosure = () => renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-pipeline" });
+  await act(async () => { disclosure().props.onClick(); });
+  assert.equal(disclosure().props["aria-expanded"], false);
+
+  await act(async () => {
+    renderer.update(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: true,
+    }));
+  });
+  assert.equal(renderer.root.findByProps({ className: "spinner" }).children.join(""), "Loading Pipeline…");
+  await act(async () => {
+    renderer.update(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
+    }));
+  });
+  assert.equal(disclosure().props["aria-expanded"], false);
+  await act(async () => { renderer.unmount(); });
+});
+
 test("Execution Floor renders active runs, Review queue, and recently-finished trail", () => {
   const floor = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
@@ -1328,7 +1369,7 @@ test("Planning Chat investigation links prefill bounded Task context", () => {
     loading: false,
     investigateTaskId: "task-estimated-999",
   }));
-  assert.match(markup, /value="Investigate Task task-estimated-999 before re-estimation:[\s\S]*Estimated DEMO task"/);
+  assert.match(markup, />Investigate Task task-estimated-999 before re-estimation:\nEstimated DEMO task<\/textarea>/);
 });
 
 test("Evidence Drawer fetches its Session Report handoff and reuses bounded evidence components", async () => {
@@ -2334,6 +2375,9 @@ test("ControlPlaneSettings surfaces stale verification and diverging per-job mod
   const markup = JSON.stringify(renderer.toJSON());
   assert.match(markup, /Verify again/);
   assert.match(markup, /estimator_model = openai-codex\/gpt-5\.4/);
+  assert.match(markup, /ignored legacy settings do not select runtime models/);
+  assert.match(markup, /Saving the Orchestrator Model removes them/);
+  assert.doesNotMatch(markup, /pinned to a different model/);
   await act(async () => { renderer.unmount(); });
 });
 

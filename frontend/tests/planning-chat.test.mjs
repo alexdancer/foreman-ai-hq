@@ -11,6 +11,7 @@ const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
 let server;
 let PlanningChatState;
 let PlanningChat;
+let drainPlanningEvents;
 
 before(async () => {
   server = await createServer({
@@ -19,7 +20,7 @@ before(async () => {
     logLevel: "silent",
     server: { middlewareMode: true },
   });
-  ({ PlanningChatState, default: PlanningChat } = await server.ssrLoadModule("/src/views/PlanningChat.jsx"));
+  ({ PlanningChatState, drainPlanningEvents, default: PlanningChat } = await server.ssrLoadModule("/src/views/PlanningChat.jsx"));
 });
 
 after(async () => {
@@ -97,7 +98,7 @@ test("PlanningChatState invites the first message when the conversation is empty
   assert.match(markup, /No turns yet/);
   assert.match(markup, /Send the first message/);
   // The spec requires the composer usable for that first message, not just the prompt.
-  assert.doesNotMatch(markup.match(/<input[^>]*>/)[0], /disabled/);
+  assert.doesNotMatch(markup.match(/<textarea[^>]*>/)[0], /disabled/);
 });
 
 test("PlanningChatState renders operator and orchestrator turns in the live-feed idiom", () => {
@@ -160,10 +161,31 @@ test("PlanningChatState disables the composer while a turn is in flight and show
 });
 
 test("PlanningChatState separates conversational Send from governed intake", () => {
-  const markup = renderState({ message: "shape this" });
+  const markup = renderState({ message: "# Shape this\n\n- [ ] Preserve structure" });
+  assert.match(markup, /<textarea[\s\S]*># Shape this\n\n- \[ \] Preserve structure<\/textarea>/);
   assert.match(markup, />Send</);
   assert.match(markup, /Create governed work/);
   assert.match(markup, /Markdown intake/);
+});
+
+test("PlanningChat drains every transcript page before enabling the composer", async () => {
+  const requested = [];
+  const pages = new Map([
+    ["0", { events: [{ id: 1 }], next_since_id: 1, has_more: true }],
+    ["1", { events: [{ id: 2 }], next_since_id: 2, has_more: true }],
+    ["2", { events: [{ id: 3 }], next_since_id: 3, has_more: false }],
+  ]);
+  const events = await drainPlanningEvents("/api/projects/demo-999/planning", async (url) => {
+    requested.push(url);
+    return pages.get(new URL(url, "https://example.invalid").searchParams.get("since_id"));
+  });
+
+  assert.deepEqual(events.map((event) => event.id), [1, 2, 3]);
+  assert.deepEqual(requested, [
+    "/api/projects/demo-999/planning/events?since_id=0",
+    "/api/projects/demo-999/planning/events?since_id=1",
+    "/api/projects/demo-999/planning/events?since_id=2",
+  ]);
 });
 
 test("PlanningChat loads the transcript on open", async () => {
@@ -245,7 +267,7 @@ test("PlanningChat submits governed intake only from the explicit intake action"
 
   const input = renderer.root.findByProps({ placeholder: "Describe the task or goal…" });
   await act(async () => {
-    input.props.onChange({ target: { value: "Create a bounded task" } });
+    input.props.onChange({ target: { value: "# Create a bounded task\n\n- [ ] Preserve line breaks" } });
   });
   const intakeButton = renderer.root.findAllByType("button")
     .find((button) => button.children.join("").includes("Create governed work"));
@@ -256,7 +278,10 @@ test("PlanningChat submits governed intake only from the explicit intake action"
 
   const intakeRequests = requests.filter((request) => request.url.includes("/planning/intake"));
   assert.equal(intakeRequests.length, 1);
-  assert.equal(intakeRequests[0].options.body.get("message"), "Create a bounded task");
+  assert.equal(
+    intakeRequests[0].options.body.get("message"),
+    "# Create a bounded task\n\n- [ ] Preserve line breaks",
+  );
   assert.equal(requests.filter((request) => request.url.includes("/planning/message")).length, 0);
   assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /Cancel/);
 

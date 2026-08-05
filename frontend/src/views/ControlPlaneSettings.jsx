@@ -143,9 +143,9 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
 
       {divergingKeys.length > 0 && (
         <div className="notice warning">
-          These jobs are pinned to a different model than the Orchestrator Model:{" "}
-          {divergingKeys.map((key) => `${key} = ${diverging[key]}`).join(", ")}. Saving again
-          resets them.
+          These ignored legacy settings do not select runtime models:{" "}
+          {divergingKeys.map((key) => `${key} = ${diverging[key]}`).join(", ")}. Saving the
+          Orchestrator Model removes them.
         </div>
       )}
 

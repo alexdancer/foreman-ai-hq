@@ -15,7 +15,7 @@ The system SHALL provide a public README onboarding path that gets a first-time 
 - **WHEN** the README describes Orchestrator setup and Worker setup
 - **THEN** it SHALL state that the Orchestrator Model selected from pi's inventory powers Foreman AI HQ estimation, planning, task breakdown, Agent Review, and reports
 - **AND** it SHALL state that native OpenCode, Claude Code, Codex, Hermes, or other Worker CLI auth remains configured in those tools or their adapter setup
-- **AND** it SHALL NOT imply that a Harness Proxy upstream API key configures pi or a native Worker CLI
+- **AND** it SHALL keep the public Worker setup path on verified native CLI usage evidence
 
 #### Scenario: Contributor workflow remains available
 - **WHEN** a contributor reads development or test instructions
@@ -28,12 +28,12 @@ The system SHALL provide public documentation that explains what Foreman AI HQ d
 #### Scenario: Operator reviews trust boundaries
 - **WHEN** an operator reads the public trust-boundary documentation
 - **THEN** the documentation SHALL explain Control Plane responsibilities, Local Runner/Execution Plane repository access, Worker Adapter auth boundaries, tracking modes, and Docker/local-runner limits
-- **AND** it SHALL explicitly state that Foreman AI HQ cannot govern arbitrary external-agent token spend unless traffic routes through the Harness Proxy or trustworthy run-bound native usage evidence is imported
+- **AND** it SHALL explicitly state that the supported public path cannot govern arbitrary external-agent token spend unless trustworthy run-bound native usage evidence is imported
 
 #### Scenario: Operator reviews local secret storage
 - **WHEN** an operator reads credential guidance
-- **THEN** the documentation SHALL state that optional Harness Proxy upstream API keys belong only in ignored local secret storage such as `.foreman/secrets.env` or the shell environment
-- **AND** it SHALL state that the Orchestrator settings portal does not collect those keys and pi authentication comes from `pi /login`
+- **THEN** the documentation SHALL state that `.foreman/secrets.env` is ignored local storage for the shared-access portal token
+- **AND** it SHALL state that pi authentication comes from `pi /login` while native Worker CLI authentication remains in those tools
 - **AND** raw key values SHALL NOT be shown as expected support artifacts
 
 ### Requirement: Public support and release hygiene
@@ -41,7 +41,7 @@ The repo SHALL include public-release hygiene files and support templates that h
 
 #### Scenario: Public support template requests actionable context
 - **WHEN** an operator opens a setup/support issue template
-- **THEN** the template SHALL ask for redacted `foremanctl check` output, OS, install method, Orchestrator Model state, Worker Adapter identity, tracking mode, and whether optional Harness Proxy upstream configuration is in use
+- **THEN** the template SHALL ask for redacted `foremanctl check` output, OS, install method, Orchestrator Model state, Worker Adapter identity, and tracking mode
 - **AND** it SHALL instruct the operator not to paste API keys, portal tokens, `.foreman/secrets.env`, or raw credentials
 
 #### Scenario: Release hygiene docs exist

@@ -45,10 +45,9 @@ Foreman AI HQ has two model layers:
 | Layer | What it powers | Auth source |
 |---|---|---|
 | Orchestrator model | Estimates, planning, task breakdown, Agent Review, summaries, and reports | Selected from pi inventory; provider auth via `pi /login` |
-| Harness Proxy upstream | Provider traffic only for `proxy_governed` Workers | Optional direct-provider settings and API key in the shell or ignored `.foreman/secrets.env` |
 | Worker / coding harness models | The actual coding task launched through OpenCode, Claude Code, Codex, or another adapter | The native CLI's own auth/config |
 
-Harness Proxy upstream credentials configure neither pi orchestration nor native Worker CLIs.
+Pi orchestration and native Worker CLIs use separate authentication and configuration.
 
 ## What Foreman AI HQ governs
 
@@ -71,8 +70,7 @@ An automatic estimate below `0.60` confidence appears in Needs You as an advisor
 ## Local secret storage
 
 - `.foreman/config.toml` stores non-secret config only.
-- `.foreman/secrets.env` is ignored local storage for the shared-access portal token and an optional Harness Proxy upstream key.
-- Set the optional upstream key in `.foreman/secrets.env` or the shell only when a `proxy_governed` Worker needs it; the Orchestrator settings page does not collect it.
+- `.foreman/secrets.env` is ignored local storage for the shared-access portal token.
 - Do not paste `.foreman/secrets.env`, API keys, portal tokens, bearer tokens, or raw credentials into support issues.
 
 ## Docker and Local Runner limits

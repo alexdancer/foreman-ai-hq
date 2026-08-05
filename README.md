@@ -172,8 +172,6 @@ There are two model layers:
 | **Worker model**        | the actual coding task                                        | configured by the native Worker CLI                             |
 
 
-Optional direct-provider credentials configure only Harness Proxy upstream traffic for `proxy_governed` Workers. They do not configure pi or a native Worker CLI.
-
 ## Local files and configuration
 
 `foremanctl init` creates local-only state under `.foreman/`:
@@ -183,7 +181,7 @@ Run it from the repository you want Foreman AI HQ to govern. If you run it from 
 | File                   | Purpose                                                        |
 | ---------------------- | -------------------------------------------------------------- |
 | `.foreman/config.toml`     | non-secret local config                                        |
-| `.foreman/secrets.env`     | ignored portal token and optional Harness Proxy upstream key storage |
+| `.foreman/secrets.env`     | ignored portal token storage                                  |
 | `.foreman/guardrails.yaml` | ignored default guardrail config                               |
 | `.foreman/harness.db`      | default SQLite database, created or migrated by `foremanctl init`     |
 
@@ -197,12 +195,9 @@ Common environment variables:
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `TOKEN_TRACKER_PORTAL_TOKEN`    | Portal login token for shared/non-loopback access                             |
 | `FOREMAN_AI_HQ_ORCHESTRATOR_MODEL`  | Orchestrator model chosen from pi's inventory                                 |
-| `FOREMAN_AI_HQ_CONTROL_PROVIDER`   | Optional Harness Proxy upstream provider for `proxy_governed` Workers         |
-| `FOREMAN_AI_HQ_CONTROL_BASE_URL`   | Optional Harness Proxy upstream base URL                                      |
-| `FOREMAN_AI_HQ_CONTROL_API_KEY`    | Optional Harness Proxy upstream API key; never pi or native Worker CLI auth    |
 
 
-Optional Harness Proxy upstream keys belong in ignored local secret storage or the shell environment; the Orchestrator settings page does not collect them. The Orchestrator Model is selected from pi's discovered inventory, and its provider authentication belongs to pi.
+The Orchestrator Model is selected from pi's discovered inventory, and its provider authentication belongs to pi. Worker CLI authentication remains in the installed Worker CLI.
 
 ## Current limits
 

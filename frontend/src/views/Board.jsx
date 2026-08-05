@@ -275,6 +275,25 @@ export function BoardState({
   onTurnComplete = () => {},
   investigateTaskId = null,
 }) {
+  const [planningExpanded, setPlanningExpanded] = useState(() => ({
+    pipeline: !(typeof window !== "undefined" && window.matchMedia?.("(max-width: 760px)").matches),
+    floor: false,
+  }));
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const media = window.matchMedia("(max-width: 760px)");
+    const onChange = (event) => {
+      if (event.matches) {
+        setPlanningExpanded((current) => ({ ...current, pipeline: false }));
+      }
+    };
+    media.addEventListener?.("change", onChange);
+    return () => media.removeEventListener?.("change", onChange);
+  }, []);
+  const setCurrentPlanningExpanded = (expanded) => {
+    setPlanningExpanded((current) => ({ ...current, [surface]: expanded }));
+  };
+
   if (loading) return <Loading>Loading {surface === "floor" ? "Execution Floor" : "Pipeline"}…</Loading>;
   if (isArchivedBoardError(error)) return <>
     <Notice variant="warning">
@@ -302,7 +321,16 @@ export function BoardState({
   const tasksByStatus = data.tasks_by_status || Object.fromEntries(COLUMNS.map((column) => [column, []]));
   const cards = Object.values(tasksByStatus).flat();
   const visible = (task) => JSON.stringify(task).toLowerCase().includes(query.toLowerCase());
-  const common = { projectId, data, tasksByStatus, visible, action, openEvidence };
+  const common = {
+    projectId,
+    data,
+    tasksByStatus,
+    visible,
+    action,
+    openEvidence,
+    planningExpanded: planningExpanded[surface],
+    onPlanningExpandedChange: setCurrentPlanningExpanded,
+  };
 
   return <>
     <h1 className="page-title">{data.project.name} · {surface === "floor" ? "Execution Floor" : "Pipeline"}</h1>
@@ -391,6 +419,8 @@ function PipelineSurface({
   cards,
   onTurnComplete,
   investigateTaskId,
+  planningExpanded,
+  onPlanningExpandedChange,
 }) {
   const needsYou = data.needs_you || { count: 0, items: [] };
   const planning = needsYou.items.filter((item) => item.kind === "breakdown_review");
@@ -416,6 +446,8 @@ function PipelineSurface({
       projectId={projectId}
       onTurnComplete={onTurnComplete}
       defaultExpanded
+      expanded={planningExpanded}
+      onExpandedChange={onPlanningExpandedChange}
       initialMessage={investigationMessage(cards, investigateTaskId)}
     />
   </div>;
@@ -435,20 +467,10 @@ export function PlanningPane({
   projectId,
   onTurnComplete,
   defaultExpanded,
+  expanded,
+  onExpandedChange,
   initialMessage = "",
 }) {
-  const [expanded, setExpanded] = useState(() => (
-    defaultExpanded && !(typeof window !== "undefined" && window.matchMedia?.("(max-width: 760px)").matches)
-  ));
-  useEffect(() => {
-    if (!defaultExpanded || typeof window === "undefined" || !window.matchMedia) return undefined;
-    const media = window.matchMedia("(max-width: 760px)");
-    const onChange = (event) => {
-      if (event.matches) setExpanded(false);
-    };
-    media.addEventListener?.("change", onChange);
-    return () => media.removeEventListener?.("change", onChange);
-  }, [defaultExpanded]);
   const contentId = `planning-pane-${projectId}-${defaultExpanded ? "pipeline" : "floor"}`;
   return <section className={`board-pane planning-pane ${expanded ? "is-expanded" : "is-collapsed"}`}>
     <Panel>
@@ -459,7 +481,7 @@ export function PlanningPane({
           variant="secondary"
           aria-expanded={expanded}
           aria-controls={contentId}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={() => onExpandedChange(!expanded)}
         >
           {expanded ? "Collapse" : "Expand"}
         </Button>
@@ -515,13 +537,31 @@ function NeedsYouItem({ item, action }) {
   </div>;
 }
 
-function FloorSurface({ projectId, data, tasksByStatus, visible, action, openEvidence, query, setQuery, onTurnComplete }) {
+function FloorSurface({
+  projectId,
+  data,
+  tasksByStatus,
+  visible,
+  action,
+  openEvidence,
+  query,
+  setQuery,
+  onTurnComplete,
+  planningExpanded,
+  onPlanningExpandedChange,
+}) {
   const queueRunning = data.automation.queue.status === "running";
   const running = tasksByStatus.Running.filter(visible);
   const review = tasksByStatus.Review.filter(visible);
   const done = tasksByStatus.Done.filter(visible);
   return <div className="board-layout execution-floor">
-    <PlanningPane projectId={projectId} onTurnComplete={onTurnComplete} defaultExpanded={false} />
+    <PlanningPane
+      projectId={projectId}
+      onTurnComplete={onTurnComplete}
+      defaultExpanded={false}
+      expanded={planningExpanded}
+      onExpandedChange={onPlanningExpandedChange}
+    />
     <div className="floor-main board-main">
       <div className="board-command-bar">
         <div className="board-command-status">

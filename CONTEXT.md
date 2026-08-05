@@ -113,13 +113,13 @@
 
 ## Operator Config
 **Definition**: The local non-secret configuration created by `foremanctl init` and edited by the Portal for normal local operation.
-**Properties**: Stored at `.foreman/config.toml`. Contains non-secret settings such as database path, guardrails path, host, port, portal token env name, control-plane provider/model/base URL/env name, and Local Runner enablement. `foremanctl init` writes `.foreman/` state at the Git repository root when run inside Git, or in the current directory outside Git. Default guardrails are written to ignored `.foreman/guardrails.yaml`; SQLite defaults to `.foreman/harness.db` and is created or migrated by `foremanctl init`. Effective startup precedence is CLI flag, then environment variable, then `.foreman/config.toml`, then built-in default.
+**Properties**: Stored at `.foreman/config.toml`. Contains non-secret settings such as database path, guardrails path, host, port, portal token env name, Local Runner enablement, and legacy direct-provider compatibility fields used only by explicitly proxy-capable Worker adapters. Those compatibility fields never configure pi orchestration. `foremanctl init` writes `.foreman/` state at the Git repository root when run inside Git, or in the current directory outside Git. Default guardrails are written to ignored `.foreman/guardrails.yaml`; SQLite defaults to `.foreman/harness.db` and is created or migrated by `foremanctl init`. Effective startup precedence is CLI flag, then environment variable, then `.foreman/config.toml`, then built-in default.
 **Relationships**: Read by `foremanctl serve` and `foremanctl check`. Updated by Control Plane Settings for non-secret fields. Points to Local Secret Storage for actual secret values.
 
 ## Local Secret Storage
 **Definition**: Ignored local storage for portal and control-plane secret values in the operator setup path.
-**Properties**: Stored at `.foreman/secrets.env`. `foremanctl init` creates a portal token value and a control-plane API-key placeholder. `foremanctl serve` and `foremanctl check` load non-placeholder values. Support output must not include raw `.foreman/secrets.env` contents, API keys, bearer tokens, or portal tokens.
-**Relationships**: Supplies the Portal Login Token and Control Plane API Key. Distinct from Operator Config, which stores only env var names and other non-secret settings.
+**Properties**: Stored at `.foreman/secrets.env`. `foremanctl init` creates a portal token value and retains a legacy Harness Proxy upstream-key placeholder for compatibility. That key applies only to explicitly proxy-capable Worker traffic and never to pi orchestration. `foremanctl serve` and `foremanctl check` load non-placeholder values. Support output must not include raw `.foreman/secrets.env` contents, API keys, bearer tokens, or portal tokens.
+**Relationships**: Supplies the Portal Login Token and, when internal compatibility mode is explicitly configured, the Harness Proxy upstream key. Distinct from Operator Config, which stores only env var names and other non-secret settings.
 
 ## Portal Login Token
 **Definition**: The token used to authenticate to the Portal login screen when portal auth is required.

@@ -35,7 +35,6 @@ Paste relevant redacted `foremanctl check` output, traceback, or logs. If you ar
 - Install method: pipx / curl installer / Homebrew / source checkout / Docker / other
 - Does `command -v foremanctl` succeed?: yes / no
 - Orchestrator Model and pi inventory state:
-- Optional Harness Proxy upstream configuration in use: yes / no
 - Worker Adapter:
 - Tracking mode:
 - Docker or local Python:

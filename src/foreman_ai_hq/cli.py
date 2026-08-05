@@ -67,14 +67,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Start with foremanctl serve, open http://localhost:8000/, run `pi /login`, "
             "then choose and verify the Orchestrator Model in /settings/control-plane."
         )
-        portal_token_env, control_key_env = secret_env_names(config)
+        portal_token_env, _ = secret_env_names(config)
         secrets_display = _display_path(secrets_path, cwd)
         print(f"Portal token for shared access: set {portal_token_env} in {secrets_display}")
-        print(
-            f"Optional Harness Proxy upstream API key for proxy_governed Workers: set "
-            f"{control_key_env} in {secrets_display} or the shell environment; it never "
-            "configures pi orchestration."
-        )
         return 0
 
     if command == "serve":
@@ -264,15 +259,6 @@ def _check_operator_setup() -> int:
             hard_fail = True
     else:
         print(f"PASS portal auth disabled for local-only access; {settings.portal_token_env} not required")
-
-    proxy_key_env = settings.control_plane_api_key_env
-    if os.getenv(proxy_key_env):
-        print(f"PASS Harness Proxy upstream API key env {proxy_key_env} present")
-    else:
-        print(
-            f"WARN Harness Proxy upstream API key env {proxy_key_env} missing; only required for "
-            "proxy_governed Workers. Set it in .foreman/secrets.env or the shell environment."
-        )
 
     # Readiness is pi's inventory, not an API key: the Orchestrator runs on pi's own
     # provider auth, so an exported control-plane key proves nothing about it.

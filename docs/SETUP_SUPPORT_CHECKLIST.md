@@ -26,7 +26,6 @@ Include:
 - Install method: `pipx`, curl installer, Homebrew, source checkout, Docker, or other
 - Whether `command -v foremanctl` succeeds
 - Orchestrator Model and pi inventory/authentication state
-- Whether optional Harness Proxy upstream configuration is in use and, if so, whether its key comes from `.foreman/secrets.env` or an environment variable
 - Worker Adapter identity: OpenCode, Claude Code, Codex, or other
 - Worker tracking status shown in the Portal: verified native usage, diagnostic-only, failed, or unknown
 - Whether you are running local Python or Docker
@@ -39,4 +38,4 @@ Screenshots are useful when they show sanitized Portal state and no secrets.
 
 ## Boundary reminder
 
-Installing Foreman AI HQ exposes the `foremanctl` operator CLI. Pi orchestration authentication comes from `pi /login`; native Worker CLI setup happens separately in those tools and through the Portal Worker Adapter setup flow. Optional Harness Proxy upstream credentials configure only `proxy_governed` Worker traffic.
+Installing Foreman AI HQ exposes the `foremanctl` operator CLI. Pi orchestration authentication comes from `pi /login`; native Worker CLI setup happens separately in those tools and through the Portal Worker Adapter setup flow.

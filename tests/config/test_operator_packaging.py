@@ -97,10 +97,9 @@ def test_readme_documents_portal_first_operator_flow():
     assert "docs/assets/screenshots/worker-adapter-setup.png" in readme
     assert "docs/assets/screenshots/sessions-token-ledger.png" in readme
     assert "environment variables" in readme.lower()
-    assert "FOREMAN_AI_HQ_CONTROL_API_KEY" in readme
-    assert "Harness Proxy upstream" in readme
-    assert "proxy_governed" in readme
-    assert "They do not configure pi or a native Worker CLI" in readme
+    assert "FOREMAN_AI_HQ_CONTROL_API_KEY" not in readme
+    assert "Harness Proxy" not in readme
+    assert "proxy_governed" not in readme
 
 
 def test_install_docs_separate_operator_installs_from_contributor_uv_run():
@@ -122,9 +121,9 @@ def test_install_docs_separate_operator_installs_from_contributor_uv_run():
     assert "uv run foremanctl ...` is a contributor convenience" in install_doc
     assert "foremanctl init" in getting_started
     assert "uv run foremanctl ...` is a contributor convenience" in getting_started
-    assert "proxy_governed" in getting_started
-    assert "Harness Proxy upstream" in getting_started
-    assert "configure neither pi orchestration nor native Worker CLIs" in getting_started
+    assert "proxy_governed" not in getting_started
+    assert "Harness Proxy" not in getting_started
+    assert "Pi orchestration and native Worker CLIs use separate authentication" in getting_started
     assert "assets/screenshots/dashboard-overview.png" in getting_started
     assert "assets/screenshots/project-board-review-workflow.png" in getting_started
     assert "assets/screenshots/control-plane-model-settings.png" in getting_started
@@ -134,15 +133,20 @@ def test_install_docs_separate_operator_installs_from_contributor_uv_run():
     assert "assets/screenshots/task-breakdown-manual-recovery.png" in getting_started
 
 
-def test_operator_docs_scope_proxy_credentials_to_worker_traffic():
-    getting_started = (ROOT / "docs" / "GETTING_STARTED.md").read_text()
-    worker_setup = (ROOT / "docs" / "WORKER_ADAPTER_SETUP.md").read_text()
+def test_public_operator_docs_do_not_advertise_unproven_proxy_mode():
+    operator_docs = [
+        ROOT / "README.md",
+        ROOT / "docs" / "GETTING_STARTED.md",
+        ROOT / "docs" / "WORKER_ADAPTER_SETUP.md",
+        ROOT / "docs" / "SETUP_SUPPORT_CHECKLIST.md",
+        ROOT / ".github" / "ISSUE_TEMPLATE" / "setup_support.md",
+        ROOT / ".github" / "ISSUE_TEMPLATE" / "bug_report.md",
+    ]
 
-    assert "Harness Proxy upstream" in getting_started
-    assert "proxy_governed" in getting_started
-    assert "Orchestrator settings page does not collect it" in getting_started
-    assert "Pi authentication from `pi /login` powers Foreman AI HQ orchestration" in worker_setup
-    assert "apply only to `proxy_governed` Worker traffic" in worker_setup
+    for path in operator_docs:
+        text = path.read_text()
+        assert "Harness Proxy" not in text, path
+        assert "proxy_governed" not in text, path
 
 
 def test_support_checklist_requests_bare_foremanctl_check_and_install_method():

@@ -100,12 +100,13 @@ export function PlanningChatState({
           <form className="planning-chat-form" onSubmit={handleSubmit}>
             <label>
               <span>Message</span>
-              <input
+              <textarea
                 className="board-input"
                 value={message}
                 onChange={(event) => onMessageChange(event.target.value)}
                 placeholder="Describe the task or goal…"
                 disabled={!started || Boolean(sending)}
+                rows={5}
               />
             </label>
             <label>
@@ -141,6 +142,20 @@ export function PlanningChatState({
   );
 }
 
+export async function drainPlanningEvents(base, get = getJSON) {
+  const events = [];
+  let sinceId = 0;
+  while (true) {
+    const page = await get(`${base}/events?since_id=${sinceId}`);
+    events.push(...(page.events || []));
+    if (!page.has_more) return events;
+    if (!Number.isInteger(page.next_since_id) || page.next_since_id <= sinceId) {
+      throw new Error("Planning transcript returned an invalid cursor.");
+    }
+    sinceId = page.next_since_id;
+  }
+}
+
 export default function PlanningChat({ projectId, onTurnComplete, compact, initialMessage = "" }) {
   const [state, setState] = useState({
     loading: true,
@@ -169,7 +184,7 @@ export default function PlanningChat({ projectId, onTurnComplete, compact, initi
     async function start() {
       try {
         await postJSON(`${base}/start`, {});
-        const { events } = await getJSON(`${base}/events?since_id=0`);
+        const events = await drainPlanningEvents(base);
         if (!active) return;
         setState((s) => ({
           ...s,
