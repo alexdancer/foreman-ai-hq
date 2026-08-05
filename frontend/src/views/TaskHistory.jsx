@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 
+import { BlockedCondition, TaskCondition } from "../components/BlockedCondition.jsx";
+import { StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -158,17 +160,6 @@ export function TaskHistoryState({
 }
 
 function TaskRow({ task, onUnarchive }) {
-  const tone =
-    task.status === "Done"
-      ? "green"
-      : task.status === "Blocked"
-      ? "red"
-      : task.status === "Review"
-      ? "yellow"
-      : task.status === "Running"
-      ? "blue"
-      : "muted";
-
   return (
     <tr id={task.id}>
       <td>
@@ -177,8 +168,8 @@ function TaskRow({ task, onUnarchive }) {
         <div className="mono muted">{task.id}</div>
       </td>
       <td>
-        <span className={`pill ${tone}`}>{task.status}</span>
-        {task.archived && <span className="pill muted">Archived</span>}
+        <StatusPill tone={statusTone(task.status)} label={task.status || "Unknown"} />
+        {task.archived && <StatusPill tone="neutral" label="Archived" />}
       </td>
       <td>
         <div className="mono muted">
@@ -198,12 +189,8 @@ function TaskRow({ task, onUnarchive }) {
           <span className="muted">No session</span>
         )}
         {task.worker_run_id && <div className="mono muted">Worker Run: {task.worker_run_id}</div>}
-        {task.blocked_reason && (
-          <div className="mono muted wrap-anywhere">Blocked: {task.blocked_reason}</div>
-        )}
-        {task.requires_manual_estimate && (
-          <div className="mono muted">Manual estimate required</div>
-        )}
+        <BlockedCondition reason={task.blocked_reason} />
+        {task.requires_manual_estimate && <TaskCondition label="Manual estimate required" />}
       </td>
       <td>
         {task.archived_at ? (

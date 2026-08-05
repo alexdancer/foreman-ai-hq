@@ -5,8 +5,10 @@ import { getJSON } from "../api.js";
 import { drainLiveEvents, runSingleFlight } from "../live-events.js";
 import { LiveRunDock, liveRunsFromTasks } from "../components/LiveRunDock.jsx";
 import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
+import { BlockedCondition } from "../components/BlockedCondition.jsx";
+import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
 import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, Pill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody } from "../components/ui/index.js";
+import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -366,9 +368,10 @@ function ProjectHeader({ projectId, workspace, action }) {
         </details>
       </div>
       <div className="pipeline-readiness">
-        <Pill tone={summary.launch_ready ? "green" : "yellow"}>
-          {summary.launch_ready ? "launch ready" : capability.label || capability.state || "setup needed"}
-        </Pill>
+        <StatusPill
+          tone={summary.launch_ready ? "green" : "yellow"}
+          label={summary.launch_ready ? "launch ready" : capability.label || capability.state || "setup needed"}
+        />
         {capability.reasons?.map((reason) => <span className="muted" key={reason}>{reason}</span>)}
       </div>
       <nav className="toolbar" aria-label="Project orchestration surfaces">
@@ -408,21 +411,21 @@ function PipelineSurface({
         <form className="board-intake" onSubmit={(event) => { event.preventDefault(); if (estimating) return; estimateTask(new FormData(event.currentTarget)); }}>
           <label className="board-intake-task-field" htmlFor="react-board-intake">
             <span>Task description</span>
-            <textarea className="board-input" id="react-board-intake" name="description" placeholder="Describe a short task or paste Markdown" rows="3" disabled={estimating} />
+            <textarea className="board-input" id="react-board-intake" name="description" placeholder="Describe a short task or paste Markdown" rows="3" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined} />
           </label>
           <label className="board-intake-kind-field">
             <span>Task kind</span>
-            <select className="board-input" name="task_kind" disabled={estimating}><option value="implementation">implementation</option><option value="scout">scout</option></select>
+            <select className="board-input" name="task_kind" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined}><option value="implementation">implementation</option><option value="scout">scout</option></select>
           </label>
           <label className="board-intake-file-field">
             <span>Markdown file <em>(optional)</em></span>
-            <input className="board-file" name="markdown_file" type="file" accept=".md,text/markdown,text/plain" disabled={estimating} />
+            <input className="board-file" name="markdown_file" type="file" accept=".md,text/markdown,text/plain" disabled={estimating} aria-describedby={estimating ? "board-estimating-reason" : undefined} />
           </label>
-          <Button size="small" type="submit" disabled={estimating}>{estimating ? "Estimating…" : "Estimate task"}</Button>
+          <Button size="small" type="submit" disabled={estimating} disabledReason="Task estimation is already in progress.">{estimating ? "Estimating…" : "Estimate task"}</Button>
           {estimating && <div className="board-intake-progress" role="status" aria-live="polite">
             <div className="board-intake-progress-copy">
               <strong>Preparing Task Breakdown Review</strong>
-              <span>Estimating and breaking down the task. Keep this page open.</span>
+              <span id="board-estimating-reason">Estimating and breaking down the task. Keep this page open.</span>
             </div>
             <div className="board-intake-progress-track" role="progressbar" aria-label="Task estimation progress" aria-valuetext="Estimating task and preparing review">
               <span className="board-intake-progress-bar" />
@@ -435,7 +438,7 @@ function PipelineSurface({
     <Panel className="planning-inbox">
       <PanelHeader title="Planning Inbox" count={planning.length} />
       <PanelBody className="needs-you-list">
-        {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · {item.status} · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
+        {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="planning-inbox-meta mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · <StatusPill tone={statusTone(item.status)} label={item.status || "unknown"} /> · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
         {planning.length === 0 && <EmptyState>No proposed Task Breakdowns await review.</EmptyState>}
       </PanelBody>
     </Panel>
@@ -475,7 +478,7 @@ function NeedsYouItem({ item, action }) {
         if (a.kind === "manual_estimate") {
           return <form key={a.kind} className="needs-you-inline" onSubmit={(event) => { event.preventDefault(); if (!Number(value)) return; post(a, { estimate_tokens: Number(value) }); }}>
             <input className="board-input" type="number" min="1" value={value} onChange={(event) => setValue(event.target.value)} placeholder="tokens" />
-            <Button size="small" type="submit" disabled={!Number(value)}>{a.label}</Button>
+            <Button size="small" type="submit" disabled={!Number(value)} disabledReason="Enter a positive token estimate.">{a.label}</Button>
           </form>;
         }
         if (a.method === "GET") {
@@ -495,7 +498,7 @@ function FloorSurface({ projectId, data, tasksByStatus, visible, action, openEvi
   return <div className="execution-floor">
     <div className="board-command-bar">
       <div className="board-command-status">
-        <Pill tone={queueRunning ? "running" : "idle"}>Queue {data.automation.queue.status}</Pill>
+        <StatusPill tone={queueRunning ? "running" : "idle"} label={`Queue ${data.automation.queue.status}`} />
         <span className="column-count">{running.length} active · {review.length} review</span>
       </div>
       <div className="board-command-actions">
@@ -528,27 +531,6 @@ function QueueStart({ projectId, queue, action }) {
     <label className="check-row"><input name="auto_agent_review" type="checkbox" defaultChecked={queue.auto_agent_review} /> Auto Agent Review</label>
     <Button size="small" type="submit">Start queue</Button>
   </form>;
-}
-
-function FinishedTokenComparison({ estimate, actual }) {
-  const savings =
-    Number.isFinite(estimate) && Number.isFinite(actual) && estimate > 0 && actual <= estimate
-      ? Math.round((1 - actual / estimate) * 100)
-      : null;
-
-  return (
-    <div className="finished-token-comparison" aria-label="Estimate versus actual tokens">
-      <div className="token-stat token-stat-estimate">
-        <small>Estimate</small>
-        <strong>{estimate?.toLocaleString() ?? "Unavailable"}</strong>
-      </div>
-      <div className="token-stat-divider" aria-hidden="true" />
-      <div className="token-stat token-stat-actual">
-        <small>{savings != null && savings > 0 ? `Actual · −${savings}%` : "Actual"}</small>
-        <strong>{actual?.toLocaleString() ?? "Unavailable"}</strong>
-      </div>
-    </div>
-  );
 }
 
 function TaskCard({ task, projectId, adapters = [], action, openEvidence = () => {}, recentlyFinished = false, actionVariant = "secondary" }) {
@@ -588,14 +570,15 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
     action(`/tasks/${task.id}/launch`, form);
   };
   return <article className="task" id={`task-${task.id}`}>
-    {recentlyFinished && <FinishedTokenComparison estimate={task.estimate_tokens} actual={task.actual_tokens} />}
+    {recentlyFinished && <TokenComparison className="finished-token-comparison" estimate={task.estimate_tokens} actual={task.actual_tokens} />}
     <header className="task-heading">
       <span className="task-id">{task.id}</span>
       <h4 className="task-title" title={fullSummary}>{displayName}</h4>
       {task.task_kind && task.task_kind !== "implementation" && <span className="pill scout" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
+      <StatusPill tone={taskStatusTone(task.status)} label={task.status || "Unknown status"} />
       {task.status === "Running" && <span className="live-pulse-dot" aria-label="Running live" title="Running live" />}
     </header>
-    {task.blocked_condition && <div className="blocked-condition" role="status"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
+    <BlockedCondition reason={task.blocked_condition?.reason} announce />
     {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
     {task.status === "Running" && <LatestEventLine timeline={task.timeline} />}
     <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}</div>
@@ -621,7 +604,7 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
           </>}
         </div>
       </details>}
-      <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)}>Launch</Button>
+      <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)} disabledReason="Enter a positive manual token estimate before launch.">Launch</Button>
       {!selectedAdapter?.launchable && controls.setup_href && <a href={controls.setup_href}>Open Worker Setup</a>}
     </div>}
     {(controls.can_refresh || controls.can_archive || controls.can_dismiss || task.session_href) && <div className="task-actions">
@@ -631,6 +614,10 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
       {task.session_href && <Button size="small" variant={actionVariant} type="button" onClick={() => openEvidence(task)}>View evidence</Button>}
     </div>}
   </article>;
+}
+
+function taskStatusTone(status) {
+  return statusTone(status);
 }
 
 /**
@@ -647,7 +634,7 @@ function LaunchFailureNotice({ failure }) {
   const nextAction = (failure.next_action?.text || "").trim();
   return (
     <div className="launch-failure" role="status">
-      <strong>Last launch failed{failure.retryable ? " · retryable" : ""}</strong>
+      <StatusPill tone={statusTone("failed")} label={`Last launch failed${failure.retryable ? " · retryable" : ""}`} />
       <span>{reason}</span>
       {detail && <span className="launch-failure-detail">{detail}{Number.isInteger(failure.returncode) ? ` (exit ${failure.returncode})` : ""}</span>}
       {nextAction && <span className="launch-failure-action">{nextAction}</span>}
@@ -764,18 +751,18 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
       <header className="evidence-drawer-header"><div><span className="section-label">Task evidence</span><h2>{taskDisplayName(task)}</h2></div><Button size="small" variant="secondary" type="button" onClick={onClose}>Close</Button></header>
       <div className="evidence-drawer-body">
         <div className="task-meta"><span>Estimate {task.estimate_tokens ?? "unavailable"}</span><span>Actual {task.actual_tokens ?? "unavailable"}</span></div>
-        {task.blocked_condition && <div className="blocked-condition"><strong>Blocked</strong><span>{task.blocked_condition.reason}</span></div>}
+        <BlockedCondition reason={task.blocked_condition?.reason} />
         {loading && <Loading>Loading session evidence…</Loading>}
         {error && <Notice variant="danger" role="alert">{error}</Notice>}
         {!loading && !error && !data && <EmptyState>No session evidence is available.</EmptyState>}
         {data && <>
           <EvidenceSection key={`${task.id}:tokens`} title="Token log" page={safeEvidencePage(data.tokens?.log)} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
-          <EvidenceSection key={`${task.id}:zones`} title="Budget-zone timeline" page={safeEvidencePage(data.zone_timeline)} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.zone || "unknown"} zone`} meta={`${item.created_at || "time unavailable"} · max tokens ${item.max_tokens ?? "unavailable"}`} />} />
+          <EvidenceSection key={`${task.id}:zones`} title="Budget-zone timeline" page={safeEvidencePage(data.zone_timeline)} renderItem={(item, index) => <EvidenceItem key={index} {...budgetZoneEvidenceProps(item)} />} />
           {(data.worker_timeline?.items?.length > 0 || data.freshness?.active) && <Panel className="evidence-section live-feed-panel"><PanelHeader title="Live Worker Run feed" badge={<span>system evidence</span>} /><PanelBody aria-live="polite"><LiveEventFeed events={(data.worker_timeline?.items || []).map((item, index) => ({ ...item, id: item.id ?? index }))} active={Boolean(data.freshness?.active)} /></PanelBody></Panel>}
           <EvidenceSection key={`${task.id}:timeline`} title="Worker Run timeline" page={safeEvidencePage(data.worker_timeline)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.level || "event"} · ${item.layer || "worker"} · ${item.kind || "event"} · ${item.title || "Worker output"}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary || ""}`} detail={item.detail} />} />
           <RepoContext key={`${task.id}:repo`} page={safeEvidencePage(data.repo_context_briefs)} />
-          <EvidenceSection key={`${task.id}:alarms`} title="Alarms" page={safeEvidencePage(data.alarms)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.severity || "unknown"} · ${item.type || "Alarm"}`} meta={`${item.id || "alarm"} · ${item.created_at || "time unavailable"}`} body={item.recommended_action || "No recommended action."} />} />
-          <EvidenceSection key={`${task.id}:checkpoints`} title="Checkpoint results" page={safeEvidencePage(data.checkpoints)} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.passed ? "PASS" : "FAIL"} · ${item.name || "Checkpoint"}`} detail={item.details} />} />
+          <EvidenceSection key={`${task.id}:alarms`} title="Alarms" page={safeEvidencePage(data.alarms)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} {...alarmEvidenceProps(item, { fallbackId: "alarm", fallbackBody: "No recommended action." })} />} />
+          <EvidenceSection key={`${task.id}:checkpoints`} title="Checkpoint results" page={safeEvidencePage(data.checkpoints)} renderItem={(item, index) => <EvidenceItem key={index} {...checkpointEvidenceProps(item)} />} />
           {data.related_agent_review && <AgentReview review={data.related_agent_review} />}
         </>}
       </div>

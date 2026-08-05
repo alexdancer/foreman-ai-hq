@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { homedir, tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { promisify } from "node:util";
 
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -9,7 +13,9 @@ import { act, create } from "react-test-renderer";
 import { createServer } from "vite";
 
 const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
+const execFileAsync = promisify(execFile);
 let server;
+let browserBaseUrl;
 let Sidebar;
 let DashboardState;
 let BoardState;
@@ -45,13 +51,63 @@ let WorkerSettingsState;
 let ControlPlaneSettingsState;
 let ProjectSettingsState;
 
+const browserNames = new Set(["chrome", "chrome-headless-shell", "headless_shell", "Chromium"]);
+
+function executable(path) {
+  if (!path || !existsSync(path)) return false;
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function browserUnder(root, depth = 0) {
+  if (!root || !existsSync(root) || depth > 4) return null;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = browserUnder(path, depth + 1);
+      if (nested) return nested;
+    } else if (browserNames.has(basename(path)) && executable(path)) {
+      return path;
+    }
+  }
+  return null;
+}
+
+function browserExecutable() {
+  const direct = [
+    process.env.CHROME_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ];
+  for (const directory of String(process.env.PATH || "").split(":")) {
+    for (const name of ["google-chrome", "chromium", "chromium-browser"]) direct.push(join(directory, name));
+  }
+  for (const root of [join(homedir(), ".cache", "ms-playwright"), join(homedir(), "Library", "Caches", "ms-playwright")]) {
+    if (!existsSync(root)) continue;
+    const shells = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("chromium_headless_shell-"))
+      .sort((left, right) => right.name.localeCompare(left.name));
+    for (const shell of shells) {
+      const cached = browserUnder(join(root, shell.name));
+      if (cached) return cached;
+    }
+  }
+  return direct.find(executable) || null;
+}
+
 before(async () => {
   server = await createServer({
     root: frontendRoot,
-    appType: "custom",
+    appType: "mpa",
     logLevel: "silent",
-    server: { middlewareMode: true },
+    server: { host: "127.0.0.1", port: 0 },
   });
+  await server.listen();
+  browserBaseUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
   ({ Sidebar } = await server.ssrLoadModule("/src/components/Shell.jsx"));
   ({ DashboardState } = await server.ssrLoadModule("/src/views/Dashboard.jsx"));
   ({ ProjectsState } = await server.ssrLoadModule("/src/views/Projects.jsx"));
@@ -102,6 +158,45 @@ function renderSidebar(overrides = {}) {
     ...overrides,
   };
   return renderToStaticMarkup(React.createElement(Sidebar, props));
+}
+
+function assertStatusPillsHaveGlyphs(markup) {
+  const statuses = (markup.match(/class="status-pill status-pill-/g) || []).length;
+  assert.ok(statuses > 0, "expected at least one rendered status pill");
+  assert.equal((markup.match(/class="status-pill-glyph"/g) || []).length, statuses);
+  assert.equal((markup.match(/class="status-pill-label"/g) || []).length, statuses);
+}
+
+function assertNoNestedPanels(markup) {
+  const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+  const stack = [];
+  for (const match of markup.matchAll(/<(\/)?([a-z][\w:-]*)([^>]*)>/gi)) {
+    const [, closing, rawTag, attributes] = match;
+    const tag = rawTag.toLowerCase();
+    if (closing) {
+      while (stack.length) {
+        const open = stack.pop();
+        if (open.tag === tag) break;
+      }
+      continue;
+    }
+    const classes = attributes.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/) || [];
+    const isPanel = classes.includes("panel");
+    assert.ok(!isPanel || !stack.some((open) => open.isPanel), `rendered nested panel at <${tag}>`);
+    if (!voidTags.has(tag) && !attributes.trimEnd().endsWith("/")) stack.push({ tag, isPanel });
+  }
+}
+
+function assertDisabledControlsHaveReasons(markup) {
+  const controls = [...markup.matchAll(/<(button|input|select|textarea|fieldset)\b[^>]*disabled=""[^>]*>/g)];
+  assert.ok(controls.length > 0, "expected at least one disabled control");
+  for (const [control] of controls) {
+    const describedBy = control.match(/aria-describedby="([^"]+)"/)?.[1];
+    assert.ok(describedBy, `disabled control has no associated reason: ${control}`);
+    for (const id of describedBy.split(/\s+/)) {
+      assert.ok(markup.includes(`id="${id}"`), `disabled reason ${id} is not rendered`);
+    }
+  }
 }
 
 function dashboardData(overrides = {}) {
@@ -544,6 +639,7 @@ test("Projects view renders empty, active, archived, and disabled runner states"
     data: {
       projects: [
         { id: "active-999", name: "Active Repo", root_path: "/active", capability: { state: "launch_ready", label: "Launch-ready", reasons: [] } },
+        { id: "blocked-999", name: "Blocked Repo", root_path: "/blocked", capability: { state: "blocked", label: "Blocked", reasons: ["Setup required"] } },
       ],
       archived_projects: [
         { id: "archived-999", name: "Archived Repo", root_path: "/archived", archived_at: "2099-01-01T00:00:00Z", capability: { state: "blocked", label: "Blocked", reasons: [] } },
@@ -555,6 +651,8 @@ test("Projects view renders empty, active, archived, and disabled runner states"
     onRefresh: () => {},
   }));
   assert.match(populated, /Active Repo/);
+  assert.match(populated, /Blocked Repo/);
+  assert.match(populated, /class="status-pill status-pill-warning"[^>]*>.*class="status-pill-label">Blocked<\/span>/s);
   assert.match(populated, /Archived Repo/);
   assert.match(populated, /Archived 2099-01-01T00:00:00Z/);
   assert.match(populated, /href="\/projects\/active-999"/);
@@ -584,6 +682,8 @@ test("Sessions sidebar and list preserve compact scan, states, and pagination", 
   const populated = renderToStaticMarkup(React.createElement(SessionsState, { data, error: null, loading: false }));
   for (const text of ["Agent Review", "DEMO review task", "claude-demo-999", "10 prompt", "5 completion", "15 total", "1 runs", "2 events", "1 failed checks", "yellow zone", "1 alarms", "Active sessions refresh every 5 seconds", "Next sessions"]) assert.match(populated, new RegExp(text));
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /status-pill-warning[^>]*>.*status-pill-label">yellow zone<\/span>/s);
 });
 
 test("Setup sidebar highlighting is exclusive and cards render backend readiness", () => {
@@ -608,6 +708,10 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   for (const text of ["First-run setup", "Control plane model", "Token budget", "Worker adapter", "Projects", "No launch-ready project", "setup needed", "OpenCode", "unverified"]) {
     assert.match(populated, new RegExp(text));
   }
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /class="status-pill-label">false<\/span>/);
+  assert.match(populated, /class="status-pill status-pill-warning"[^>]*>.*class="status-pill-label">unverified<\/span>/s);
+  assert.doesNotMatch(populated, />not launchable</);
   // The forwarded adapter context reaches the destination link.
   assert.match(populated, /href="\/settings\/workers\?adapter_id=opencode"/);
   assert.doesNotMatch(populated, /Open task board/);
@@ -623,6 +727,69 @@ test("Setup sidebar highlighting is exclusive and cards render backend readiness
   const failed = renderToStaticMarkup(React.createElement(SetupState, { data: null, error: new Error("secret"), loading: false }));
   assert.match(failed, /Could not load setup state/);
   assert.doesNotMatch(failed, /secret/);
+});
+
+test("Project Settings renders proof outcomes through its public interaction", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const data = {
+    local_runner_enabled: true,
+    backend_status: { online: true, name: "Local Runner" },
+    connected_projects: [{
+      id: "project-demo-999",
+      name: "DEMO project 999",
+      root_path: "/demo/project",
+      capability: { state: "launch_ready", reasons: [] },
+    }],
+    archived_projects: [],
+  };
+  const blocked = renderToStaticMarkup(React.createElement(ProjectSettingsState, {
+    data: {
+      ...data,
+      connected_projects: data.connected_projects.map((project) => ({
+        ...project,
+        capability: { state: "unknown", reasons: ["Capability probe unavailable."] },
+      })),
+    },
+    error: null,
+    loading: false,
+    onRefresh: () => {},
+  }));
+  assert.match(blocked, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
+
+  for (const testCase of [
+    { passed: true, tone: "success", label: "Read-only proof launched", reasons: [] },
+    { passed: false, tone: "warning", label: "Read-only proof blocked", reasons: ["Complete project setup."] },
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: testCase.passed,
+      status: testCase.passed ? 200 : 409,
+      json: async () => ({ launch_guardrails: { reasons: testCase.reasons } }),
+    });
+    let renderer;
+    await act(async () => {
+      renderer = create(React.createElement(ProjectSettingsState, {
+        data,
+        error: null,
+        loading: false,
+        onRefresh: () => {},
+      }));
+    });
+    const proofButton = renderer.root.findAllByType("button")
+      .find((button) => button.children.join("") === "Run read-only proof");
+    await act(async () => { await proofButton.props.onClick(); });
+
+    const label = renderer.root.findAllByProps({ className: "status-pill-label" })
+      .find((node) => node.children.join("") === testCase.label);
+    assert.ok(label);
+    const pill = label.parent;
+    assert.equal(pill.props.className, `status-pill status-pill-${testCase.tone}`);
+    assert.ok(pill.findByProps({ className: "status-pill-glyph" }).children.join(""));
+    assert.equal(pill.parent.parent.type, "p");
+    assert.equal(pill.parent.parent.props.className, undefined);
+    if (testCase.reasons.length) assert.match(JSON.stringify(renderer.toJSON()), /Complete project setup\./);
+    await act(async () => { renderer.unmount(); });
+  }
 });
 
 test("Alarms sidebar and list render from available_actions and bookmarkable filters", () => {
@@ -665,6 +832,8 @@ test("Alarms sidebar and list render from available_actions and bookmarkable fil
     assert.match(populated, new RegExp(text));
   }
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /class="status-pill-label">HIGH<\/span>/);
   assert.doesNotMatch(populated, /Abort/);
   assert.doesNotMatch(populated, /adjust_guardrail/);
 });
@@ -684,6 +853,8 @@ test("Session Report renders compact governance plus every bounded evidence path
   ]) assert.match(markup, new RegExp(text));
   assert.match(markup, /href="\/sessions\/review-demo-999"/);
   assert.match(markup, /aria-live="polite"/);
+  assertStatusPillsHaveGlyphs(markup);
+  for (const label of ["MEDIUM", "FAIL", "completed"]) assert.match(markup, new RegExp(`class="status-pill-label">${label}<\\/span>`));
   assert.ok(markup.indexOf("Governance summary") < markup.indexOf("Token log"));
 });
 
@@ -715,6 +886,22 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(populated, /href="\/projects\/demo-999"/);
   assert.match(populated, /href="\/projects\/demo-999\/floor"/);
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assertStatusPillsHaveGlyphs(populated);
+  assert.match(populated, /status-pill-success[^>]*>.*status-pill-label">launch_ready<\/span>/s);
+
+  const aborted = renderDashboard({
+    data: dashboardData({
+      active_sessions: [{
+        id: "sess-aborted-999",
+        task_description: "DEMO aborted task",
+        model: "opencode/gpt-5.1",
+        status: "aborted",
+      }],
+    }),
+    error: null,
+    loading: false,
+  });
+  assert.match(aborted, /status-pill-danger[^>]*>.*status-pill-label">aborted<\/span>/s);
 
   const empty = renderDashboard({
     data: dashboardData({
@@ -1023,7 +1210,7 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     "launch ready",
     "Needs You",
     "Review proposed Task Breakdown",
-    "DEMO_INTAKE_2099_999.md · 1 candidate · proposed · 2099-01-01T00:00:00Z",
+    "DEMO_INTAKE_2099_999.md · 1 candidate",
     "Planning Inbox",
     "Short task intake",
     "Filter loaded tasks",
@@ -1038,6 +1225,8 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
   ]) {
     assert.match(pipeline, new RegExp(text));
   }
+  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">✓<\/span><span class="status-pill-label">launch ready<\/span>/);
+  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">▲<\/span><span class="status-pill-label">proposed<\/span>/);
   assert.match(pipeline, /type="file"/);
   assert.match(pipeline, /type="number"/);
   assert.match(pipeline, /type="checkbox"/);
@@ -1108,7 +1297,9 @@ test("Execution Floor renders active runs, Review queue, and recently-finished t
     "Done DEMO task",
     "Archive",
   ]) assert.match(floor, new RegExp(text));
-  assert.match(floor, /aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
+  assert.match(floor, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
+  assert.match(floor, /class="token-comparison finished-token-comparison" aria-label="Estimate versus actual tokens"[\s\S]*?token-stat-estimate[\s\S]*?<small>Estimate<\/small><strong>100<\/strong>[\s\S]*?token-stat-actual[\s\S]*?<small>Actual · −11%<\/small><strong>89<\/strong>/);
+  assert.match(floor, /status-pill-glyph[^>]*aria-hidden="true">▮<\/span><span class="status-pill-label">Queue idle<\/span>/);
   assert.ok(floor.indexOf("finished-token-comparison") < floor.indexOf("Done DEMO task"));
   assert.doesNotMatch(floor, /Short task intake|Planning Inbox|Estimated DEMO task|Task details/);
 });
@@ -1155,6 +1346,8 @@ test("Evidence Drawer fetches its Session Report handoff and reuses bounded evid
     "Block",
   ]) assert.match(drawer, new RegExp(text));
   assert.match(drawer, /role="dialog"/);
+  assert.match(drawer, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
+  assert.match(drawer, /class="live-event live-event-launch event-row"/);
   assert.match(drawer, /Preview truncated/);
 });
 
@@ -1183,7 +1376,10 @@ test("board intake shows progress while task estimation is running", () => {
   assert.match(busy, /role="progressbar"/);
   assert.match(busy, /aria-valuetext="Estimating task and preparing review"/);
   assert.match(busy, /aria-busy="true"/);
+  assert.equal((busy.match(/aria-describedby="board-estimating-reason"/g) || []).length, 3);
+  assert.match(busy, /Task estimation is already in progress\./);
   assert.match(busy, /disabled=""/);
+  assertDisabledControlsHaveReasons(busy);
 });
 
 test("board cards derive short names from long task descriptions", () => {
@@ -1223,10 +1419,14 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
   assert.doesNotMatch(populated, /href="\/app\/projects\/demo-999\/board"/);
 });
 
-test("React task history renders a visible Scout label", () => {
+test("React task history renders Scout and blocked-condition labels", () => {
   const markup = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
-    data: { filters: [], tasks: [{ id: "scout-history-1", description: "Inspect routing", status: "Done", task_kind: "scout", archived: false }] },
+    data: { filters: [], tasks: [
+      { id: "scout-history-1", description: "Inspect routing", status: "Done", task_kind: "scout", archived: false },
+      { id: "blocked-history-1", description: "Await operator input", status: "Blocked", task_kind: "implementation", archived: false },
+      { id: "archived-blocked-history-1", description: "Preserve blocked evidence", status: "Estimated", task_kind: "implementation", archived: true, blocked_reason: "Needs operator input", requires_manual_estimate: true },
+    ] },
     error: null,
     loading: false,
     filter: "all",
@@ -1235,6 +1435,13 @@ test("React task history renders a visible Scout label", () => {
     notice: null,
   }));
   assert.match(markup, /<span[^>]*class="[^"]*pill scout[^"]*"[^>]*>scout<\/span>/);
+  assertStatusPillsHaveGlyphs(markup);
+  assert.match(markup, /class="status-pill-label">Done<\/span>/);
+  assert.match(markup, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
+  assert.match(markup, /class="status-pill-label">Estimated<\/span>/);
+  assert.match(markup, /class="status-pill-label">Archived<\/span>/);
+  assert.match(markup, /Needs operator input/);
+  assert.match(markup, /class="status-pill status-pill-warning"><span class="status-pill-glyph" aria-hidden="true">▲<\/span><span class="status-pill-label">Manual estimate required<\/span><\/span>/);
 });
 
 test("board action controller negotiates JSON, reloads, reports failures, and navigates", async () => {
@@ -1538,6 +1745,11 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
   ]) assert.match(markup, new RegExp(text));
   assert.match(markup, /Load full text before editing/);
   assert.match(markup, /disabled=""/);
+  assert.match(markup, /aria-describedby="[^"]+-disabled-reason"/);
+  assert.match(markup, /Complete text must load before this field can be edited\./);
+  assertDisabledControlsHaveReasons(markup);
+  assertStatusPillsHaveGlyphs(markup);
+  assert.match(markup, /class="status-pill-label">proposed<\/span>/);
 });
 
 test("Task Breakdown Review renders failed recovery, accepted evidence, and overflow gate", () => {
@@ -1557,11 +1769,14 @@ test("Task Breakdown Review renders failed recovery, accepted evidence, and over
   assert.match(accepted, /Global contract summary/);
   assert.match(accepted, /Repo Context Brief/);
   assert.doesNotMatch(accepted, /Accept selected and estimate/);
+  assertNoNestedPanels(accepted);
 
   const overflow = renderBreakdown("proposed", { overflow: true });
   assert.match(overflow, /Load remaining candidates/);
   assert.match(overflow, /Load every candidate before acceptance/);
   assert.match(overflow, /Accept selected and estimate<\/button>/);
+  assert.match(overflow, /class="disabled-reason"[^>]*>Load every candidate before acceptance\.<\/span>/);
+  assertDisabledControlsHaveReasons(overflow);
 });
 
 test("Task Breakdown Review renders a proposed acceptance claim read-only", () => {
@@ -1570,6 +1785,69 @@ test("Task Breakdown Review renders a proposed acceptance claim read-only", () =
   assert.match(markup, /controlled operator repair/);
   assert.match(markup, /DEMO title 999/);
   assert.doesNotMatch(markup, /Accept selected and estimate|Candidate kind|Execution mode/);
+});
+
+test("rendered Portal surfaces preserve focus, motion, select, and panel contracts", () => {
+  const board = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    data: boardData(),
+    error: null,
+    loading: false,
+    action: () => {},
+    estimating: true,
+  }));
+  const review = renderBreakdown("proposed");
+  const accepted = renderBreakdown("accepted");
+  const floor = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    surface: "floor",
+    data: boardData(),
+    error: null,
+    loading: false,
+    action: () => {},
+  }));
+  const budget = renderToStaticMarkup(React.createElement(BudgetSettingsState, {
+    data: {
+      daily_cap_tokens: 1000,
+      session_cap_tokens: 250,
+      current_window_used_tokens: 125,
+      current_window_remaining_tokens: 875,
+      daily_usage_reset_at: "2099-01-01T00:00:00Z",
+      budget_since: "2099-01-01T00:00:00Z",
+    },
+    error: null,
+    loading: false,
+    onRefresh: () => {},
+  }));
+
+  assert.match(board, /<select[^>]*name="task_kind"/);
+  assert.match(review, /<select[^>]*>.*?<option value="implementation"[^>]*>/s);
+  assert.match(board, /class="board-intake-progress-bar"/);
+  assert.match(floor, /class="live-pulse-dot"/);
+  for (const markup of [board, floor, review, accepted, budget]) assertNoNestedPanels(markup);
+});
+
+test("Vite browser computes focus, motion, select, and panel contracts", { timeout: 30000 }, async () => {
+  const browser = browserExecutable();
+  assert.ok(browser, "Chromium or Chrome is required for the rendered Ledger contract");
+  const profile = mkdtempSync(join(tmpdir(), "foreman-ledger-browser-"));
+  try {
+    const { stdout } = await execFileAsync(browser, [
+      "--headless",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      `--user-data-dir=${profile}`,
+      "--force-prefers-reduced-motion=reduce",
+      "--virtual-time-budget=5000",
+      "--dump-dom",
+      `${browserBaseUrl}/static/react/tests/ledger-browser-contract.html`,
+    ], { encoding: "utf8", maxBuffer: 2 * 1024 * 1024, timeout: 20000, killSignal: "SIGKILL" });
+    assert.match(stdout, /data-ledger-contract="passed"/);
+    assert.doesNotMatch(stdout, /data-ledger-contract="failed"|data-contract-error=/);
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
 });
 
 function reviewButton(root, label) {
@@ -1628,7 +1906,7 @@ test("Task Breakdown controller pages, loads full text, and installs dirty guard
   await act(async () => { renderer = create(mountedReview(data.review.id, (value) => { guard = value; })); });
   assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, true);
   await act(async () => { await reviewButton(renderer.root, "Load remaining candidates").props.onClick(); });
-  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, false);
+  assert.notEqual(reviewButton(renderer.root, "Accept selected").props.disabled, true);
   assert.equal(reviewButton(renderer.root, "Load remaining candidates"), undefined);
   await act(async () => { await reviewButton(renderer.root, "Load full text before editing").props.onClick(); });
   assert(renderer.root.findAllByType("textarea").some((field) => field.props.value === "Complete DEMO prompt 999"));
@@ -1945,6 +2223,25 @@ function controlPlaneData(overrides = {}) {
     ...overrides,
   };
 }
+
+test("ControlPlaneSettings renders untested connections as attention statuses", async () => {
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(ControlPlaneSettingsState, {
+      data: controlPlaneData(),
+      error: null,
+      loading: false,
+      onRefresh: () => {},
+    }));
+  });
+  const markup = JSON.stringify(renderer.toJSON());
+  const label = renderer.root.findByProps({ className: "status-pill-label" });
+  assert.equal(label.children.join(""), "needs test");
+  assert.equal(label.parent.props.className, "status-pill status-pill-warning");
+  assert.ok(label.parent.findByProps({ className: "status-pill-glyph" }).children.join(""));
+  assert.match(markup, /needs test/);
+  await act(async () => { renderer.unmount(); });
+});
 
 // This is the client-side replacement for the retired Jinja
 // <option selected>/hidden/disabled markup: dataToForm() in

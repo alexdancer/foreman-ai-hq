@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
+import { StatusPill, statusTone, trackingStatusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -54,6 +55,7 @@ export function WorkerSettingsState({
   const [verifyModel, setVerifyModel] = useState("");
   const [verifyTrackingMode, setVerifyTrackingMode] = useState("");
   const [verifyProxyUrl, setVerifyProxyUrl] = useState("");
+  const busyReasonId = busy ? "worker-settings-busy-reason" : undefined;
 
   const adapters = data?.adapters || [];
   const activeAdapter = useMemo(
@@ -208,6 +210,12 @@ export function WorkerSettingsState({
     );
   }
 
+  const verificationSetupReason = !verifyModel
+    ? "Select a Worker model before verification."
+    : !verifyTrackingMode
+      ? "Select a tracking mode before verification."
+      : null;
+
   return (
     <>
       <h1 className="page-title">Worker adapters</h1>
@@ -216,12 +224,11 @@ export function WorkerSettingsState({
       <div className="live-notice" aria-live="polite">
         {inlineError || status || ""}
       </div>
+      {busy && <p className="disabled-reason" id={busyReasonId} role="status">A Worker adapter action is already in progress.</p>}
 
       <section className="status-toolbar">
         <div className="status-group">
-          <span className={`pill ${activeAdapter?.launchable ? "green" : "yellow"}`}>
-            {activeAdapter?.launchable ? "launch ready" : "setup needed"}
-          </span>
+          <StatusPill tone={activeAdapter?.launchable ? "success" : "warning"} label={activeAdapter?.launchable ? "launch ready" : "setup needed"} />
           <span className="status-item">Next missing action: {nextAction.detail}</span>
         </div>
         <a className="btn primary" href={nextAction.href}>{nextAction.label}</a>
@@ -239,6 +246,7 @@ export function WorkerSettingsState({
                 onClick={() => onSelectAdapter(adapter.id)}
                 aria-pressed={adapter.id === activeAdapter?.id}
                 disabled={busy}
+                aria-describedby={busyReasonId}
               >
                 {adapter.kind}
                 {adapter.is_default ? " · default" : ""}
@@ -252,9 +260,7 @@ export function WorkerSettingsState({
         <section className="panel">
           <div className="panel-header">
             <h3>{activeAdapter.kind} setup</h3>
-            <span className={`pill ${activeAdapter.launchable ? "green" : "yellow"}`}>
-              {activeAdapter.launchable ? "launchable" : "setup needed"}
-            </span>
+            <StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "launchable" : "setup needed"} />
           </div>
           <div className="panel-body worker-setup-grid">
             <div className="worker-setup-card">
@@ -267,9 +273,11 @@ export function WorkerSettingsState({
                 className="worker-primary"
                 onClick={setDefault}
                 disabled={busy || activeAdapter.is_default}
+                aria-describedby={busyReasonId || (activeAdapter.is_default ? "worker-default-disabled-reason" : undefined)}
               >
                 Set as default
               </button>
+              {activeAdapter.is_default && <span className="disabled-reason" id="worker-default-disabled-reason">This Worker Adapter is already the default.</span>}
             </div>
 
             <div className="worker-setup-card">
@@ -282,14 +290,12 @@ export function WorkerSettingsState({
                 className="worker-secondary"
                 onClick={discoverModels}
                 disabled={busy}
+                aria-describedby={busyReasonId}
               >
                 Discover models
               </button>
               {discoverResult && (
-                <p className={`notice ${discoverResult.passed ? "success" : "warning"}`}>
-                  {discoverResult.passed ? "Discovery passed" : "Discovery failed"}
-                  {discoverResult.reasons?.length ? `: ${discoverResult.reasons.join(" ")}` : ""}
-                </p>
+                <WorkerOutcome result={discoverResult} passedLabel="Discovery passed" failedLabel="Discovery failed" />
               )}
 
               {activeAdapter.discovered_models?.length > 0 ? (
@@ -301,10 +307,11 @@ export function WorkerSettingsState({
                       className="worker-text-button"
                       onClick={() => setSelectedModels(activeAdapter.discovered_models || [])}
                       disabled={busy}
+                      aria-describedby={busyReasonId}
                     >
                       Check all
                     </button>
-                    <button type="button" className="worker-text-button" onClick={() => setSelectedModels([])} disabled={busy}>
+                    <button type="button" className="worker-text-button" onClick={() => setSelectedModels([])} disabled={busy} aria-describedby={busyReasonId}>
                       Uncheck all
                     </button>
                   </div>
@@ -319,12 +326,13 @@ export function WorkerSettingsState({
                         checked={selectedModels.includes(model)}
                         onChange={() => toggleModel(model)}
                         disabled={busy}
+                        aria-describedby={busyReasonId}
                       />
                       {model}
                     </label>
                     ))}
                   </div>
-                  <button type="submit" className="worker-primary" disabled={busy}>
+                  <button type="submit" className="worker-primary" disabled={busy} aria-describedby={busyReasonId}>
                     Save allowed models
                   </button>
                 </form>
@@ -343,6 +351,7 @@ export function WorkerSettingsState({
                   value={verifyModel}
                   onChange={(e) => setVerifyModel(e.target.value)}
                   disabled={busy}
+                  aria-describedby={busyReasonId}
                 >
                   {(activeAdapter.supported_models || []).length === 0 && (
                     <option value="">Discover models first</option>
@@ -358,6 +367,7 @@ export function WorkerSettingsState({
                   value={verifyTrackingMode}
                   onChange={(e) => setVerifyTrackingMode(e.target.value)}
                   disabled={busy}
+                  aria-describedby={busyReasonId}
                 >
                   {(activeAdapter.tracking_mode_options || []).map((option) => (
                     <option key={option.mode} value={option.mode}>{option.label}</option>
@@ -377,31 +387,28 @@ export function WorkerSettingsState({
                       onChange={(e) => setVerifyProxyUrl(e.target.value)}
                       placeholder="https://..."
                       disabled={busy}
+                      aria-describedby={busyReasonId}
                     />
                   </>
                 )}
 
-                <button type="submit" className="worker-primary" disabled={busy || !verifyModel || !verifyTrackingMode}>
+                <button type="submit" className="worker-primary" disabled={busy || Boolean(verificationSetupReason)} aria-describedby={busyReasonId || (verificationSetupReason ? "worker-verification-disabled-reason" : undefined)}>
                   Verify tracking
                 </button>
+                {!busy && verificationSetupReason && <span className="disabled-reason" id="worker-verification-disabled-reason">{verificationSetupReason}</span>}
               </form>
               {verifyResult && (
-                <p className={`notice ${verifyResult.passed ? "success" : "warning"}`}>
-                  {verifyResult.passed ? "Verification passed" : "Verification failed"}
-                  {verifyResult.reasons?.length ? `: ${verifyResult.reasons.join(" ")}` : ""}
-                </p>
+                <WorkerOutcome result={verifyResult} passedLabel="Verification passed" failedLabel="Verification failed" />
               )}
             </div>
 
             <div className="worker-setup-card">
               <h3>4. Launch readiness</h3>
               <p>
-                <span className={`pill ${activeAdapter.configured ? "green" : "yellow"}`}>
-                  {activeAdapter.configured ? "configured" : "unconfigured"}
-                </span>
+                <StatusPill tone={activeAdapter.configured ? "success" : "warning"} label={activeAdapter.configured ? "configured" : "unconfigured"} />
               </p>
               <p>
-                <span className="pill blue">{activeAdapter.tracking?.label}</span>
+                <StatusPill tone={trackingStatusTone(activeAdapter.tracking?.mode, activeAdapter.launchable)} label={activeAdapter.tracking?.label || "Unverified"} />
               </p>
               <p className="muted">
                 Runtime request guardrails: {activeAdapter.tracking?.runtime_request_guardrails} · Accounting: {activeAdapter.tracking?.accounting}
@@ -421,9 +428,7 @@ export function WorkerSettingsState({
                 <p className="muted">Allow at least one discovered Worker model before launch.</p>
               )}
               <p>
-                <span className={`pill ${activeAdapter.launchable ? "green" : "yellow"}`}>
-                  {activeAdapter.launchable ? "launchable" : "not launchable"}
-                </span>
+                <StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "launchable" : "not launchable"} />
               </p>
               {activeAdapter.is_default && <p><span className="pill blue">default</span></p>}
               {activeAdapter.launchable && <p><a className="btn primary" href="/board">Open board</a></p>}
@@ -435,7 +440,7 @@ export function WorkerSettingsState({
                 <strong>{activeAdapter.kind} diagnostics</strong>
               </p>
               {Object.keys(activeAdapter.diagnostics || {}).length > 0 ? (
-                <span className="mono">{activeAdapter.diagnostics.status || "cached"}</span>
+                <StatusPill tone={statusTone(activeAdapter.diagnostics.status)} label={activeAdapter.diagnostics.status || "cached"} />
               ) : (
                 <span className="muted">No cached diagnostics. Refresh to check PATH.</span>
               )}
@@ -444,6 +449,7 @@ export function WorkerSettingsState({
                 className="worker-secondary"
                 onClick={refreshDiagnostics}
                 disabled={busy}
+                aria-describedby={busyReasonId}
               >
                 Refresh diagnostics
               </button>
@@ -482,6 +488,16 @@ export function WorkerSettingsState({
         </section>
       )}
     </>
+  );
+}
+
+function WorkerOutcome({ result, passedLabel, failedLabel }) {
+  const passed = Boolean(result.passed);
+  return (
+    <p>
+      <StatusPill tone={passed ? "success" : "danger"} label={passed ? passedLabel : failedLabel} />
+      {result.reasons?.length ? `: ${result.reasons.join(" ")}` : ""}
+    </p>
   );
 }
 

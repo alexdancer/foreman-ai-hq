@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from "react";
 
+import { EventRow } from "./ui/index.js";
+
 const ISO_TIME = /T(\d{2}:\d{2}:\d{2})/;
 
 export function liveEventText(summary) {
@@ -19,16 +21,13 @@ export function liveEventTime(createdAt) {
 export function LiveEventRow({ event }) {
   const text = liveEventText(event.detail_summary);
   return (
-    <li className={`live-event live-event-${event.kind}`}>
-      <span className="live-event-time">{liveEventTime(event.created_at) || "--:--:--"}</span>
-      <span className="live-event-kind">{event.kind}</span>
-      <span className="live-event-body">
-        {text || event.title || event.kind}
-        {event.kind === "token" && (
-          <em className="live-event-note"> · provisional; final total recorded on completion.</em>
-        )}
-      </span>
-    </li>
+    <EventRow
+      time={liveEventTime(event.created_at) || "--:--:--"}
+      kind={event.kind}
+      note={event.kind === "token" ? " · provisional; final total recorded on completion." : undefined}
+    >
+      {text || event.title || event.kind}
+    </EventRow>
   );
 }
 

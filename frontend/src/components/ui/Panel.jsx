@@ -2,6 +2,22 @@ import React from "react";
 
 import { cx } from "./cx.js";
 
+function containsNestedPanel(children) {
+  let found = false;
+  React.Children.forEach(children, (child) => {
+    if (found || !React.isValidElement(child)) return;
+    const classNames = typeof child.props?.className === "string"
+      ? child.props.className.split(/\s+/)
+      : [];
+    if (child.type === Panel || classNames.includes("panel")) {
+      found = true;
+      return;
+    }
+    found = containsNestedPanel(child.props?.children);
+  });
+  return found;
+}
+
 // The workhorse container trio, wrapping the shared `.panel` / `.panel-header`
 // / `.panel-body` classes.
 //
@@ -13,6 +29,9 @@ import { cx } from "./cx.js";
 // the few headers that need a different marker (a `.nav-badge`, a bare
 // `<span>`), pass a ready-made node as `badge` and it wins.
 export function Panel({ as: Component = "section", className, children, ...rest }) {
+  if (containsNestedPanel(children)) {
+    throw new Error("Panel cannot contain another Panel; use Fieldset or Disclosure.");
+  }
   return (
     <Component className={cx("panel", className)} {...rest}>
       {children}

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 
+import { StatusPill, trackingStatusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) => error?.status === 401
@@ -53,9 +54,7 @@ export function SetupState({ data, error, loading }) {
 
       <section className="status-toolbar" aria-label="Next setup action">
         <div className="status-group">
-          <span className={`pill ${readyToLaunch ? "green" : "yellow"}`}>
-            {readyToLaunch ? "ready" : "next missing action"}
-          </span>
+          <StatusPill tone={readyToLaunch ? "success" : "warning"} label={readyToLaunch ? "ready" : "next missing action"} />
           <span className="status-item">{nextStep.detail}</span>
         </div>
         <a className="btn primary" href={nextStep.href}>
@@ -68,7 +67,7 @@ export function SetupState({ data, error, loading }) {
           <article className="kpi" key={step.name}>
             <div className="label">{step.name}</div>
             <div className="value" style={{ fontSize: 18 }}>
-              {step.state}
+              <StatusPill tone={setupTone(step.state)} label={step.state || "unknown"} />
             </div>
             <div className="sub">{step.detail}</div>
             <p style={{ margin: "12px 0 0" }}>
@@ -88,7 +87,7 @@ export function SetupState({ data, error, loading }) {
           {readyToLaunch ? (
             <>
               <p>
-                <span className="pill green">ready</span> Worker execution has a confirmed budget, budget-authoritative adapter, and launch-ready Connected Project.
+                <StatusPill tone="success" label="ready" /> Worker execution has a confirmed budget, budget-authoritative adapter, and launch-ready Connected Project.
               </p>
               <p>
                 <a className="btn primary" href={nextStep.href}>
@@ -99,12 +98,12 @@ export function SetupState({ data, error, loading }) {
           ) : (
             <>
               <p>
-                <span className="pill yellow">setup needed</span> Complete the required setup steps before governed Worker launch.
+                <StatusPill tone="warning" label="setup needed" /> Complete the required setup steps before governed Worker launch.
               </p>
               <ol>
                 {steps.map((step) => (
                   <li key={step.name}>
-                    <a href={step.href}>{step.name}</a>: {step.state}
+                    <a href={step.href}>{step.name}</a>: <StatusPill tone={setupTone(step.state)} label={step.state || "unknown"} />
                   </li>
                 ))}
               </ol>
@@ -123,17 +122,26 @@ export function SetupState({ data, error, loading }) {
               <dt>adapter</dt>
               <dd>{activeAdapter.name}</dd>
               <dt>status</dt>
-              <dd>{activeAdapter.verification_status}</dd>
+              <dd><StatusPill tone={setupTone(activeAdapter.verification_status)} label={activeAdapter.verification_status || "unknown"} /></dd>
               <dt>launchable</dt>
-              <dd>{activeAdapter.launchable ? "true" : "false"}</dd>
+              <dd><StatusPill tone={activeAdapter.launchable ? "success" : "warning"} label={activeAdapter.launchable ? "true" : "false"} /></dd>
               <dt>tracking</dt>
-              <dd>{trackingLabel}</dd>
+              <dd><StatusPill tone={trackingStatusTone(activeAdapter.tracking_mode, activeAdapter.launchable)} label={trackingLabel} /></dd>
             </dl>
           </div>
         </section>
       )}
     </>
   );
+}
+
+function setupTone(value) {
+  const state = String(value || "").toLowerCase();
+  if (["ready", "verified", "online", "launchable"].includes(state)) return "success";
+  if (["failed", "offline"].includes(state)) return "danger";
+  if (state === "blocked") return "warning";
+  if (state.includes("need") || state.includes("setup") || state.includes("unverified")) return "warning";
+  return "neutral";
 }
 
 function trackingModeLabel(mode) {

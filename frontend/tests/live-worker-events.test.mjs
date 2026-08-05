@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 
 const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -94,7 +96,7 @@ test("liveEventText normalizes string and bounded summary shapes", () => {
 });
 
 test("LiveEventRow renders a token event with provisional usage note", () => {
-  const element = LiveEventRow({
+  const markup = renderToStaticMarkup(React.createElement(LiveEventRow, {
     event: {
       id: 3,
       kind: "token",
@@ -103,12 +105,12 @@ test("LiveEventRow renders a token event with provisional usage note", () => {
       layer: "worker_harness",
       detail_summary: "input_tokens=12; output_tokens=3",
     },
-  });
-  const html = JSON.stringify(element);
-  assert.ok(html.includes("input_tokens=12; output_tokens=3"));
-  assert.ok(html.includes("provisional; final total recorded on completion."));
+  }));
+  assert.ok(markup.includes("input_tokens=12; output_tokens=3"));
+  assert.ok(markup.includes("provisional; final total recorded on completion."));
   // The kind must reach the class name, since per-kind colour keys off it.
-  assert.ok(html.includes("live-event-token"));
+  assert.ok(markup.includes("live-event-token"));
+  assert.ok(markup.includes("event-row"));
 });
 
 test("liveEventTime shortens wire timestamps without shifting timezone", () => {

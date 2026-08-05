@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
+import { StatusPill, statusTone } from "../components/ui/index.js";
 import { useResource } from "../useResource.js";
 
 const safeError = (error) =>
@@ -61,6 +62,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [inlineError, setInlineError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const busyReasonId = busy ? "control-plane-busy-reason" : undefined;
 
   useEffect(() => {
     if (data) {
@@ -207,6 +209,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
       <div className="live-notice" aria-live="polite">
         {inlineError || status || ""}
       </div>
+      {busy && <p className="disabled-reason" id={busyReasonId} role="status">A control-plane settings action is already in progress.</p>}
 
       <section className="control-plane-layout">
         <article className="panel">
@@ -221,6 +224,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                     value={form.provider}
                     onChange={(e) => handleProviderChange(e.target.value)}
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   >
                     {PROVIDERS.map((provider) => (
                       <option key={provider.value} value={provider.value}>{provider.label}</option>
@@ -235,6 +239,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                     value={form.model}
                     onChange={(e) => handleModelChange(e.target.value)}
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   >
                     {curatedForProvider.map((m) => (
                       <option key={m.model} value={m.model}>{m.label}</option>
@@ -253,6 +258,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                     placeholder="model id for OpenAI-compatible or future providers"
                     required
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   />
                   <p className="muted">
                     Use Custom model for OpenAI-compatible endpoints or provider model IDs that are not in the curated dropdown.
@@ -268,6 +274,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                     onChange={(e) => updateField("baseUrl", e.target.value)}
                     placeholder="Required for OpenAI-compatible endpoints"
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   />
                   <p className="muted">Required for OpenAI-compatible endpoints; leave blank for provider defaults.</p>
                 </div>
@@ -281,6 +288,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                     onChange={(e) => updateField("apiKey", e.target.value)}
                     placeholder="Paste provider API key"
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   />
                   <p className="muted">
                     Leave blank to keep the existing key. The key is saved to ignored <code>.foreman/secrets.env</code>, never shown again, and never written to <code>.foreman/config.toml</code>.
@@ -298,6 +306,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                     onChange={(e) => updateField("apiKeyEnv", e.target.value)}
                     required
                     disabled={busy}
+                    aria-describedby={busyReasonId}
                   />
                 </div>
               </details>
@@ -308,12 +317,13 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                   checked={form.applyToEstimator}
                   onChange={(e) => updateField("applyToEstimator", e.target.checked)}
                   disabled={busy}
+                  aria-describedby={busyReasonId}
                 />
                 Use this model for estimation and task breakdown too
               </label>
 
               <div className="control-plane-actions">
-                <button type="submit" className="control-plane-primary" disabled={busy}>
+                <button type="submit" className="control-plane-primary" disabled={busy} aria-describedby={busyReasonId}>
                   Save control-plane model
                 </button>
               </div>
@@ -353,7 +363,7 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
                 className="control-plane-primary"
                 onClick={submitTest}
                 disabled={busy || isDirty}
-                aria-describedby={isDirty ? "test-dirty-hint" : undefined}
+                aria-describedby={busyReasonId || (isDirty ? "test-dirty-hint" : undefined)}
               >
                 Test control-plane connection
               </button>
@@ -368,9 +378,9 @@ export function ControlPlaneSettingsState({ data, error, loading, onRefresh }) {
           <div className="panel-header"><h3>Last connection test</h3></div>
           <div className="panel-body">
             <p>
-              {state === "online" && <span className="pill green">online</span>}
-              {state === "needs_test" && <span className="pill muted">needs test</span>}
-              {state === "offline" && <span className="pill red">offline</span>}
+              {state === "online" && <StatusPill tone={statusTone(state)} label="online" />}
+              {state === "needs_test" && <StatusPill tone={statusTone(state)} label="needs test" />}
+              {state === "offline" && <StatusPill tone={statusTone(state)} label="offline" />}
               {data.connection_status.checked_at && (
                 <span className="pill muted">{data.connection_status.checked_at}</span>
               )}

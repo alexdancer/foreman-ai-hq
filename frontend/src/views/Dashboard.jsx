@@ -1,5 +1,6 @@
 import React from "react";
 
+import { budgetZoneStatusTone, capabilityStatusTone, sessionStatusTone, severityStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink, OwnedLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -85,7 +86,7 @@ export function DashboardContent({ data }) {
           value={budget.daily_cap
             ? `${formatTokens(budget.total_tokens)} / ${formatTokens(budget.daily_cap)}`
             : formatTokens(budget.total_tokens)}
-          detail={`zone: ${budget.current_zone || "unknown"} · normalized governed model spend since ${budget.since || "unknown"}`}
+          detail={<><StatusPill tone={budgetZoneStatusTone(budget.current_zone)} label={`zone: ${budget.current_zone || "unknown"}`} /> · normalized governed model spend since {budget.since || "unknown"}</>}
           progress={budgetPercent}
         />
         <Metric
@@ -182,7 +183,7 @@ export function DashboardContent({ data }) {
                     <td className="mono muted"><OwnedLink to={`/sessions/${session.id}`}>{session.id}</OwnedLink></td>
                     <td>{session.task_description}</td>
                     <td className="mono">{session.model}</td>
-                    <td><span className="pill blue">{session.status}</span></td>
+                    <td><StatusPill tone={sessionStatusTone(session.status)} label={session.status || "unknown"} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -200,7 +201,7 @@ export function DashboardContent({ data }) {
           {alarms.recent && alarms.recent.length > 0 ? alarms.recent.map((alarm) => (
             <article className={`dashboard-alarm ${String(alarm.severity || "info").toLowerCase()}`} key={alarm.id}>
               <div className="dashboard-alarm-head">
-                <span className={`pill ${alarmTone(alarm.severity)}`}>{alarm.severity}</span>
+                <StatusPill tone={severityStatusTone(alarm.severity)} label={alarm.severity || "unknown"} />
                 <span className="mono">{alarm.type}</span>
                 <span className="mono muted">{alarm.id}</span>
               </div>
@@ -255,9 +256,7 @@ export function DashboardContent({ data }) {
           ) : projects.map((project) => (
             <article className="dashboard-project" key={project.id}>
               <h3>{project.name}</h3>
-              <p className="muted mono">
-                {formatTokens(project.task_count)} tasks · {(project.capability || {}).state || "unknown"}
-              </p>
+              <p className="muted mono">{formatTokens(project.task_count)} tasks · <StatusPill tone={capabilityStatusTone(project.capability?.state)} label={project.capability?.state || "unknown"} /></p>
               <div className="toolbar">
                 <AppLink className="btn" to={`/projects/${project.id}`}>
                   Open Pipeline
@@ -291,13 +290,6 @@ function formatTokens(value) {
 
 function formatCost(value) {
   return value == null ? "unpriced" : `$${Number(value).toFixed(4)}`;
-}
-
-function alarmTone(severity) {
-  const normalized = String(severity || "info").toLowerCase();
-  if (["critical", "high"].includes(normalized)) return "red";
-  if (["warning", "medium"].includes(normalized)) return "yellow";
-  return "blue";
 }
 
 function accuracyDetail(ratio) {

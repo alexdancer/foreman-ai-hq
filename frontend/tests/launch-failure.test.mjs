@@ -82,6 +82,8 @@ test("a retryable launch failure is annotated on the still-launchable card", () 
     next_action: { text: "Retry once the network settles.", truncated: false },
     setup_href: null,
   });
+  assert.match(markup, /class="status-pill status-pill-danger"/);
+  assert.match(markup, /class="status-pill-glyph" aria-hidden="true">✕<\/span>/);
   assert.match(markup, /Last launch failed · retryable/);
   assert.match(markup, /Worker adapter launch failed\./);
   assert.match(markup, /Command timed out after 60 seconds\. \(exit 124\)/);

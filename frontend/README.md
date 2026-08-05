@@ -20,7 +20,16 @@ FastAPI serves under `/static/react/`. No Node server runs in production.
 ```bash
 cd frontend
 npm install
-npm run build      # or: npm run check
+npm run build
+```
+
+`npm run check` includes a rendered Ledger contract and requires Chrome or
+Chromium. From the repository root, provision the same browser used by CI once,
+then run the frontend check:
+
+```bash
+uv run --extra test playwright install chromium
+npm --prefix frontend run check
 ```
 
 After building, start the app as usual. Logging in (or opening `/` with auth

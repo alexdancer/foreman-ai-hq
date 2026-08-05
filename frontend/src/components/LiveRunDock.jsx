@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { StatusPill } from "./ui/index.js";
 import { LiveEventFeed } from "./LiveEventFeed.jsx";
 
 /**
@@ -55,10 +56,7 @@ export function LiveRunDock({ runs }) {
             ))}
           </div>
         )}
-        <span className="pill running live-run-badge">
-          <span className="live-pulse-dot" aria-hidden="true" />
-          live
-        </span>
+        <StatusPill className="live-run-badge" tone="running" label="live" />
       </div>
       <div className="panel-body live-run-dock-body">
         <p className="live-run-dock-task">
