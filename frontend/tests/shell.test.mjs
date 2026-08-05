@@ -711,8 +711,13 @@ test("project switching preserves App Back and Forward history", async (t) => {
   otherBoard.project = { id: "other-999", name: "Other DEMO 999" };
   otherBoard.workspace = workspaceData({ project: otherBoard.project });
   otherBoard.automation.live_refresh_enabled = false;
+  const requested = [];
   globalThis.fetch = async (url) => {
+    requested.push(url);
     if (url === "/api/portal/nav") return { ok: true, json: async () => navigation };
+    if (url === "/api/alarms?filter=open") {
+      return { ok: true, json: async () => ({ filters: [{ value: "open", count: 2 }], selected_filter: "open", alarms: [] }) };
+    }
     if (url === "/api/dashboard") return { ok: true, json: async () => dashboardData() };
     if (url === "/api/projects/other-999/workspace") return { ok: true, json: async () => otherBoard.workspace };
     if (url === "/api/projects/other-999/board") return { ok: true, json: async () => otherBoard };
@@ -724,6 +729,10 @@ test("project switching preserves App Back and Forward history", async (t) => {
   await act(async () => { renderer = create(React.createElement(App)); });
   const activeHref = () => renderer.root.findAllByType("a").find((link) => link.props["aria-current"] === "page")?.props.href;
   assert.equal(activeHref(), "/app");
+  assert.equal(requested.filter((url) => url === "/api/dashboard").length, 1);
+  assert.ok(requested.includes("/api/alarms?filter=open"));
+  const alarmsLink = renderer.root.findAllByType("a").find((link) => link.props.href === "/alarms");
+  assert.equal(alarmsLink.props["aria-label"], "Alarms, 2 open alarms");
 
   const switcher = renderer.root.findByProps({ "aria-label": "Switch project" });
   await act(async () => { switcher.props.onChange({ target: { value: "other-999" } }); });

@@ -117,9 +117,10 @@ export function ContextBar({ activeProject, activeProjectId, activeView }) {
 // payloads: the rail only composes the existing authenticated navigation data.
 export default function Shell({ children, activeView, activeProjectId, refreshKey = 0 }) {
   const navigation = useResource("/api/portal/nav", refreshKey);
-  const dashboard = useResource("/api/dashboard", refreshKey);
+  const alarms = useResource("/api/alarms?filter=open", refreshKey);
   const projects = navigation.data?.sidebar_projects || [];
   const activeProject = projects.find((project) => project.id === activeProjectId);
+  const openAlarmCount = alarms.data?.filters?.find((filter) => filter.value === "open")?.count;
 
   return (
     <div className="shell">
@@ -129,7 +130,7 @@ export default function Shell({ children, activeView, activeProjectId, refreshKe
         data={navigation.data}
         error={navigation.error}
         loading={navigation.loading}
-        alarmCount={count(dashboard.data?.alarms?.open)}
+        alarmCount={count(openAlarmCount)}
       />
       <div className="shell-workbench">
         <ContextBar
