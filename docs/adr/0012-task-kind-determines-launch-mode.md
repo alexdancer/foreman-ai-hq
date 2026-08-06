@@ -21,8 +21,8 @@ Neither flag is ever set for an implementation task. An exhaustive search finds
 `write_capable` assigned only in `tests/workers/test_write_capable_launch.py`, where nine
 tests inject it into task metadata directly. No route, no view, no default, no demo
 fixture sets it. So every implementation task the board launches falls through to the
-third branch — `"standard"` — a state with no entry in the glossary and no requirement in
-any spec. `grep -rln "write_capable" openspec/specs/` returns nothing.
+third branch — `"standard"` — a state with no entry in the glossary or documented
+requirement.
 
 The consequence is that the entire git-governance half of the implementation flow is
 unreachable. The Repository Cleanliness Guardrail, `_create_task_branch`,

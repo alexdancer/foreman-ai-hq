@@ -80,9 +80,8 @@ Concretely, five coupled decisions taken in a design interview on 2026-07-24:
   risk lives in Workers, which keep the proxy. Native usage + daily-budget counting +
   overrun alarms remain. This is the same trust class already accepted for
   `native_usage` Workers.
-- **The `orchestrator-runtime` spec must be rewritten, not amended.** It is currently
-  built entirely on pi-through-proxy with an injected planning bearer and
-  `usage_source: harness_proxy`; that contract is replaced for orchestration.
+- **The earlier pi-through-proxy runtime contract is replaced for orchestration.**
+  It used an injected planning bearer and `usage_source: harness_proxy`.
 - **Structured-output reliability becomes a first-class concern.** An agent turn is
   measurably worse at strict JSON than a json-mode call; the submit-tool boundary is
   the mitigation and must be proven.
@@ -94,14 +93,11 @@ Concretely, five coupled decisions taken in a design interview on 2026-07-24:
 
 ## Rollout
 
-Two OpenSpec changes, planning-first:
+The implementation was planned in two phases:
 
-- **Change 1 — `pi-native-provider-orchestration`** (reshape of the former
-  `pi-orchestrator-native-oauth`): planning only, provider-agnostic. The Orchestrator
-  runs planning on its own provider config; `native_usage` accounting from native
-  per-turn usage; persona + read-only tools preserved; a clear provider-auth-missing
-  state; and the `orchestrator-runtime` spec rewritten off the proxy. Closest to done —
-  M2b already runs the runtime; this swaps transport + accounting.
-- **Change 2 — `orchestrator-structured-jobs-on-pi`** (gated on Change 1): Task
-  Estimation and Task Breakdown migrate to Orchestrator agent turns with `submit_*`
-  tools, per-job personas and allowlists, curated context, and Scout escalation.
+- **Phase 1 — native-provider planning:** the Orchestrator runs planning on its own
+  provider configuration with `native_usage` accounting from native per-turn usage,
+  retained persona and read-only tools, and a clear provider-auth-missing state.
+- **Phase 2 — structured jobs:** Task Estimation and Task Breakdown migrate to
+  Orchestrator agent turns with `submit_*` tools, per-job personas and allowlists,
+  curated context, and Scout escalation.

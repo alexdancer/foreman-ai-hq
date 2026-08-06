@@ -53,8 +53,6 @@ All notable changes to Foreman AI HQ will be documented in this file.
 - Added frontend component/contract tests, Portal API tests, Worker streaming tests, intake-provenance coverage, and production-shaped browser verification.
 - Added Node and Playwright support to CI while keeping tests isolated from real providers, Worker credentials, and operator repositories.
 - Added maintained architecture, product, design-system, domain-glossary, setup, and ADR documentation for the React Portal, two-surface board, decision queue, estimation model, and Planning Chat workflow.
-- Synchronized and strictly validated the canonical OpenSpec suite, including archived implementation evidence for the React migration, OpenRouter/cost reporting, live streaming, recorded demo, two-surface board, driver-based estimation, and Planning Chat workflow.
-- Removed completed implementation plans whose durable history is already preserved by archived OpenSpec changes and ADRs.
 
 ## 0.1.0 - 2026-07-03
 

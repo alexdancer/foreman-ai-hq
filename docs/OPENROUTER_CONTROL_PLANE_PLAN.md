@@ -7,7 +7,5 @@ authentication; provider, base URL, and API credentials never configure
 orchestration.
 
 The retained direct-provider connection, including OpenRouter transport and
-provider-reported cost support, is owned by the canonical OpenSpec
-specifications for `control-plane-model-connection` and
-`proxy-governed-orchestration`. It applies only to governed Worker proxy
-traffic.
+provider-reported cost support, applies only to governed Worker proxy traffic.
+Current product terminology and behavior are defined in `CONTEXT.md`.
