@@ -29,6 +29,11 @@ function ContractSurface() {
         <div className="shell-workbench"><div className="context-bar" aria-label="Page context">Project / Pipeline</div><div className="main">Workbench content</div></div>
       </div>
       <button id="confirm-opener" type="button" onClick={() => setConfirming(true)}>Open confirmation</button>
+      <div className="task-breakdown-workbench" id="review-grid-contract" style={{ height: 400 }}>
+        <header className="review-workbench-header">Review header</header>
+        <div className="review-workbench-zones">Review zones</div>
+        <div className="sticky-action-bar">Review actions</div>
+      </div>
       <ConfirmSheet
         ref={confirmSheetRef}
         open={confirming}
@@ -133,6 +138,12 @@ async function inspect() {
     contentBadgeBox.left >= contentBadgeHeaderBox.left && contentBadgeBox.right <= contentBadgeHeaderBox.right,
     "content badge escapes its panel header",
   );
+
+  const reviewGrid = document.querySelector("#review-grid-contract");
+  const reviewZones = reviewGrid.querySelector(".review-workbench-zones");
+  const reviewActions = reviewGrid.querySelector(".sticky-action-bar");
+  requireContract(getComputedStyle(reviewZones).gridRowStart === "3", "review zones leave the scrolling grid row when no notice renders");
+  requireContract(getComputedStyle(reviewActions).gridRowStart === "4", "review actions leave the permanent action row when no notice renders");
 
   const live = document.querySelector(".live-pulse-dot");
   const liveStyle = getComputedStyle(live);

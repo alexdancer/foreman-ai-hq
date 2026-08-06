@@ -2302,18 +2302,21 @@ textarea.board-input {
   min-width: 0;
 }
 .review-workbench-header {
+  grid-row: 1;
   padding: 18px 22px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-canvas);
 }
 .review-workbench-header .page-sub { margin-bottom: 0; }
-.task-breakdown-workbench > .notice { margin: 8px 22px; }
+.task-breakdown-workbench > .notice { grid-row: 2; margin: 8px 22px; }
 .review-workbench-zones {
+  grid-row: 3;
   display: grid;
   grid-template-columns: minmax(210px, 0.65fr) minmax(360px, 1.45fr) minmax(260px, 0.8fr);
   min-height: 0;
   overflow: hidden;
 }
+.task-breakdown-workbench > .sticky-action-bar { grid-row: 4; }
 .review-zone {
   min-width: 0;
   min-height: 0;

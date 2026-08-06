@@ -1983,7 +1983,7 @@ function breakdownReviewData(status = "proposed") {
   };
 }
 
-function breakdownDraft(data, { overflow = false } = {}) {
+function breakdownDraft(data, { overflow = false, total = data.candidates.pagination.total } = {}) {
   const fields = Object.fromEntries(Object.entries(data.candidates.items[0] || {})
     .filter(([, value]) => value && typeof value === "object" && "preview" in value)
     .map(([field, value]) => [field, {
@@ -1995,7 +1995,7 @@ function breakdownDraft(data, { overflow = false } = {}) {
       index: 0, selected: true, kind: "implementation", executionMode: "AFK",
       kindTouched: false, executionModeTouched: false, fields,
     }] : [],
-    candidatePagination: { ...data.candidates.pagination, has_more: overflow, next_href: overflow ? "/api/task-breakdowns/demo/evidence/candidates?offset=1&limit=50" : null },
+    candidatePagination: { ...data.candidates.pagination, total, has_more: overflow, next_href: overflow ? "/api/task-breakdowns/demo/evidence/candidates?offset=1&limit=50" : null },
     globalContract: { value: "DEMO global contract 999", loaded: true, touched: false, error: null },
     globalConstraints: { value: "DEMO global constraint 999", loaded: true, touched: false, error: null },
     verification: { value: "Run DEMO verification 999", loaded: true, touched: false, error: null },
@@ -2004,6 +2004,7 @@ function breakdownDraft(data, { overflow = false } = {}) {
 
 function renderBreakdown(status, options = {}) {
   const data = breakdownReviewData(status);
+  if (options.repoContextAvailable === false) data.repo_context.available = false;
   if (options.acceptanceClaim) {
     data.controls = {
       can_accept: false,
@@ -2028,6 +2029,7 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
     "Task Breakdown Review", "DEMO title 999", "Candidate kind", "Execution mode",
     "Acceptance criteria", "Candidate proof / verification path", "Slicing rationale",
     "Global contract summary", "Rejected as Tasks", "Repo Context Brief",
+    "4 context groups",
     "Intake decision", "needs_breakdown", "Intake reason", "DEMO intake reason 999",
     "Accept selected and estimate", "Unsaved browser-local edits",
   ]) assert.match(markup, new RegExp(text));
@@ -2035,6 +2037,7 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-describedby="[^"]+-disabled-reason"/);
   assert.match(markup, /Complete text must load before this field can be edited\./);
+  assert.match(renderBreakdown("proposed", { repoContextAvailable: false }), /3 context groups/);
   assertDisabledControlsHaveReasons(markup);
   assertStatusPillsHaveGlyphs(markup);
   assert.match(markup, /class="status-pill-label">proposed<\/span>/);
@@ -2187,9 +2190,10 @@ test("Task Breakdown Review renders failed recovery, accepted evidence, and over
   assert.doesNotMatch(accepted, /Accept selected and estimate/);
   assertNoNestedPanels(accepted);
 
-  const overflow = renderBreakdown("proposed", { overflow: true });
+  const overflow = renderBreakdown("proposed", { overflow: true, total: 21 });
   assert.match(overflow, /Load remaining candidates/);
   assert.match(overflow, /Load every candidate before acceptance/);
+  assert.match(overflow, /1 of 21 candidates selected\./);
   assert.match(overflow, /Accept selected and estimate<\/button>/);
   assert.match(overflow, /class="disabled-reason"[^>]*>Load every candidate before acceptance\.<\/span>/);
   assertDisabledControlsHaveReasons(overflow);

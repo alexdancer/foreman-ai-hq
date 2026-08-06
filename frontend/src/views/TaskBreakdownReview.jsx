@@ -536,7 +536,11 @@ function TaskBreakdownWorkbench({
 }) {
   const focusedCandidate = draft.candidates.find((candidate) => candidate.index === focusedIndex) || null;
   const selectedCount = selectedCandidates.length;
-  const consequence = `${selectedCount} of ${draft.candidates.length} candidates selected. Accepting creates ${selectedCount} board ${selectedCount === 1 ? "Task" : "Tasks"} and queues ${selectedCount === 1 ? "it" : "them"} for estimation.`;
+  const reportedCandidateTotal = draft.candidatePagination?.total;
+  const candidateTotal = Number.isInteger(reportedCandidateTotal) && reportedCandidateTotal >= draft.candidates.length
+    ? reportedCandidateTotal
+    : draft.candidates.length;
+  const consequence = `${selectedCount} of ${candidateTotal} candidates selected. Accepting creates ${selectedCount} board ${selectedCount === 1 ? "Task" : "Tasks"} and queues ${selectedCount === 1 ? "it" : "them"} for estimation.`;
 
   return <div className="task-breakdown-workbench">
     <header className="review-workbench-header">
@@ -724,6 +728,7 @@ function FocusedCandidateEditor({ candidate, openSlicing, onSlicingToggle, updat
 }
 
 function ReviewContextRail({ data, draft, updateGlobalField, loadGlobalField }) {
+  const supportingContextCount = data.repo_context.available ? 4 : 3;
   return <section className="review-zone review-context-rail" aria-label="Task Breakdown context">
     <div className="review-zone-header"><h2>Context rail</h2><span>{data.repo_context.text_chars.toLocaleString()} chars</span></div>
     <Fieldset legend="Review record">
@@ -745,7 +750,7 @@ function ReviewContextRail({ data, draft, updateGlobalField, loadGlobalField }) 
       <EditableField field="global-constraints" label="Global constraints" rows={4} state={draft.globalConstraints} onChange={(value) => updateGlobalField("globalConstraints", value)} onLoad={() => loadGlobalField("globalConstraints")} />
       <EditableField field="verification" label="Verification" rows={4} state={draft.verification} onChange={(value) => updateGlobalField("verification", value)} onLoad={() => loadGlobalField("verification")} />
     </Fieldset>
-    <Disclosure label="Supporting context" count={3} countLabel="3 context groups">
+    <Disclosure label="Supporting context" count={supportingContextCount} countLabel={`${supportingContextCount} context groups`}>
       <SecondaryEvidence data={data} />
     </Disclosure>
   </section>;
@@ -895,4 +900,3 @@ function BoundedEvidence({ label, value }) {
   };
   return <div className="bounded-text">{label && <h4>{label}</h4>}<pre className="raw-evidence">{full ?? value.preview}</pre>{value.truncated && full === null && <button className="btn small secondary" type="button" onClick={load}>Load full text</button>}{error && <span className="danger-text" role="alert">{error}</span>}</div>;
 }
-
