@@ -276,10 +276,17 @@ code,
 /* The review workbench owns its three scroll zones, so the shell must not add a
    competing document scroll axis while the acceptance decision is open. */
 .shell:has(.task-breakdown-workbench) {
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell:has(.task-breakdown-workbench) .shell-workbench {
+  min-height: 0;
   overflow: hidden;
 }
 .shell:has(.task-breakdown-workbench) .main {
+  height: 100%;
   min-height: 0;
   padding: 0;
   overflow: hidden;

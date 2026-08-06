@@ -26,14 +26,24 @@ function ContractSurface() {
             </nav>
           </section>
         </aside>
-        <div className="shell-workbench"><div className="context-bar" aria-label="Page context">Project / Pipeline</div><div className="main">Workbench content</div></div>
+        <div className="shell-workbench">
+          <div className="context-bar" aria-label="Page context">Project / Pipeline</div>
+          <div className="main">
+            <div className="task-breakdown-workbench" id="review-grid-contract">
+              <header className="review-workbench-header">Review header</header>
+              <div className="review-workbench-zones">
+                {['Candidate navigator', 'Focused candidate editor', 'Task Breakdown context'].map((label) => (
+                  <section key={label} className="review-zone" aria-label={label}>
+                    <div style={{ height: 1200 }}>{label} scroll evidence</div>
+                  </section>
+                ))}
+              </div>
+              <div className="sticky-action-bar">Review actions</div>
+            </div>
+          </div>
+        </div>
       </div>
       <button id="confirm-opener" type="button" onClick={() => setConfirming(true)}>Open confirmation</button>
-      <div className="task-breakdown-workbench" id="review-grid-contract" style={{ height: 400 }}>
-        <header className="review-workbench-header">Review header</header>
-        <div className="review-workbench-zones">Review zones</div>
-        <div className="sticky-action-bar">Review actions</div>
-      </div>
       <ConfirmSheet
         ref={confirmSheetRef}
         open={confirming}
@@ -144,6 +154,12 @@ async function inspect() {
   const reviewActions = reviewGrid.querySelector(".sticky-action-bar");
   requireContract(getComputedStyle(reviewZones).gridRowStart === "3", "review zones leave the scrolling grid row when no notice renders");
   requireContract(getComputedStyle(reviewActions).gridRowStart === "4", "review actions leave the permanent action row when no notice renders");
+  requireContract(reviewGrid.clientHeight === document.querySelector(".main").clientHeight, "review workbench exceeds its shell row");
+  requireContract(Math.abs(reviewActions.getBoundingClientRect().bottom - innerHeight) < 1, "review actions fall below the viewport");
+  for (const zone of reviewGrid.querySelectorAll(".review-zone")) {
+    requireContract(getComputedStyle(zone).overflowY === "auto", "review zone does not own vertical scrolling");
+    requireContract(zone.scrollHeight > zone.clientHeight, "review zone expands instead of scrolling independently");
+  }
 
   const live = document.querySelector(".live-pulse-dot");
   const liveStyle = getComputedStyle(live);
