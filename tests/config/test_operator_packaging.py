@@ -1,8 +1,27 @@
 from importlib.metadata import distribution
 from pathlib import Path
+import re
+import subprocess
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_tracked_repository_has_no_removed_spec_system_artifacts_or_references():
+    tracked_output = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    tracked_paths = [Path(raw.decode()) for raw in tracked_output.split(b"\0") if raw]
+    removed_name = rb"open" + rb"spec"
+    forbidden_reference = re.compile(removed_name + rb"|open[ \t]+spec", re.IGNORECASE)
+
+    # Git is the archive; keeping even a dormant tracked path or reference would
+    # quietly recreate the repository contract this removal intentionally deletes.
+    assert not [path for path in tracked_paths if forbidden_reference.search(path.as_posix().encode())]
+    assert not [path for path in tracked_paths if forbidden_reference.search((ROOT / path).read_bytes())]
 
 
 def test_docker_packaging_files_define_demo_container_contract():

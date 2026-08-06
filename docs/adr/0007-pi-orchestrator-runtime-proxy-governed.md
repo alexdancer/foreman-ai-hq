@@ -72,26 +72,23 @@ its spend is `proxy_governed` and metered as `planning` Orchestration Tokens.
 
 ## Rollout
 
-Three milestones, mapped to OpenSpec changes:
+The original rollout had three milestones:
 
-- **M1 — Metering proof** (own change): a turn through the Harness Proxy recorded
-  as a `planning` token turn, categorized and budget-gated. No ACP, no orchestrator
+- **M1 — Metering proof:** a turn through the Harness Proxy recorded as a
+  `planning` token turn, categorized and budget-gated. No ACP, no orchestrator
   logic, no UI. Proves `proxy_governed` end-to-end. Client-agnostic — a real pi turn
   is the demonstration, not the contract.
-- **M2a — Governed pi launch** (own change, gated on M1 archived): pi launched
-  non-interactively (`pi -p`) with a **custom provider** in the tracked profile pointed
-  at the Harness Proxy (`baseUrl` = proxy, `apiKey` = planning session bearer injected at
-  launch), one real pi turn recorded as a `planning` token turn. Establishes the
-  `orchestrator-runtime` capability minimally and closes M1's deferred 5.2. No ACP, no
-  subprocess supervision, no HITL. (Resolves the custom-provider config unknown the M1
-  spike surfaced.)
-- **M2b — Conversational runtime** (own change, gated on M2a archived): pi as a managed
-  subprocess over ACP — Node↔Python bridge, streamed tool-calls mapped to Needs You /
-  HITL, cancellation as a clean stop, extending the tracked profile with the orchestrator
-  prompt and memory. Modifies `orchestrator-runtime`.
-- **M3 — Scoped orchestrator** (phases inside M2b, not its own change): code-write and
-  shell tools denied or escalated to Needs You; deep repository analysis delegated to
-  a governed Scout Task, never hidden orchestrator spend.
+- **M2a — Governed pi launch:** pi launched non-interactively (`pi -p`) with a
+  **custom provider** in the tracked profile pointed at the Harness Proxy (`baseUrl` =
+  proxy, `apiKey` = planning session bearer injected at launch), one real pi turn
+  recorded as a `planning` token turn. No ACP, subprocess supervision, or HITL.
+  (Resolves the custom-provider configuration unknown the M1 spike surfaced.)
+- **M2b — Conversational runtime:** pi as a managed subprocess over ACP — Node↔Python
+  bridge, streamed tool-calls mapped to Needs You / HITL, cancellation as a clean stop,
+  and a tracked profile with the orchestrator prompt and memory.
+- **M3 — Scoped orchestrator:** code-write and shell tools denied or escalated to Needs
+  You; deep repository analysis delegated to a governed Scout Task, never hidden
+  orchestrator spend.
 
 ### M2 carry-forward (from the M1 pi-startup spike)
 

@@ -1,9 +1,9 @@
 # Portal operator workbench — design record
 
 The desktop Portal redesign accepted on 2026-08-03. This note is the index; the
-normative material lives in the change proposal. Captain-approved consistency
-corrections made during handoff review are part of this authoritative design
-record and supersede conflicting wording in the original ZIP handoff.
+normative material lives in the implementation specification. Captain-approved
+consistency corrections made during handoff review are part of this authoritative
+design record and supersede conflicting wording in the original ZIP handoff.
 
 ## Where things are
 
@@ -13,8 +13,8 @@ record and supersede conflicting wording in the original ZIP handoff.
   `DESIGN.md` (updated in the same change)
 - **Design artifacts** — the baseline recreation, the three compared directions,
   the clickable prototype, and the printable handoff spec. These are design-tool
-  documents, not repo source; they are the reference for anything the proposal
-  and `DESIGN.md` do not pin down.
+  documents, not repo source; they are the reference for anything the
+  implementation specification and `DESIGN.md` do not pin down.
 
 ## The short version
 
