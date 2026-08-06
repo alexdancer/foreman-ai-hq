@@ -45,7 +45,7 @@ function ContractSurface() {
         <p>Confirmation body</p>
       </ConfirmSheet>
       <Panel>
-        <PanelHeader title="Ledger contract" />
+        <PanelHeader title="Ledger contract" badge={<span id="content-contract-badge" className="nav-badge">3</span>} />
         <PanelBody>
           <div id="select-track" style={{ display: "grid", gridTemplateColumns: "minmax(0, 180px)" }}>
             <label>Worker adapter<select id="contract-select" defaultValue="long"><option value="long">A deliberately long adapter option that must stay contained</option></select></label>
@@ -124,6 +124,15 @@ async function inspect() {
   requireContract(railLink.getAttribute("aria-label") === "Pipeline, 3 Needs You", "collapsed rail link loses its badge state");
   requireContract(getComputedStyle(railLabel).clip === "auto", "focused collapsed rail label stays clipped");
   requireContract(railLabel.getBoundingClientRect().width > 1, "focused collapsed rail label is not visible");
+  const contentBadge = document.querySelector("#content-contract-badge");
+  const contentBadgeHeader = contentBadge.closest(".panel-header");
+  const contentBadgeBox = contentBadge.getBoundingClientRect();
+  const contentBadgeHeaderBox = contentBadgeHeader.getBoundingClientRect();
+  requireContract(getComputedStyle(contentBadge).position !== "absolute", "content badge inherits rail-only positioning");
+  requireContract(
+    contentBadgeBox.left >= contentBadgeHeaderBox.left && contentBadgeBox.right <= contentBadgeHeaderBox.right,
+    "content badge escapes its panel header",
+  );
 
   const live = document.querySelector(".live-pulse-dot");
   const liveStyle = getComputedStyle(live);
