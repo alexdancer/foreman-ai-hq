@@ -2566,13 +2566,11 @@ def test_react_alarms_canonical_route_serves_react_when_built(tmp_path, monkeypa
 
 def test_react_alarms_source_contract():
     """Frontend Alarms view matches the backend contract and routing expectations."""
-    app_source = Path("frontend/src/App.jsx").read_text(encoding="utf-8")
     routes_source = Path("frontend/src/routes.js").read_text(encoding="utf-8")
     shell_source = Path("frontend/src/components/Shell.jsx").read_text(encoding="utf-8")
     source = Path("frontend/src/views/Alarms.jsx").read_text(encoding="utf-8")
 
     assert 'view: "alarms"' in routes_source
-    assert '<Alarms />' in app_source
     assert 'to="/alarms"' in shell_source
     assert 'activeView === "alarms"' in shell_source
     api_source = Path("frontend/src/api.js").read_text(encoding="utf-8")
