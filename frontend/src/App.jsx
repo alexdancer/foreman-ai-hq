@@ -69,7 +69,7 @@ export default function App() {
   } else if (route.view === "setup") {
     content = <Setup />;
   } else if (route.view === "alarms") {
-    content = <Alarms />;
+    content = <Alarms onStateChanged={() => setNavRefreshKey((current) => current + 1)} />;
   } else if (route.view === "sessions") {
     content = <Sessions />;
   } else if (route.view === "sessionReport") {

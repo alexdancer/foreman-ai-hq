@@ -31,7 +31,7 @@ function safeError(error) {
   return "Could not load Alarms. Retry.";
 }
 
-export default function Alarms() {
+export default function Alarms({ onStateChanged = () => {} }) {
   const [filter, setFilter] = useState(initialFilter);
   const [url, setUrl] = useState(apiUrl(initialFilter));
   const [state, setState] = useState({ data: null, error: null, loading: true });
@@ -73,6 +73,7 @@ export default function Alarms() {
       filter={filter}
       onFilter={selectFilter}
       onRefresh={refresh}
+      onStateChanged={onStateChanged}
       retry={() => load(url)}
     />
   );
@@ -85,6 +86,7 @@ export function AlarmsState({
   filter,
   onFilter,
   onRefresh,
+  onStateChanged = () => {},
   retry,
 }) {
   const [acting, setActing] = useState({});
@@ -100,6 +102,7 @@ export function AlarmsState({
         setInlineError(boundedError(outcome?.error, "Could not resolve alarm."));
       } else {
         setStatus(`${action} resolved for alarm ${alarm.id}`);
+        onStateChanged();
         await onRefresh();
       }
     } catch (err) {

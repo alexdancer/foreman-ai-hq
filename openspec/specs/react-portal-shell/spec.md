@@ -302,7 +302,7 @@ The React Portal shell SHALL load dashboard, project Pipeline and Execution Floo
 - **WHEN** React posts to `/projects/{project_id}/restore` with `Accept: application/json` for an archived or already-active project
 - **THEN** the response SHALL be `200` JSON with exactly `ok`, `error`, `next_href`, `retry_href`, and `project`
 - **AND** it SHALL contain `ok: true`, `error: null`, `next_href: /projects/{project_id}`, `retry_href: null`, and project fields exactly `id` and `archived: false`
-- **AND** React SHALL refetch workspace and sidebar state after success rather than optimistically changing project state
+- **AND** React SHALL refetch workspace and navigation state after success rather than optimistically changing project state
 
 #### Scenario: React Restore receives bounded unknown-project outcome
 - **WHEN** a JSON-negotiated Restore targets an unknown project
@@ -371,7 +371,7 @@ The normal Portal landing SHALL be the React dashboard at the canonical `/dashbo
 The React Portal shell SHALL let operators move between its dashboard home, Projects list, project workspace, project board, Sessions, Session Report, and Task Breakdown Review without manual URL entry, while deep links to React-owned routes still resolve on a full page load.
 
 #### Scenario: Selecting a project opens its workspace in-shell
-- **WHEN** an operator selects a project from the React dashboard, the React Projects list, or the sidebar
+- **WHEN** an operator selects a project from the React dashboard, the React Projects list, or the navigation rail
 - **THEN** the shell SHALL open that project's workspace without the operator typing a URL
 
 #### Scenario: Moving between the Projects list and the dashboard stays in-shell
@@ -397,24 +397,34 @@ The React Portal shell SHALL let operators move between its dashboard home, Proj
 - **WHEN** an operator loads or refreshes a React-owned route such as the canonical dashboard, Projects list, project workspace, board, Sessions, Session Report, or Task Breakdown Review URL directly
 - **THEN** the system SHALL serve the React shell for that existing resource route when the complete build is available
 
-### Requirement: React shell preserves the full Portal chrome
+### Requirement: React shell renders the grouped Portal workbench
 
-The React Portal shell SHALL render the full Portal application frame: a top brand bar, a left sidebar with the connected-project list and the Setup, Governance, Planning (only when no projects connected), and Settings groups, a `+ Open local repo` action, a logout form when portal auth is required, and a footer. React-owned routes SHALL share that frame so every canonical Portal route reads as the same product. React SHALL be the sole owner of this frame; no server-rendered template SHALL define it. Sidebar and dashboard links to React-owned canonical routes SHALL navigate in-shell through a shared route-aware link seam that decides client-side versus full-page navigation from the canonical route table; links whose target the React shell does not own SHALL remain ordinary full-page anchors.
+The React Portal shell SHALL render a fixed-width grouped navigation rail with a project switcher, `Project`, `Governance`, and `Configure` groups, and a per-page context bar. The shell SHALL NOT render the retired brand top bar, ASCII project child links, or footer. React-owned routes SHALL share this frame so every canonical Portal route reads as the same product. React SHALL be the sole owner of this frame; no server-rendered template SHALL define it. Links to React-owned canonical routes SHALL navigate in-shell through the shared route-aware link seam that decides client-side versus full-page navigation from the canonical route table; links whose target the React shell does not own SHALL remain ordinary full-page anchors.
 
-#### Scenario: React shell renders the sidebar project list from the shared context helper
+#### Scenario: Project switcher selects the active project
 
 - **WHEN** an authenticated operator opens a React-owned route with one or more connected projects
-- **THEN** the shell SHALL render a sidebar listing those projects, each with its name and a `Task board` subtitle when the project has tasks or a `No tasks` subtitle when it does not
-- **AND** the selected project SHALL expand to its canonical sub-links — `└ Pipeline` (`/projects/{project_id}#needs-you`, carrying a Needs You badge when that count is above zero), `└ Execution Floor` (`/projects/{project_id}/floor`), and `└ Plan` (`/projects/{project_id}/plan`) — while unselected projects SHALL show no sub-links
-- **AND** the project data SHALL come from an authenticated FastAPI JSON endpoint that reuses the existing `portal_template_context` helper
-- **AND** the shell SHALL render an empty `No projects` state and a reachable `+ Open local repo` action when no projects are connected
+- **THEN** the rail SHALL render those projects in a keyboard-reachable project switcher
+- **AND** selecting a project SHALL navigate in-shell to its canonical `/projects/{project_id}` Pipeline
+- **AND** the `Project` group SHALL show `Pipeline`, `Execution Floor`, and `Planning` links for the active project without ASCII child-link prefixes
+- **AND** Pipeline SHALL carry the active project's Needs You count when that count is above zero
+- **AND** the project data SHALL come from the existing authenticated FastAPI navigation endpoint
+- **AND** the shell SHALL render an empty `No projects` state and a reachable `Open local repo` action when no projects are connected
 
-#### Scenario: React shell renders the sidebar navigation groups
+#### Scenario: React shell renders the grouped rail
 
 - **WHEN** an authenticated operator opens a React-owned route
-- **THEN** the shell SHALL render the `Setup` group with a `First-run setup` link, the `Governance` group with in-shell `Dashboard`, `Sessions`, and `Alarms` links, the `Settings` group with in-shell `Control plane model`, `Token budget`, `Projects`, and `Worker adapters` links, and a footer reading `Foreman AI HQ portal · operator-controlled budget governance`
-- **AND** the `Setup`, `Governance`, and `Settings` group links and the `+ Open local repo` action SHALL use the shared route-aware link seam so their React-owned targets navigate in-shell
-- **AND** the Planning group with a `Task board` link SHALL appear only when no projects are connected, and its bare `/board` shim SHALL remain a full-page navigation
+- **THEN** the `Project` group SHALL contain the active project's surface links plus `Open local repo`
+- **AND** the `Governance` group SHALL contain in-shell `Dashboard`, `Sessions`, and `Alarms` links
+- **AND** Alarms SHALL carry the open-alarm count when that count is above zero
+- **AND** the `Configure` group SHALL contain in-shell `First-run setup`, `Control plane model`, `Token budget`, `Projects`, and `Worker adapters` links
+- **AND** the rail SHALL NOT render the retired `Setup`, `Planning`, or `Settings` groups, the bare `/board` shim, the brand top bar, or the footer
+
+#### Scenario: Every React page has context
+
+- **WHEN** an authenticated operator opens a React-owned route
+- **THEN** the shell SHALL render a context bar naming the active project or navigation group and the current page
+- **AND** the context bar SHALL provide a relevant in-shell entry point to Task History, Pipeline, Projects, or Dashboard
 
 #### Scenario: React shell shows logout when portal auth is required
 
@@ -425,56 +435,63 @@ The React Portal shell SHALL render the full Portal application frame: a top bra
 #### Scenario: Dashboard is the sole active home navigation item
 
 - **WHEN** an authenticated operator opens `/dashboard`
-- **THEN** the Dashboard sidebar item SHALL be highlighted as active
-- **AND** no project sidebar entry SHALL be highlighted
-- **AND** the `+ Open local repo` action SHALL NOT be highlighted
+- **THEN** the Dashboard rail item SHALL expose the active page state
+- **AND** no project or Configure rail item SHALL expose the active page state
+- **AND** the `Open local repo` action SHALL NOT expose the active page state
 
-#### Scenario: Active project and board routes are highlighted in the sidebar
+#### Scenario: Active project routes are highlighted in the rail
 
 - **WHEN** an authenticated operator opens a project surface at the canonical `/projects/{project_id}`, `/projects/{project_id}/floor`, or `/projects/{project_id}/plan`
-- **THEN** the sidebar SHALL highlight the active project's sidebar entry so the operator can tell which project the shell is showing
-- **AND** exactly one sub-link SHALL be highlighted — `└ Pipeline` on the project home, `└ Execution Floor` on the floor route, and `└ Plan` on the plan route
-- **AND** the Dashboard sidebar item SHALL NOT be highlighted
-- **AND** the shell SHALL NOT mark Setup, Sessions, Alarms, or Settings group items as active
+- **THEN** the project switcher SHALL identify the active project
+- **AND** exactly one project link SHALL expose the active page state — `Pipeline` on the project home, `Execution Floor` on the floor route, and `Planning` on the plan route
+- **AND** the Dashboard rail item SHALL NOT expose the active page state
+- **AND** the shell SHALL NOT mark Configure, Sessions, or Alarms items as active
 
-#### Scenario: Sessions routes are highlighted in the sidebar
+#### Scenario: Sessions routes are highlighted in the rail
 
 - **WHEN** an authenticated operator opens `/sessions` or `/sessions/{session_id}` with a complete React build
-- **THEN** the Sessions sidebar item SHALL be highlighted
-- **AND** no Dashboard or project sidebar entry SHALL be highlighted
+- **THEN** the Sessions rail item SHALL expose the active page state
+- **AND** no Dashboard or project rail item SHALL expose the active page state
 
-#### Scenario: React-owned Settings routes are highlighted in the sidebar
+#### Scenario: React-owned Configure routes are highlighted in the rail
 
 - **WHEN** an authenticated operator opens `/settings/control-plane`, `/settings/budget`, `/settings/project`, or `/settings/workers` with a complete React build
-- **THEN** the shell SHALL highlight that route's `Settings` group sidebar item as active
-- **AND** no Dashboard or project sidebar entry SHALL be highlighted
-- **AND** the shell SHALL highlight at most one `Settings` group item
+- **THEN** the shell SHALL expose the active page state on that route's `Configure` group item
+- **AND** no Dashboard or project rail item SHALL expose the active page state
+- **AND** the shell SHALL mark at most one `Configure` group item as active
 
-#### Scenario: Setup route is highlighted in the sidebar
+#### Scenario: Setup route is highlighted in the rail
 
 - **WHEN** an authenticated operator opens `/setup` with a complete React build
-- **THEN** the shell SHALL highlight the `Setup` group `First-run setup` item as active
-- **AND** no Dashboard, project, Sessions, or Settings sidebar entry SHALL be highlighted
+- **THEN** the shell SHALL expose the active page state on the `Configure` group `First-run setup` item
+- **AND** no Dashboard, project, Sessions, or other Configure rail item SHALL expose the active page state
+
+#### Scenario: Rail collapses at narrower desktop widths
+
+- **WHEN** an operator uses the shell at an accepted narrower desktop width
+- **THEN** the rail SHALL collapse to a compact glyph strip while preserving every navigation destination and badge state
+- **AND** focusing or hovering a rail item SHALL reveal its text label
+- **AND** the project switcher, navigation links, and logout control SHALL remain keyboard reachable
 
 #### Scenario: Unknown React paths return not found
 
 - **WHEN** an operator opens a path under `/app` other than `/app`, `/app/projects/{id}`, or `/app/projects/{id}/board`
 - **THEN** FastAPI SHALL return not found instead of serving a React surface
 
-#### Scenario: React-owned sidebar links navigate in-shell while server-rendered targets stay full-page
+#### Scenario: React-owned rail links navigate in-shell while server-rendered targets stay full-page
 
-- **WHEN** an authenticated operator follows a sidebar link whose canonical target is a React-owned route — a `Settings` group item, `Alarms`, `Sessions`, `First-run setup`, `+ Open local repo` (`/projects`), a project, or one of its `└ Pipeline`, `└ Execution Floor`, and `└ Plan` sub-links
+- **WHEN** an authenticated operator follows a rail link whose canonical target is a React-owned route — a `Configure` group item, `Alarms`, `Sessions`, `First-run setup`, `Open local repo` (`/projects`), or one of the active project's `Pipeline`, `Execution Floor`, and `Planning` links
 - **THEN** the shell SHALL navigate client-side via the shared route-aware link seam without a full-page transition
 - **AND** browser Back and Forward SHALL preserve those route transitions
-- **WHEN** an authenticated operator follows a sidebar link whose canonical target the React shell does not own — the bare `/board` Planning shim, or the `/login` / `/logout` controls
-- **THEN** the shared seam SHALL fall back to an ordinary full-page navigation to that canonical route
+- **WHEN** an authenticated operator follows a navigation control whose canonical target the React shell does not own — the `/login` or `/logout` controls
+- **THEN** the shell SHALL preserve ordinary full-page anchor or form behavior for that canonical route
 - **AND** the seam SHALL derive React ownership from the same canonical route table the router uses, so the two never disagree about which targets stay full-page
 
-#### Scenario: Sidebar navigation endpoint requires portal auth
+#### Scenario: Rail navigation endpoint requires portal auth
 
-- **WHEN** an unauthenticated request calls the sidebar navigation JSON endpoint while portal auth is required
+- **WHEN** an unauthenticated request calls the rail navigation JSON endpoint while portal auth is required
 - **THEN** the system SHALL reject the request using the existing portal authentication boundary
-- **AND** an authenticated request SHALL receive `portal_auth_required` and a `sidebar_projects` array whose items include `id`, `name`, and `task_count`
+- **AND** an authenticated request SHALL receive `portal_auth_required` and a `sidebar_projects` array whose items include `id`, `name`, `task_count`, and `needs_you_count`
 
 ### Requirement: React Sessions JSON is exact, bounded, and pageable
 The system SHALL expose an authenticated read-only `/api/sessions` projection ordered newest first and bounded by non-negative `offset` plus `limit` with default 50 and maximum 100.
@@ -1139,7 +1156,7 @@ FastAPI SHALL expose a new authenticated JSON handoff for Setup Overview that re
 - **AND** the projects step state SHALL NOT report ready
 
 ### Requirement: React Setup Overview navigates inside the shell
-React SHALL render Setup Overview inside the shared Portal chrome on the canonical `/setup` URL when the complete build is available, and that URL SHALL return the missing-build recovery response when the build is missing or partial. The view SHALL preserve the next-action toolbar, the four readiness cards with their destination links, the launch-readiness panel, and the active Worker adapter panel. The Setup sidebar link SHALL use in-shell client navigation.
+React SHALL render Setup Overview inside the shared Portal chrome on the canonical `/setup` URL when the complete build is available, and that URL SHALL return the missing-build recovery response when the build is missing or partial. The view SHALL preserve the next-action toolbar, the four readiness cards with their destination links, the launch-readiness panel, and the active Worker adapter panel. The First-run setup rail link SHALL use in-shell client navigation.
 
 #### Scenario: Built canonical route opens React Setup Overview in-shell
 - **WHEN** an authenticated operator opens `/setup` while the complete React build is available

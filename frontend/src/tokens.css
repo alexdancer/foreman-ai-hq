@@ -88,115 +88,133 @@ code,
   font-family: var(--mono);
 }
 
-/* Layout — mirrors templates/base.html so the React shell reads as the same product. */
+/* The workbench keeps navigation fixed at desktop widths so page context stays
+   visible while dense evidence scrolls in the main surface. */
 .shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  grid-template-rows: auto 1fr auto;
+  grid-template-columns: 236px minmax(0, 1fr);
   min-height: 100vh;
+  background: var(--surface-canvas);
 }
-.topbar {
-  grid-column: 1 / -1;
+.sidebar {
   display: flex;
+  grid-column: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 16px 12px;
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--line);
+}
+.shell-workbench {
+  display: grid;
+  grid-column: 2;
+  grid-template-rows: 52px minmax(0, 1fr);
+  min-width: 0;
+}
+.context-bar {
+  display: flex;
+  grid-row: 1;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 20px;
-  background: var(--bg-1);
+  min-width: 0;
+  padding: 0 22px;
   border-bottom: 1px solid var(--line);
+  background: var(--surface-panel);
 }
-.brand {
-  font-family: var(--mono);
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: var(--accent);
+.context-location {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: 13px/1.4 var(--sans);
+}
+.context-location strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.context-group,
+.context-separator {
+  color: var(--text-tertiary);
+  font: 600 10px/1.3 var(--mono);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.brand .dot {
-  color: var(--fg-3);
-  margin: 0 6px;
+.context-action {
+  flex: none;
+  color: var(--text-secondary);
+  font: 600 12px/1.4 var(--sans);
 }
-.brand-portal {
-  color: var(--fg-1);
+.project-switcher {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
 }
-.sidebar {
-  grid-column: 1;
-  grid-row: 2;
-  background: var(--bg-1);
-  border-right: 1px solid var(--line);
-  padding: 20px 0;
-}
-.sidebar nav {
-  display: flex;
-  flex-direction: column;
-}
-.sidebar a {
-  padding: 8px 20px;
-  color: var(--fg-1);
-  font-family: var(--mono);
-  font-size: 13px;
-  border-left: 2px solid transparent;
-}
-.sidebar a:hover {
-  background: var(--bg-2);
-  text-decoration: none;
-}
-.sidebar a.active {
-  color: var(--accent);
-  background: var(--bg-2);
-  border-left-color: var(--accent);
-}
-.sidebar .group {
-  padding: 16px 20px 6px;
-  font-size: 10px;
+.project-switcher-label,
+.rail-group-title {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: 600 10px/1.3 var(--mono);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--fg-3);
 }
-.project-list {
-  display: flex;
-  flex-direction: column;
+.project-switcher select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  color-scheme: dark;
+  font: 12px/1.35 var(--sans);
+}
+.rail-group {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+.rail-group nav {
+  display: grid;
   gap: 2px;
 }
-.sidebar .project-item {
-  display: block;
-  padding: 7px 12px 8px 20px;
-  color: var(--fg-1);
-  border-left: 2px solid transparent;
-  font-family: var(--mono);
+.sidebar [data-rail-link] {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 8px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font: 13px/1.35 var(--sans);
 }
-.sidebar .project-item:hover {
-  background: var(--bg-2);
+.sidebar [data-rail-link]:hover {
+  background: var(--surface-panel);
+  color: var(--text-primary);
   text-decoration: none;
 }
-.sidebar .project-item.active {
-  background: var(--bg-2);
-  border-left-color: var(--accent);
+.sidebar [data-rail-link].active {
+  background: var(--surface-raised);
+  box-shadow: inset 2px 0 var(--mint);
+  color: var(--text-primary);
 }
-.project-name {
-  display: block;
-  color: var(--fg-0);
-  font-size: 13px;
-  line-height: 1.35;
+.nav-glyph {
+  display: none;
+  width: 1.25rem;
+  color: var(--text-tertiary);
+  font: 600 11px/1 var(--mono);
+  text-align: center;
+}
+.rail-label {
+  min-width: 0;
   overflow-wrap: anywhere;
-}
-.project-item.active .project-name {
-  color: var(--accent);
-  font-weight: 600;
-}
-.project-sub {
-  display: block;
-  margin-top: 3px;
-  color: var(--fg-3);
-  font-size: 12px;
-}
-.sidebar .project-board {
-  display: block;
-  padding: 2px 12px 7px 34px;
-  color: var(--fg-3);
-  font-family: var(--mono);
-  font-size: 12px;
-  border-left: 2px solid transparent;
 }
 .nav-badge {
   display: inline-flex;
@@ -205,89 +223,147 @@ code,
   align-items: center;
   justify-content: center;
   padding: 0 6px;
+  border: 1px solid var(--warn);
   border-radius: 999px;
   background: var(--warn);
-  color: var(--bg-0);
-  font: 700 11px var(--mono);
+  color: var(--mint-ink);
+  font: 700 11px/1 var(--mono);
 }
-.sidebar .project-board:hover,
-.sidebar .sidebar-action:hover {
-  background: var(--bg-2);
-  color: var(--fg-1);
-  text-decoration: none;
+.nav-badge-alarm {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
 }
 .sidebar .sidebar-action,
 .sidebar-empty {
   display: block;
-  padding: 7px 20px;
-  color: var(--fg-2);
-  font-family: var(--mono);
-  font-size: 13px;
+  min-width: 0;
+  padding: 7px 8px;
+  color: var(--text-tertiary);
+  font: 12px/1.4 var(--sans);
+  overflow-wrap: anywhere;
 }
-.sidebar .sidebar-action.active {
-  color: var(--accent);
-  background: var(--bg-2);
-  border-left-color: var(--accent);
+.sidebar .sidebar-action:hover {
+  color: var(--text-primary);
+  text-decoration: none;
 }
 .logout {
-  margin: 16px 20px 0;
+  margin-top: auto;
+  padding-top: 4px;
 }
 .logout button {
   width: 100%;
-  display: inline-block;
-  background: var(--surface-raised);
-  border: 1px solid var(--line-2);
-  color: var(--fg-0);
-  padding: 8px 14px;
-  border-radius: 4px;
-  font-family: var(--mono);
-  font-size: 12px;
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font: 600 12px/1.4 var(--sans);
 }
 .logout button:hover {
-  background: var(--line);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .main {
-  grid-column: 2;
   grid-row: 2;
-  padding: 24px 28px;
-  max-width: none;
-  width: 100%;
   min-width: 0;
-}
-.shell-footer {
-  grid-column: 1 / -1;
-  grid-row: 3;
-  padding: 12px 20px;
-  border-top: 1px solid var(--line);
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-3);
-  text-align: center;
+  width: 100%;
+  max-width: none;
+  padding: 24px 28px;
 }
 
-@media (max-width: 900px) {
+/* At the accepted narrow desktop width, preserve every destination as a real
+   labelled link while collapsing the rail into a compact, focusable control strip. */
+@media (max-width: 1200px) {
   .shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .sidebar {
+    padding: 12px 8px;
+  }
+  .project-switcher-label,
+  .rail-group-title,
+  .rail-label,
+  .sidebar-empty,
+  .sidebar .sidebar-action {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .project-switcher {
+    margin-bottom: 12px;
+  }
+  .project-switcher select {
+    padding-inline: 2px;
+    font-size: 10px;
+  }
+  .nav-glyph {
+    display: inline;
+  }
+  .sidebar [data-rail-link] {
+    grid-template-columns: 1fr auto;
+    justify-items: center;
+    padding: 7px 4px;
+  }
+  .sidebar [data-rail-link]:hover .rail-label,
+  .sidebar [data-rail-link]:focus-visible .rail-label {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: calc(100% + 8px);
+    width: max-content;
+    max-width: min(240px, calc(100vw - 96px));
+    height: auto;
+    margin: 0;
+    padding: 6px 8px;
+    overflow: visible;
+    clip: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    white-space: normal;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+  .sidebar .nav-badge {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    min-width: 16px;
+    min-height: 16px;
+    padding: 0 3px;
+    font-size: 9px;
+  }
+  .logout button {
+    padding-inline: 2px;
+    font-size: 0;
+  }
+  .logout button::after {
+    content: "↪";
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
     grid-column: 1;
-    grid-row: 2;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
-  .main {
+  .shell-workbench {
     grid-column: 1;
-    grid-row: 3;
   }
-  .shell-footer {
-    grid-row: 4;
-  }
-  .kpi-row {
-    grid-template-columns: 1fr;
-  }
+  .kpi-row,
   .board {
     grid-template-columns: 1fr;
   }

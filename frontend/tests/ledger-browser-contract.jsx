@@ -10,6 +10,24 @@ function ContractSurface() {
   const [confirming, setConfirming] = React.useState(false);
   return (
     <main>
+      <div className="shell" id="rail-contract-shell">
+        <aside className="sidebar">
+          <div className="project-switcher">
+            <label className="project-switcher-label" htmlFor="rail-contract-select">Project</label>
+            <select id="rail-contract-select" aria-label="Switch project" defaultValue="demo"><option value="demo">DEMO 999</option></select>
+          </div>
+          <section className="rail-group" aria-label="Project">
+            <h2 className="rail-group-title">Project</h2>
+            <nav>
+              <a id="rail-contract-link" data-rail-link="true" aria-label="Pipeline, 3 Needs You" href="/projects/demo-999">
+                <span className="nav-glyph" aria-hidden="true">P</span><span className="rail-label">Pipeline</span>
+                <span className="nav-badge nav-badge-needs-you" aria-label="3 Needs You"><span aria-hidden="true">3</span></span>
+              </a>
+            </nav>
+          </section>
+        </aside>
+        <div className="shell-workbench"><div className="context-bar" aria-label="Page context">Project / Pipeline</div><div className="main">Workbench content</div></div>
+      </div>
       <button id="confirm-opener" type="button" onClick={() => setConfirming(true)}>Open confirmation</button>
       <ConfirmSheet
         ref={confirmSheetRef}
@@ -27,7 +45,7 @@ function ContractSurface() {
         <p>Confirmation body</p>
       </ConfirmSheet>
       <Panel>
-        <PanelHeader title="Ledger contract" />
+        <PanelHeader title="Ledger contract" badge={<span id="content-contract-badge" className="nav-badge">3</span>} />
         <PanelBody>
           <div id="select-track" style={{ display: "grid", gridTemplateColumns: "minmax(0, 180px)" }}>
             <label>Worker adapter<select id="contract-select" defaultValue="long"><option value="long">A deliberately long adapter option that must stay contained</option></select></label>
@@ -94,6 +112,27 @@ async function inspect() {
   requireContract(selectStyle.outlineStyle === "solid" && selectStyle.outlineWidth === "2px", "focus outline is not visible");
   requireContract(selectStyle.minWidth === "0px" && selectStyle.maxWidth === "100%", "select sizing contract is missing");
   requireContract(selectBox.left >= trackBox.left - 0.5 && selectBox.right <= trackBox.right + 0.5, "select escapes its layout track");
+
+  const railShell = document.querySelector("#rail-contract-shell");
+  const railLink = document.querySelector("#rail-contract-link");
+  const railLabel = railLink.querySelector(".rail-label");
+  requireContract(matchMedia("(max-width: 1200px)").matches, "narrow desktop rail contract is not active");
+  requireContract(getComputedStyle(railShell).gridTemplateColumns.startsWith("72px"), "narrow desktop rail does not collapse");
+  requireContract(getComputedStyle(railLabel).position === "absolute", "collapsed rail still renders full-width labels");
+  railLink.focus();
+  requireContract(railLink.matches(":focus-visible"), "collapsed rail link is not keyboard focusable");
+  requireContract(railLink.getAttribute("aria-label") === "Pipeline, 3 Needs You", "collapsed rail link loses its badge state");
+  requireContract(getComputedStyle(railLabel).clip === "auto", "focused collapsed rail label stays clipped");
+  requireContract(railLabel.getBoundingClientRect().width > 1, "focused collapsed rail label is not visible");
+  const contentBadge = document.querySelector("#content-contract-badge");
+  const contentBadgeHeader = contentBadge.closest(".panel-header");
+  const contentBadgeBox = contentBadge.getBoundingClientRect();
+  const contentBadgeHeaderBox = contentBadgeHeader.getBoundingClientRect();
+  requireContract(getComputedStyle(contentBadge).position !== "absolute", "content badge inherits rail-only positioning");
+  requireContract(
+    contentBadgeBox.left >= contentBadgeHeaderBox.left && contentBadgeBox.right <= contentBadgeHeaderBox.right,
+    "content badge escapes its panel header",
+  );
 
   const live = document.querySelector(".live-pulse-dot");
   const liveStyle = getComputedStyle(live);
