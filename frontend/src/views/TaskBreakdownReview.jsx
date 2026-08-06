@@ -21,6 +21,12 @@ const TEXT_FIELDS = [
   ["likely_entry_points", "Likely repo entry points", 2, true],
 ];
 
+// Match the existing acceptance validator so blank local edits fail before its generic response.
+const REQUIRED_CANDIDATE_FIELDS = [
+  "title", "objective", "prompt", "acceptance_criteria", "proof",
+  "why_this_task_exists", "why_not_smaller", "why_not_larger",
+];
+
 function boundedDraft(value) {
   return {
     value: value?.preview || "",
@@ -406,17 +412,23 @@ export function TaskBreakdownReviewState({
   const allCandidatesLoaded = !draft.candidatePagination?.has_more;
   const selectedCandidates = draft.candidates.filter((candidate) => candidate.selected);
   const selected = selectedCandidates.length;
+  const selectedIncomplete = selectedCandidates.filter((candidate) => missingCandidateFields(candidate).length > 0);
+  const globalContractMissing = !draft.globalContract.value.trim();
   const resolvedFocusedIndex = draft.candidates.some((candidate) => candidate.index === focusedIndex)
     ? focusedIndex
     : draft.candidates[0]?.index ?? null;
-  const canAccept = canEdit && allCandidatesLoaded && selected > 0;
+  const canAccept = canEdit && allCandidatesLoaded && selected > 0 && !globalContractMissing && selectedIncomplete.length === 0;
   const acceptDisabledReason = pending
     ? "Acceptance is already in progress."
     : !allCandidatesLoaded
       ? "Load every candidate before acceptance."
       : selected === 0
         ? "Select at least one candidate before acceptance."
-        : undefined;
+        : globalContractMissing
+          ? "Complete the required global contract summary before acceptance."
+          : selectedIncomplete.length > 0
+            ? `Complete required text for ${selectedIncomplete.length} selected ${selectedIncomplete.length === 1 ? "candidate" : "candidates"} before acceptance.`
+            : undefined;
   const actionReason = [
     dirty && "Unsaved browser-local edits will be included only when accepted.",
     acceptDisabledReason,
@@ -582,7 +594,7 @@ function TaskBreakdownWorkbench({
     >
       <p>Acceptance will create these Tasks:</p>
       <ol className="review-confirmation-list">
-        {selectedCandidates.map((candidate) => <li key={candidate.index}>{candidate.fields.title.value || `Candidate ${candidate.index + 1}`}</li>)}
+        {selectedCandidates.map((candidate) => <li key={candidate.index}>{candidateTitle(candidate)}</li>)}
       </ol>
     </ConfirmSheet>
   </div>;
@@ -592,15 +604,19 @@ function candidateTitle(candidate) {
   return candidate.fields.title.value || `Candidate ${candidate.index + 1}`;
 }
 
+function missingCandidateFields(candidate) {
+  const required = candidate.executionMode === "HITL"
+    ? [...REQUIRED_CANDIDATE_FIELDS, "hitl_reason"]
+    : REQUIRED_CANDIDATE_FIELDS;
+  return required.filter((field) => !candidate.fields[field].value.trim());
+}
+
 function candidateStateFlags(candidate) {
   const fields = Object.values(candidate.fields);
   return {
     edited: fields.some((field) => field.touched) || candidate.kindTouched || candidate.executionModeTouched,
-    // A blank required value is incomplete; an unloaded preview is separately
-    // disabled so the navigator does not make the two states look equivalent.
-    incomplete: ["title", "objective", "prompt", "acceptance_criteria", "proof"].some(
-      (field) => !candidate.fields[field].value.trim(),
-    ),
+    // An unloaded preview is separately disabled so it cannot look like missing text.
+    incomplete: missingCandidateFields(candidate).length > 0,
     disabled: fields.some((field) => !field.loaded),
   };
 }
@@ -624,6 +640,7 @@ function CandidateNavigator({ candidates, focusedIndex, onFocusCandidate, onOpen
     onFocusCandidate(next.index);
     rowRefs.current.get(next.index)?.focus();
   };
+  // Keep roving shortcuts on navigator rows so text controls retain native arrows.
   const onKeyDown = (event, candidate) => {
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();

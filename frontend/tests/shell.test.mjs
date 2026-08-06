@@ -2089,34 +2089,81 @@ test("Task Breakdown Review workbench keeps focus, selection, disclosure, and co
   assert.match(JSON.stringify(renderer.toJSON()), /5 rationale fields/);
   assert.match(navigator.props.className, /review-navigator/);
 
-  await act(async () => { rows[0].props.onKeyDown({ key: "ArrowDown", preventDefault: () => {} }); });
+  const keyDown = (key) => ({ key, preventDefault: () => {} });
+  await act(async () => { rows[0].props.onKeyDown(keyDown("ArrowDown")); });
   rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
   assert.equal(rows[1].props.tabIndex, 0);
   assert.equal(rows[1].props["aria-current"], "true");
   assert.equal(rows[0].props.tabIndex, -1);
 
-  await act(async () => { rows[1].props.onKeyDown({ key: " ", preventDefault: () => {} }); });
-  const candidates = renderer.root.findAllByType("input").filter((input) => input.props.type === "checkbox");
+  await act(async () => { rows[1].props.onKeyDown(keyDown("ArrowUp")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[0].props.tabIndex, 0, "ArrowUp moves focus backward");
+  await act(async () => { rows[0].props.onKeyDown(keyDown("j")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[1].props.tabIndex, 0, "j moves focus forward");
+  await act(async () => { rows[1].props.onKeyDown(keyDown("k")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[0].props.tabIndex, 0, "k moves focus backward");
+  await act(async () => { rows[0].props.onKeyDown(keyDown("j")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+
+  await act(async () => { rows[0].props.onKeyDown(keyDown(" ")); });
+  let candidates = renderer.root.findAllByType("input").filter((input) => input.props.type === "checkbox");
+  assert.deepEqual(candidates.map((input) => input.props.checked), [true, false], "Space ignores an unfocused row");
+  await act(async () => { rows[1].props.onKeyDown(keyDown(" ")); });
+  candidates = renderer.root.findAllByType("input").filter((input) => input.props.type === "checkbox");
   assert.deepEqual(candidates.map((input) => input.props.checked), [true, true]);
   const editableTitle = renderer.root.findAllByType("input").find((input) => input.props.value === "DEMO title 2");
   assert.equal(editableTitle.props.onKeyDown, undefined, "text editing keeps native arrow-key behavior");
+
+  await act(async () => { rows[1].props.onKeyDown(keyDown("Enter")); });
+  assert.equal(renderer.root.findByProps({ "data-slicing-rationale": "1" }).props.open, true);
+
   await act(async () => { editableTitle.props.onChange({ target: { value: "" } }); });
   rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
   assert.match(rows[1].parent.props.className, /is-edited/, "edited state is distinct from selection");
   assert.match(rows[1].parent.props.className, /is-incomplete/, "blank required fields are visibly incomplete");
+  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, true);
+  assert.match(JSON.stringify(renderer.toJSON()), /Complete required text for 1 selected candidate before acceptance\./);
 
-  await act(async () => { rows[1].props.onKeyDown({ key: "Enter", preventDefault: () => {} }); });
-  assert.equal(renderer.root.findByProps({ "data-slicing-rationale": "1" }).props.open, true);
+  await act(async () => { editableTitle.props.onChange({ target: { value: "DEMO title 2" } }); });
+  const globalContract = renderer.root.findAllByType("textarea").find((field) => field.props.value === "DEMO global contract 999");
+  await act(async () => { globalContract.props.onChange({ target: { value: "" } }); });
+  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, true);
+  assert.match(JSON.stringify(renderer.toJSON()), /Complete the required global contract summary before acceptance\./);
+  await act(async () => { globalContract.props.onChange({ target: { value: "DEMO global contract 999" } }); });
+  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, undefined);
 
   await act(async () => { reviewButton(renderer.root, "Accept selected").props.onClick(); });
   assert.equal(posted.length, 0, "opening confirmation never mutates");
-  const confirmation = renderer.root.findByProps({ role: "dialog" });
+  let confirmation = renderer.root.findByProps({ role: "dialog" });
   assert.ok(confirmation, "confirmation opens before the acceptance mutation");
-  assert.match(JSON.stringify(renderer.toJSON()), /DEMO title 999|Candidate 2/);
+  let escapePrevented = false;
+  let escapeStopped = false;
+  await act(async () => {
+    confirmation.props.onKeyDown({
+      key: "Escape",
+      preventDefault: () => { escapePrevented = true; },
+      stopPropagation: () => { escapeStopped = true; },
+    });
+  });
+  assert.equal(escapePrevented, true);
+  assert.equal(escapeStopped, true);
+  assert.throws(() => renderer.root.findByProps({ role: "dialog" }), "Escape closes the confirmation overlay");
+
+  await act(async () => { reviewButton(renderer.root, "Accept selected").props.onClick(); });
+  confirmation = renderer.root.findByProps({ role: "dialog" });
+  assert.match(JSON.stringify(renderer.toJSON()), /DEMO title 999|DEMO title 2/);
   await act(async () => { reviewButton(renderer.root, "Accept and estimate").props.onClick(); });
   assert.deepEqual(posted, [{
     url: data.links.accept_href,
-    body: { accept_0: "1", accept_1: "1", title_1: "" },
+    body: {
+      accept_0: "1",
+      accept_1: "1",
+      title_1: "DEMO title 2",
+      global_contract_summary: "DEMO global contract 999",
+    },
   }]);
   await act(async () => { renderer.unmount(); });
 });
