@@ -273,6 +273,17 @@ code,
   max-width: none;
   padding: 24px 28px;
 }
+/* The review workbench owns its three scroll zones, so the shell must not add a
+   competing document scroll axis while the acceptance decision is open. */
+.shell:has(.task-breakdown-workbench) {
+  height: 100vh;
+  overflow: hidden;
+}
+.shell:has(.task-breakdown-workbench) .main {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
 
 /* At the accepted narrow desktop width, preserve every destination as a real
    labelled link while collapsing the rail into a compact, focusable control strip. */
@@ -2274,31 +2285,131 @@ textarea.board-input {
 .nested-evidence button,
 .live-notice button { cursor: pointer; background: var(--surface-raised); color: var(--fg-0); border: 1px solid var(--line-2); border-radius: 4px; padding: 7px 10px; }
 
-/* Task Breakdown Review: dense, editable parity without introducing a second design system. */
-.review-grid {
+/* Task Breakdown Review: a fixed decision surface with three independently
+   scrolling zones, so dense evidence never displaces the acceptance decision. */
+.task-breakdown-workbench {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr);
-  gap: 20px;
-  align-items: start;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
 }
+.review-workbench-header,
+.review-zone-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.review-workbench-header {
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-canvas);
+}
+.review-workbench-header .page-sub { margin-bottom: 0; }
+.task-breakdown-workbench > .notice { margin: 8px 22px; }
+.review-workbench-zones {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.65fr) minmax(360px, 1.45fr) minmax(260px, 0.8fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.review-zone {
+  min-width: 0;
+  min-height: 0;
+  padding: 14px 16px 20px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--surface-panel);
+}
+.review-zone:last-child { border-right: 0; }
+.review-navigator { background: var(--surface-sunken); }
+.review-context-rail { background: var(--surface-sunken); }
+.review-zone-header {
+  align-items: center;
+  min-height: 28px;
+  margin-bottom: 12px;
+  color: var(--text-tertiary);
+  font: 600 10px/1.3 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.review-zone-header h2,
+.review-zone-header p { margin: 0; }
+.review-zone-header h2 { color: var(--text-primary); font: 650 13px/1.35 var(--sans); letter-spacing: normal; text-transform: none; }
+.review-zone-header p { margin-top: 2px; color: var(--text-tertiary); font: 12px/1.4 var(--sans); }
+.candidate-nav-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.candidate-nav-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+.candidate-nav-item:hover { background: var(--surface-hover); }
+.candidate-nav-item.is-focused { border-color: var(--mint-edge); background: var(--surface-raised); }
+.candidate-nav-item.is-selected { border-left: 3px solid var(--mint); }
+.candidate-nav-item.is-edited { box-shadow: inset 0 -2px var(--warn); }
+.candidate-nav-item.is-incomplete { border-color: var(--warn); }
+.candidate-nav-item.is-disabled { border-style: dashed; background: color-mix(in srgb, var(--surface-raised) 65%, var(--surface-sunken)); }
+.candidate-nav-item.is-disabled .candidate-state { color: var(--warn); }
+.candidate-focus-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: 12px/1.4 var(--sans);
+  text-align: left;
+}
+.candidate-number { color: var(--text-tertiary); font: 600 10px/1.3 var(--mono); letter-spacing: 0.08em; }
+.candidate-nav-title { min-width: 0; overflow-wrap: anywhere; }
+.candidate-state {
+  grid-column: 2;
+  color: var(--text-tertiary);
+  font: 10px/1.3 var(--mono);
+  overflow-wrap: anywhere;
+}
+.candidate-select {
+  align-self: start;
+  color: var(--text-secondary);
+  font: 11px/1.4 var(--sans);
+  white-space: nowrap;
+}
+.candidate-select input { accent-color: var(--mint); }
 .review-stack,
 .review-field {
   display: grid;
   gap: 8px;
 }
 .review-stack { gap: 14px; }
+.review-editor .workbench-fieldset,
+.review-context-rail .workbench-fieldset { margin-bottom: 16px; }
+.review-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
 .review-candidate {
   min-width: 0;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg-2);
-}
-.review-field-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 12px 0;
 }
 .review-candidate label,
 .review-stack > label,
@@ -2313,6 +2424,8 @@ textarea.board-input {
 .review-candidate select,
 .review-stack input,
 .review-stack textarea,
+.review-field input,
+.review-field textarea,
 .review-field-row select {
   width: 100%;
   margin-top: 5px;
@@ -2324,18 +2437,22 @@ textarea.board-input {
   font: 13px/1.45 var(--sans);
 }
 .review-candidate textarea,
-.review-stack textarea { resize: vertical; }
+.review-stack textarea,
+.review-field textarea { resize: vertical; }
 .review-candidate input:disabled,
 .review-candidate textarea:disabled,
-.review-stack textarea:disabled { color: var(--fg-2); cursor: not-allowed; }
+.review-stack textarea:disabled,
+.review-field input:disabled,
+.review-field textarea:disabled { color: var(--fg-2); cursor: not-allowed; }
 .review-dirty {
   color: var(--warn);
   font: 12px var(--mono);
 }
+.review-confirmation-list { margin: 0; padding-left: 20px; color: var(--text-secondary); }
+.review-confirmation-list li { margin: 0 0 6px; overflow-wrap: anywhere; }
 .review-evidence { min-width: 0; }
 .review-evidence h4 { margin-bottom: 6px; }
 .review-evidence li { overflow-wrap: anywhere; margin-bottom: 6px; }
-.review-actions { position: sticky; bottom: 0; padding: 12px; background: color-mix(in srgb, var(--bg-0) 92%, transparent); border-top: 1px solid var(--line); }
 .pill.proposed { color: var(--warn); border-color: #8a6d2a; }
 .pill.failed { color: var(--danger); border-color: #8a2a2a; }
 .pill.accepted { color: var(--accent); border-color: var(--accent-dim); }
@@ -2500,7 +2617,14 @@ textarea.board-input {
 }
 
 @media (max-width: 1100px) {
-  .review-grid { grid-template-columns: 1fr; }
+  .review-workbench-zones { grid-template-columns: minmax(190px, 0.6fr) minmax(0, 1.4fr) minmax(220px, 0.7fr); }
+}
+@media (max-width: 780px) {
+  .shell:has(.task-breakdown-workbench) { height: auto; overflow: visible; }
+  .shell:has(.task-breakdown-workbench) .main { overflow: visible; }
+  .task-breakdown-workbench { height: auto; }
+  .review-workbench-zones { grid-template-columns: 1fr; overflow: visible; }
+  .review-zone { max-height: none; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
 }
 @media (max-width: 650px) {
   .review-field-row { grid-template-columns: 1fr; }

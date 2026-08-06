@@ -28,7 +28,7 @@ export const ConfirmSheet = forwardRef(function ConfirmSheet({
   useImperativeHandle(forwardedRef, () => dialogRef.current);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || typeof document === "undefined") return undefined;
     const dialog = dialogRef.current;
     const opener = document.activeElement;
     if (!dialog) return undefined;
