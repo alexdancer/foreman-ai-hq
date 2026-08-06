@@ -1,6 +1,6 @@
 # Future TODO
 
-Parking lot for ideas I actually want to revisit. This is not a roadmap or a promise; promote an item to the active specification and GitHub Issues workflow or GitHub Issues when it is ready to build.
+Parking lot for ideas I actually want to revisit. This is not a roadmap or a promise; promote an item to a GitHub Issue when it is ready to build.
 
 ## Build next
 
