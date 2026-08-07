@@ -1464,6 +1464,9 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   const pipeline = JSON.stringify(renderer.toJSON());
   for (const text of [
     "Next required action",
+    "Review proposed Task Breakdown",
+    "Proposed Task Breakdown awaits review.",
+    "Review breakdown",
     "Pipeline stages",
     "Project task ledger",
     "Evidence and provenance",
@@ -1472,6 +1475,7 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     "Review DEMO task",
     "Done DEMO task",
     "Current launch tracking",
+    "Run tracking · Authoritative Session Report",
     "Needs operator disposition",
     "Last launch failed · retryable",
     "Launch options",
@@ -1479,13 +1483,19 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     "Approve budget override",
     "Acknowledge native usage overrun risk",
   ]) assert.match(pipeline, new RegExp(text));
+  assert.doesNotMatch(pipeline, /Running work|2 slices need refresh/);
+  assert.equal((pipeline.match(/View evidence/g) || []).length, 4);
+  for (const status of ["estimated", "running", "review", "done"]) {
+    assert.match(pipeline, new RegExp(`"id":"task-task-${status}-999"`));
+  }
   assert.match(pipeline, /"aria-expanded":false/);
   assert.match(pipeline, /"hidden":true/);
   assert.match(pipeline, /"data-pipeline-stage":"intake"/);
   assert.match(pipeline, /"data-pipeline-stage":"review"/);
   assert.match(pipeline, /"data-pipeline-stage":"acceptance"/);
   assert.doesNotMatch(pipeline, /"data-pipeline-stage":"done"/);
-  assert.doesNotMatch(pipeline, /Planning Inbox|Review proposed Task Breakdown|DEMO_INTAKE_2099_999\.md/);
+  assert.equal((pipeline.match(/Review proposed Task Breakdown/g) || []).length, 1);
+  assert.doesNotMatch(pipeline, /Planning Inbox|DEMO_INTAKE_2099_999\.md/);
 
   const stage = (id) => renderer.root.findByProps({ "data-pipeline-stage": id });
   const attentionStage = (id) => renderer.root.findAllByType("a").find((link) => link.props["data-pipeline-stage"] === id);
@@ -1508,7 +1518,11 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
 
   const launchOptions = renderer.root.findAllByType("button").find((button) => button.props.children === "Launch options");
   await act(async () => { launchOptions.props.onClick(); });
-  assert.equal(renderer.root.findByProps({ role: "dialog" }).props.hidden, false);
+  const launchDialog = renderer.root.findByProps({ role: "dialog" });
+  assert.equal(launchDialog.props.popover, "auto");
+  assert.equal(launchDialog.props["aria-hidden"], false);
+  await act(async () => { launchDialog.props.onKeyDown({ key: "Escape", preventDefault() {} }); });
+  assert.equal(launchOptions.props["aria-expanded"], false);
   await act(async () => { renderer.unmount(); });
 
   const emptyData = boardData();

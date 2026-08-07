@@ -476,6 +476,7 @@ function PipelineSurface({
       <NextRequiredAction
         projectId={projectId}
         workspace={data.workspace}
+        needsYou={data.needs_you}
         cards={cards}
         onOpenPlanning={() => onPlanningExpandedChange(true)}
       />
@@ -549,7 +550,19 @@ function PipelineSurface({
   </div>;
 }
 
-function NextRequiredAction({ projectId, workspace, cards, onOpenPlanning }) {
+function NextRequiredAction({ projectId, workspace, needsYou, cards, onOpenPlanning }) {
+  const needsYouAction = needsYou?.items?.[0];
+  if (needsYouAction) {
+    const actionHref = needsYouAction.href || `/projects/${projectId}/needs-you`;
+    return <Panel className="next-required-action">
+      <PanelBody>
+        <StatusPill tone="warning" label="Next required action" />
+        <h2>{needsYouAction.title}</h2>
+        <p>{needsYouAction.reason}</p>
+        <Button as={AppLink} to={actionHref}>{needsYouAction.action_label || "Open Needs You"}</Button>
+      </PanelBody>
+    </Panel>;
+  }
   const attentionAction = workspace?.summary?.attention_actions?.[0];
   const attentionHref = attentionAction?.href === `/projects/${projectId}/board`
     ? `/projects/${projectId}`
@@ -621,9 +634,13 @@ function taskText(value) {
 
 function TaskLedgerRow({ task, status, projectId, adapters = [], action, openEvidence }) {
   const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
-  const trackingLabel = defaultAdapter?.tracking?.label || "Worker tracking unavailable";
+  const trackingLabel = status === "Estimated"
+    ? `Current launch tracking · ${defaultAdapter?.tracking?.label || "Worker tracking unavailable"}`
+    : task.session_href
+      ? "Run tracking · Authoritative Session Report"
+      : "Run tracking · No Worker session recorded";
   const intakeReason = taskText(task.intake_decision_reason);
-  return <Row className="pipeline-ledger-row" data-task-status={status}>
+  return <Row id={`task-${task.id}`} className="pipeline-ledger-row" data-task-status={status}>
     <DataCell><StatusPill tone={taskStatusTone(status)} label={status} /></DataCell>
     <DataCell>
       <span className="task-id">{task.id}</span>
@@ -633,7 +650,7 @@ function TaskLedgerRow({ task, status, projectId, adapters = [], action, openEvi
     <DataCell><TokenComparison estimate={task.estimate_tokens} actual={task.actual_tokens} /></DataCell>
     <DataCell>
       <div className="ledger-evidence">
-        <span>Current launch tracking · {trackingLabel}</span>
+        <span>{trackingLabel}</span>
         {task.intake_decision && <span>Intake · {task.intake_decision}{intakeReason ? ` — ${intakeReason}` : ""}</span>}
         {task.launch_model && <span>Run model · {task.launch_model}</span>}
         {task.task_branch && <span>{task.task_branch}</span>}
@@ -660,7 +677,7 @@ function TaskLedgerActions({ task, projectId, adapters, action, openEvidence }) 
     {controls.can_refresh && <Button size="small" type="button" onClick={() => action(`/tasks/${task.id}/refresh`, reviewForm(projectId))}>Refresh</Button>}
     {controls.can_archive && <Button size="small" variant="secondary" type="button" onClick={() => action(`/projects/${projectId}/tasks/${task.id}/archive`)}>Archive</Button>}
     {controls.can_dismiss && <Button size="small" variant="secondary" type="button" onClick={() => action(`/projects/${projectId}/tasks/${task.id}/archive`)}>Dismiss</Button>}
-    {task.session_href && <Button size="small" variant="secondary" type="button" onClick={() => openEvidence(task)}>View evidence</Button>}
+    <Button size="small" variant="secondary" type="button" onClick={() => openEvidence(task)}>View evidence</Button>
   </div>;
 }
 
@@ -679,23 +696,63 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
   const [manualEstimate, setManualEstimate] = useState("");
   const popoverId = React.useId();
   const triggerId = `${popoverId}-trigger`;
+  const rootRef = React.useRef(null);
+  const popoverRef = React.useRef(null);
   const launchGuardrails = Boolean(
     controls.requires_manual_estimate ||
     controls.budget_override_available ||
     controls.native_usage_override_ack_required,
   );
 
+  const focusFirstControl = () => {
+    const firstControl = popoverRef.current?.querySelector("button, input, select, textarea, a[href]");
+    firstControl?.focus();
+  };
+
+  const afterPaint = (callback) => {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(callback);
+    } else {
+      callback();
+    }
+  };
+
+  const closePopover = (restoreFocus = false) => {
+    const panel = popoverRef.current;
+    if (typeof panel?.hidePopover === "function" && panel.matches(":popover-open")) panel.hidePopover();
+    setOpen(false);
+    if (restoreFocus) afterPaint(() => {
+      if (typeof document !== "undefined") document.getElementById(triggerId)?.focus();
+    });
+  };
+
+  const togglePopover = () => {
+    if (open) {
+      closePopover(true);
+      return;
+    }
+    const panel = popoverRef.current;
+    if (typeof panel?.showPopover === "function") panel.showPopover();
+    setOpen(true);
+    afterPaint(focusFirstControl);
+  };
+
   useEffect(() => {
-    if (!open || typeof document === "undefined") return undefined;
-    const onKeyDown = (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
-      document.getElementById(triggerId)?.focus();
+    const panel = popoverRef.current;
+    if (!panel) return undefined;
+    const onToggle = (event) => setOpen(event.newState === "open");
+    panel.addEventListener("toggle", onToggle);
+    return () => panel.removeEventListener("toggle", onToggle);
+  }, []);
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined" || typeof popoverRef.current?.showPopover === "function") return undefined;
+    const onPointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) closePopover(false);
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, triggerId]);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
 
   const launch = () => {
     const form = new FormData();
@@ -708,7 +765,27 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
     action(`/tasks/${task.id}/launch`, form);
   };
 
-  return <div className="launch-popover">
+  const onPopoverKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePopover(true);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = [...popoverRef.current.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]")];
+    if (!controls.length) return;
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return <div ref={rootRef} className="launch-popover">
     <Button
       id={triggerId}
       size="small"
@@ -717,16 +794,20 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-controls={popoverId}
-      onClick={() => setOpen((current) => !current)}
+      onClick={togglePopover}
     >
       Launch options
     </Button>
     <div
+      ref={popoverRef}
       id={popoverId}
       className="launch-popover-panel"
+      popover="auto"
       role="dialog"
       aria-label={`Launch controls for ${taskDisplayName(task)}`}
-      hidden={!open}
+      aria-hidden={!open}
+      data-open={open}
+      onKeyDown={onPopoverKeyDown}
     >
       <label>Worker Adapter<select className="board-input" aria-describedby={selectedAdapter?.tracking?.label ? `adapter-tracking-${task.id}` : undefined} value={adapterId} onChange={(event) => {
         const nextId = event.target.value;
@@ -909,42 +990,10 @@ function QueueStart({ projectId, queue, action }) {
   </form>;
 }
 
-function TaskCard({ task, projectId, adapters = [], action, openEvidence = () => {}, recentlyFinished = false, actionVariant = "secondary" }) {
+function TaskCard({ task, projectId, action, openEvidence = () => {}, recentlyFinished = false, actionVariant = "secondary" }) {
   const { controls } = task;
   const fullSummary = task.summary.text || task.id;
   const displayName = taskDisplayName(task);
-  const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
-  const [adapterId, setAdapterId] = useState(defaultAdapter?.id || "");
-  const selectedAdapter = adapters.find((adapter) => adapter.id === adapterId) || defaultAdapter;
-  const initialModel = selectedAdapter?.allowed_models.includes(task.recommended_model)
-    ? task.recommended_model
-    : selectedAdapter?.allowed_models[0] || "";
-  const [model, setModel] = useState(initialModel);
-  const [budgetOverride, setBudgetOverride] = useState(false);
-  const [nativeAcknowledged, setNativeAcknowledged] = useState(false);
-  const [manualEstimate, setManualEstimate] = useState("");
-  // The routine launch is just adapter + model + Launch; guardrail fields only
-  // surface when a control actually demands one, grouped in an auto-opened
-  // disclosure so the exception path never crowds the common path.
-  const launchGuardrails = Boolean(
-    controls.requires_manual_estimate ||
-    controls.budget_override_available ||
-    controls.native_usage_override_ack_required,
-  );
-
-
-  const launch = () => {
-    const form = new FormData();
-    form.set("project_id", projectId);
-    if (adapterId) form.set("adapter_id", adapterId);
-    if (model) form.set("model", model);
-    if (budgetOverride) form.set("budget_override", "on");
-    if (nativeAcknowledged) form.set("native_budget_acknowledged", "on");
-    if (controls.requires_manual_estimate && Number(manualEstimate) > 0) {
-      form.set("estimate_tokens", manualEstimate);
-    }
-    action(`/tasks/${task.id}/launch`, form);
-  };
   return <article className="task" id={`task-${task.id}`}>
     {recentlyFinished && <TokenComparison className="finished-token-comparison" estimate={task.estimate_tokens} actual={task.actual_tokens} />}
     <header className="task-heading">
@@ -958,35 +1007,6 @@ function TaskCard({ task, projectId, adapters = [], action, openEvidence = () =>
     {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
     {task.status === "Running" && <LatestEventLine timeline={task.timeline} />}
     <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}{task.intake_decision && <span title={task.intake_decision_reason || ""}>Intake: {task.intake_decision}</span>}</div>
-    {controls.can_launch && <div className="card-controls">
-      <label>Worker Adapter<select className="board-input" aria-describedby={selectedAdapter?.tracking?.label ? `adapter-tracking-${task.id}` : undefined} value={adapterId} onChange={(event) => {
-        const nextId = event.target.value;
-        const nextAdapter = adapters.find((adapter) => adapter.id === nextId);
-        setAdapterId(nextId);
-        setModel(nextAdapter?.allowed_models.includes(task.recommended_model) ? task.recommended_model : nextAdapter?.allowed_models[0] || "");
-      }}>{adapters.map((adapter) => <option key={adapter.id} value={adapter.id}>{adapter.name}{adapter.is_default ? " · Default" : ""}</option>)}</select>{selectedAdapter?.tracking?.label && <small className="card-hint" id={`adapter-tracking-${task.id}`}>Spend tracking · {selectedAdapter.tracking.label}</small>}</label>
-      <label>Worker model<select className="board-input" value={model} onChange={(event) => setModel(event.target.value)}>{(selectedAdapter?.allowed_models || []).map((modelId) => <option key={modelId} value={modelId}>{modelId}</option>)}</select></label>
-      {launchGuardrails && <details className="card-guardrails" open>
-        <summary>Launch guardrails</summary>
-        <div className="card-guardrails-fields">
-          {controls.requires_manual_estimate && <label>Manual token estimate<input className="board-input" type="number" min="1" step="1" aria-describedby={`manual-estimate-${task.id}`} value={manualEstimate} onChange={(event) => setManualEstimate(event.target.value)} required /><small className="card-hint" id={`manual-estimate-${task.id}`}>No automatic estimate is available. Enter the token budget to reserve for this run.</small></label>}
-          {controls.budget_override_available && <>
-            <label className="check-row"><input type="checkbox" aria-describedby={`budget-override-${task.id}`} checked={budgetOverride} onChange={(event) => setBudgetOverride(event.target.checked)} /> Approve budget override</label>
-            <small className="card-hint" id={`budget-override-${task.id}`}>This estimate is over your remaining budget. Approving launches it anyway and records an audited budget override.</small>
-          </>}
-          {controls.native_usage_override_ack_required && <>
-            <label className="check-row"><input type="checkbox" aria-describedby={`native-ack-${task.id}`} checked={nativeAcknowledged} onChange={(event) => setNativeAcknowledged(event.target.checked)} /> {controls.native_usage_override_ack_text}</label>
-            <small className="card-hint" id={`native-ack-${task.id}`}>Native usage can't be throttled mid-run — it may reconcile as an overrun after the run finishes.</small>
-          </>}
-        </div>
-      </details>}
-      <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)} disabledReason="Enter a positive manual token estimate before launch.">Launch</Button>
-      {controls.setup_href && (!selectedAdapter?.launchable || !controls.setup_href.startsWith("/settings/workers")) && (
-        <a href={controls.setup_href}>
-          {controls.setup_href.startsWith("/settings/workers") ? "Open Worker Setup" : "Open project settings"}
-        </a>
-      )}
-    </div>}
     {(controls.can_refresh || controls.can_archive || controls.can_dismiss || task.session_href) && <div className="task-actions">
       {controls.can_refresh && <Button size="small" type="button" onClick={() => action(`/tasks/${task.id}/refresh`, reviewForm(projectId))}>Refresh</Button>}
       {controls.can_archive && <Button size="small" variant={actionVariant} onClick={() => action(`/projects/${projectId}/tasks/${task.id}/archive`)}>Archive</Button>}
