@@ -1,10 +1,11 @@
 // Thin JSON client for the FastAPI handoff endpoints. FastAPI stays
 // authoritative for auth, guardrails, launch, budget, and review disposition;
 // this only reads presentation state and never re-implements those rules.
-export async function getJSON(url) {
+export async function getJSON(url, { signal } = {}) {
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
     credentials: "same-origin",
+    signal,
   });
   if (!res.ok) {
     let detail = "";

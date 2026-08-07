@@ -134,12 +134,9 @@ export function mergeBoardLiveEvents(current, sessionId, events) {
 function provenanceFromReport(report) {
   const adapterId = report?.summary?.adapter_id || null;
   const trackingMode = report?.summary?.tracking_mode || null;
-  const missingLabels = report?.summary?.missing_labels || [];
   const retryable = Boolean(
-    report?.freshness?.active
-    || String(adapterId || "").startsWith("missing ")
+    String(adapterId || "").startsWith("missing ")
     || String(trackingMode || "").startsWith("missing ")
-    || missingLabels.some((label) => label !== "no review blockers recorded"),
   );
   return {
     adapterId: String(adapterId || "").startsWith("missing ") ? null : adapterId,
@@ -165,7 +162,7 @@ export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSO
       const [sessionHref, task] = pending[cursor];
       cursor += 1;
       try {
-        const report = await loadEvidenceDrawer(task, getJSONImpl);
+        const report = await loadEvidenceDrawer(task, getJSONImpl, signal);
         if (signal?.aborted) return;
         provenance[sessionHref] = provenanceFromReport(report);
       } catch {
@@ -235,15 +232,24 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
         onStateChanged();
         return;
       }
-      const [board, needsYou] = await Promise.all([
+      const [board, needsYou, workerSettings] = await Promise.all([
         getJSON(`/api/projects/${projectId}/board`),
         // The stage rail counts attention from Needs You without rendering its
         // items here, so a pending breakdown still has one decision surface.
         surface === "pipeline"
           ? getJSON(`/api/projects/${projectId}/needs-you`)
           : Promise.resolve(null),
+        surface === "pipeline"
+          ? getJSON("/api/settings/workers")
+          : Promise.resolve(null),
       ]);
-      setState({ data: { ...board, workspace, needs_you: needsYou }, error: null, loading: false });
+      const trackingModeOptions = (workerSettings?.adapters || [])
+        .flatMap((adapter) => adapter.tracking_mode_options || []);
+      setState({
+        data: { ...board, workspace, needs_you: needsYou, tracking_mode_options: trackingModeOptions },
+        error: null,
+        loading: false,
+      });
       onStateChanged();
     } catch (error) {
       setState({ data: null, error, loading: false });
@@ -617,6 +623,7 @@ function PipelineSurface({
               status={status}
               projectId={projectId}
               adapters={data.adapters}
+              trackingModeOptions={data.tracking_mode_options}
               runProvenance={runProvenance}
               action={action}
               openEvidence={openEvidence}
@@ -730,7 +737,7 @@ function taskText(value) {
   return typeof value === "string" ? value : value?.text || "";
 }
 
-function trackingProvenanceLabel(task, status, adapters, runProvenance) {
+function trackingProvenanceLabel(task, status, adapters, trackingModeOptions, runProvenance) {
   const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
   if (task.session_href) {
     const provenance = runProvenance[task.session_href];
@@ -738,11 +745,9 @@ function trackingProvenanceLabel(task, status, adapters, runProvenance) {
     if (provenance.retryable && !provenance.adapterId && !provenance.trackingMode) {
       return "Session Report provenance temporarily unavailable";
     }
-    const accounting = adapters.find((adapter) => (
-      adapter.id === provenance.adapterId && adapter.tracking?.mode === provenance.trackingMode
-    ))?.tracking?.accounting || adapters.find((adapter) => (
-      adapter.tracking?.mode === provenance.trackingMode
-    ))?.tracking?.accounting;
+    const accounting = trackingModeOptions.find((option) => (
+      option.mode === provenance.trackingMode
+    ))?.accounting;
     return [
       provenance.adapterId,
       provenance.trackingMode || "tracking mode unavailable",
@@ -754,8 +759,8 @@ function trackingProvenanceLabel(task, status, adapters, runProvenance) {
   return "No Worker session recorded; run provenance unavailable";
 }
 
-function TaskLedgerRow({ task, status, projectId, adapters = [], runProvenance = {}, action, openEvidence }) {
-  const trackingProvenance = trackingProvenanceLabel(task, status, adapters, runProvenance);
+function TaskLedgerRow({ task, status, projectId, adapters = [], trackingModeOptions = [], runProvenance = {}, action, openEvidence }) {
+  const trackingProvenance = trackingProvenanceLabel(task, status, adapters, trackingModeOptions, runProvenance);
   const intakeReason = taskText(task.intake_decision_reason);
   return <Row id={`task-${task.id}`} className="pipeline-ledger-row" data-task-status={status}>
     <DataCell><StatusPill tone={taskStatusTone(status)} label={status} /></DataCell>
@@ -1201,9 +1206,9 @@ function LatestEventLine({ timeline }) {
   );
 }
 
-export async function loadEvidenceDrawer(task, getJSONImpl = getJSON) {
+export async function loadEvidenceDrawer(task, getJSONImpl = getJSON, signal = null) {
   if (!task?.session_href || !/^\/sessions\/[^/]+$/.test(task.session_href)) return null;
-  return getJSONImpl(`/api${task.session_href}/report`);
+  return getJSONImpl(`/api${task.session_href}/report`, { signal });
 }
 
 export function EvidenceDrawer({ task, projectId, action, onClose, getJSONImpl = getJSON }) {

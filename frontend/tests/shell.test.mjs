@@ -491,6 +491,16 @@ function boardData() {
         accounting: "Not budget-authoritative",
       },
     }],
+    tracking_mode_options: [{
+      mode: "native_usage",
+      accounting: "Budget-authoritative after run",
+    }, {
+      mode: "proxy_governed",
+      accounting: "Budget-authoritative during run",
+    }, {
+      mode: "observed_only",
+      accounting: "Not budget-authoritative",
+    }],
     tasks_by_status: {
       Estimated: [card("Estimated", {
         can_launch: true,
@@ -1655,15 +1665,29 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   assert.deepEqual(activeProvenance["/sessions/session-demo-999"], {
     adapterId: "opencode",
     trackingMode: "native_usage",
-    retryable: true,
+    retryable: false,
   });
   let activeRetry = 0;
-  const settledProvenance = await loadBoardRunProvenance(activeTasks, async () => {
+  const cachedActiveProvenance = await loadBoardRunProvenance(activeTasks, async () => {
     activeRetry += 1;
     return completedReportData();
   }, activeProvenance);
-  assert.equal(activeRetry, 1);
-  assert.equal(settledProvenance["/sessions/session-demo-999"].retryable, false);
+  assert.equal(activeRetry, 0);
+  assert.deepEqual(cachedActiveProvenance, activeProvenance);
+
+  const retryableLaunchReport = completedReportData();
+  retryableLaunchReport.summary.missing_labels = ["missing authoritative token usage"];
+  const retryableLaunchProvenance = await loadBoardRunProvenance(
+    activeTasks,
+    async () => retryableLaunchReport,
+  );
+  assert.equal(retryableLaunchProvenance["/sessions/session-demo-999"].retryable, false);
+  const cachedRetryableLaunch = await loadBoardRunProvenance(
+    activeTasks,
+    async () => { throw new Error("final launch provenance must remain cached"); },
+    retryableLaunchProvenance,
+  );
+  assert.deepEqual(cachedRetryableLaunch, retryableLaunchProvenance);
 
   const missingReport = completedReportData();
   missingReport.summary.adapter_id = "missing Worker Adapter evidence";
@@ -1677,20 +1701,32 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   });
 
   const cancellation = new AbortController();
-  const releases = [];
   let canceledReportLoads = 0;
-  const canceledLoad = loadBoardRunProvenance(boundedTasks, async () => {
+  const canceledLoad = loadBoardRunProvenance(boundedTasks, async (_url, options) => {
     canceledReportLoads += 1;
-    await new Promise((resolve) => { releases.push(resolve); });
-    return completedReportData();
+    assert.equal(options.signal, cancellation.signal);
+    await new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
   }, {}, cancellation.signal);
   while (canceledReportLoads < 3) await new Promise((resolve) => setImmediate(resolve));
   cancellation.abort();
-  releases.forEach((release) => release());
   await canceledLoad;
   assert.equal(canceledReportLoads, 3);
 
   const retryableData = boardData();
+  retryableData.adapters = retryableData.adapters.map((adapter) => (
+    adapter.id === "codex"
+      ? {
+          ...adapter,
+          tracking: {
+            mode: "proxy_governed",
+            label: "API / Proxy: Governed through Harness Proxy",
+            accounting: "Budget-authoritative during run",
+          },
+        }
+      : adapter
+  ));
   retryableData.tasks_by_status.Estimated[0].session_href = "/sessions/failed-demo-999";
   retryableData.tasks_by_status.Estimated[0].launch_failure = data.tasks_by_status.Estimated[0].launch_failure;
   const retryable = renderToStaticMarkup(React.createElement(BoardState, {
