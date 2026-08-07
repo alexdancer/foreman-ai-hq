@@ -42,7 +42,7 @@ redirects to their canonical URLs:
 - `/app/projects/<project_id>/floor` → `/projects/<project_id>/floor`
 
 Canonical React routes include `/dashboard`, `/projects`, `/projects/<project_id>`,
-`/projects/<project_id>/floor`, `/sessions`, `/sessions/<session_id>`,
+`/projects/<project_id>/needs-you`, `/projects/<project_id>/floor`, `/sessions`, `/sessions/<session_id>`,
 `/projects/<project_id>/task-history`, `/alarms`, `/setup`, `/task-breakdowns/<id>/review`,
 and `/settings/*`. The legacy `/projects/<project_id>/board` route redirects to the
 project Pipeline at `/projects/<project_id>`.

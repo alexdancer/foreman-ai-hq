@@ -691,6 +691,9 @@ test("Needs You direct loads use the existing project projection without board d
     if (url === "/api/alarms?filter=open") {
       return { ok: true, json: async () => ({ filters: [], alarms: [] }) };
     }
+    if (url === "/api/projects/demo-999/workspace") {
+      return { ok: true, json: async () => workspaceData() };
+    }
     if (url === "/api/projects/demo-999/needs-you") {
       return { ok: true, json: async () => ({
         project_id: "demo-999",
@@ -706,8 +709,8 @@ test("Needs You direct loads use the existing project projection without board d
   const markup = JSON.stringify(renderer.toJSON());
   assert.match(markup, /Task breakdown awaits review/);
   assert.ok(requested.includes("/api/projects/demo-999/needs-you"));
+  assert.ok(requested.includes("/api/projects/demo-999/workspace"));
   assert.ok(!requested.includes("/api/projects/demo-999/board"));
-  assert.ok(!requested.includes("/api/projects/demo-999/workspace"));
   await act(async () => { renderer.unmount(); });
 });
 
@@ -1422,6 +1425,13 @@ test("archived Pipeline is restore-first and does not expose active workflow con
   assert.match(markup, /Restore project/);
   assert.match(markup, /Archived project/);
   assert.doesNotMatch(markup, /Planning Chat|Active Worker Runs|Execution Floor<\/a>/);
+
+  const needsYouMarkup = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999", surface: "needsYou", data, error: null, loading: false, action: () => {},
+  }));
+  assert.match(needsYouMarkup, /Restore project/);
+  assert.match(needsYouMarkup, /Archived project/);
+  assert.doesNotMatch(needsYouMarkup, /Needs You|Enter manual estimate/);
 });
 
 test("Pipeline renders project readiness, Planning Chat, and Estimated work only", () => {
@@ -1525,12 +1535,15 @@ test("Needs You is a projection-backed route with inline manual estimates", asyn
       data,
       error: null,
       loading: false,
+      notice: { message: "Estimate revision changed.", setupHref: null },
       action: (url, body) => actions.push([url, body]),
     }));
   });
   const markup = JSON.stringify(tree.toJSON());
   assert.match(markup, /Needs You/);
   assert.match(markup, /Enter manual estimate/);
+  assert.match(markup, /Estimate revision changed/);
+  assert.match(markup, /"role":"alert"/);
   assert.doesNotMatch(markup, /Planning Inbox|Filter loaded tasks|Estimated DEMO task/);
 
   const input = tree.root.findByProps({ placeholder: "tokens" });

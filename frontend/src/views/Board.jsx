@@ -149,17 +149,17 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   const load = async () => {
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
+      const workspace = await getJSON(`/api/projects/${projectId}/workspace`);
+      if (workspace.project.archived_at) {
+        setState({ data: { project: workspace.project, workspace }, error: null, loading: false });
+        onStateChanged();
+        return;
+      }
       if (surface === "needsYou") {
         // Needs You owns only its existing project projection; it must not pull
         // board state merely to render a decision queue.
         const needsYou = await getJSON(`/api/projects/${projectId}/needs-you`);
-        setState({ data: { project: { id: projectId }, needs_you: needsYou }, error: null, loading: false });
-        onStateChanged();
-        return;
-      }
-      const workspace = await getJSON(`/api/projects/${projectId}/workspace`);
-      if (workspace.project.archived_at) {
-        setState({ data: { project: workspace.project, workspace }, error: null, loading: false });
+        setState({ data: { project: workspace.project, workspace, needs_you: needsYou }, error: null, loading: false });
         onStateChanged();
         return;
       }
@@ -315,9 +315,6 @@ export function BoardState({
     {error?.status !== 401 && <div className="notice-actions"><Button size="small" variant="secondary" type="button" onClick={onRetry}>Retry</Button></div>}
   </Notice>;
   if (!data) return <EmptyState>No project orchestration state available.</EmptyState>;
-  if (surface === "needsYou") {
-    return <NeedsYouSurface data={data.needs_you} action={action} />;
-  }
   const workspace = data.workspace || {
     project: data.project,
     summary: { launch_ready: data.board_summary?.launch_ready },
@@ -326,8 +323,11 @@ export function BoardState({
   };
   if (workspace.project?.archived_at) return <>
     <ProjectHeader projectId={projectId} workspace={workspace} action={action} />
-    <Notice variant="warning">Archived project. Restore it before resuming Pipeline work.</Notice>
+    <Notice variant="warning">Archived project. Restore it before resuming active project work.</Notice>
   </>;
+  if (surface === "needsYou") {
+    return <NeedsYouSurface data={data.needs_you} notice={notice} action={action} />;
+  }
 
   const tasksByStatus = data.tasks_by_status || Object.fromEntries(COLUMNS.map((column) => [column, []]));
   const cards = Object.values(tasksByStatus).flat();
@@ -499,11 +499,12 @@ export function PlanningPane({
   </section>;
 }
 
-function NeedsYouSurface({ data, action }) {
+function NeedsYouSurface({ data, notice, action }) {
   const needsYou = data || { count: 0, items: [] };
   return <>
     <h1 className="page-title">Needs You</h1>
     <p className="page-sub">Project decisions that require an operator.</p>
+    {notice && <Notice variant="danger" role="alert">{notice.message}{notice.setupHref && <> · <a href={notice.setupHref}>Open setup</a></>}</Notice>}
     <NeedsYou items={needsYou.items} count={needsYou.count} action={action} />
   </>;
 }
