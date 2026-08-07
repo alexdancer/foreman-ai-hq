@@ -9,7 +9,7 @@ import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveE
 import { BlockedCondition } from "../components/BlockedCondition.jsx";
 import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
 import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison } from "../components/ui/index.js";
+import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison, DataTable, Row, ColumnHead, DataCell } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -163,8 +163,15 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
         onStateChanged();
         return;
       }
-      const board = await getJSON(`/api/projects/${projectId}/board`);
-      setState({ data: { ...board, workspace }, error: null, loading: false });
+      const [board, needsYou] = await Promise.all([
+        getJSON(`/api/projects/${projectId}/board`),
+        // The stage rail counts attention from Needs You without rendering its
+        // items here, so a pending breakdown still has one decision surface.
+        surface === "pipeline"
+          ? getJSON(`/api/projects/${projectId}/needs-you`)
+          : Promise.resolve(null),
+      ]);
+      setState({ data: { ...board, workspace, needs_you: needsYou }, error: null, loading: false });
       onStateChanged();
     } catch (error) {
       setState({ data: null, error, loading: false });
@@ -279,7 +286,9 @@ export function BoardState({
   investigateTaskId = null,
 }) {
   const [planningExpanded, setPlanningExpanded] = useState(() => ({
-    pipeline: !(typeof window !== "undefined" && window.matchMedia?.("(max-width: 760px)").matches),
+    // Pipeline is the project ledger; planning remains available but never
+    // competes with its next action or reads like a second launch surface.
+    pipeline: false,
     floor: false,
   }));
   useEffect(() => {
@@ -418,6 +427,28 @@ function ProjectHeader({ projectId, workspace, action }) {
   </Panel>;
 }
 
+export const PIPELINE_STAGE_MAP = Object.freeze([
+  { id: "intake", label: "Intake", attention: "intake" },
+  { id: "review", label: "Review", attention: "review" },
+  { id: "estimated", label: "Estimated", bucket: "Estimated" },
+  { id: "running", label: "Running", bucket: "Running" },
+  { id: "acceptance", label: "Acceptance", bucket: "Review" },
+]);
+
+export function pipelineStageCounts(tasksByStatus, needsYou) {
+  const counts = Object.fromEntries(COLUMNS.map((status) => [status, (tasksByStatus[status] || []).length]));
+  const attentionItems = needsYou?.items || [];
+  // Attention stays in its canonical projection; only its count belongs on the rail.
+  const intake = attentionItems.filter((item) => item.kind === "breakdown_review").length;
+  return {
+    intake,
+    review: attentionItems.length - intake,
+    estimated: counts.Estimated,
+    running: counts.Running,
+    acceptance: counts.Review,
+  };
+}
+
 function PipelineSurface({
   projectId,
   data,
@@ -433,24 +464,288 @@ function PipelineSurface({
   planningExpanded,
   onPlanningExpandedChange,
 }) {
-  const estimated = tasksByStatus.Estimated.filter(visible);
-  return <div className="board-layout">
-    <div className="board-main">
-      <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter loaded tasks" /><span className="column-count">{cards.filter(visible).length} of {cards.length} visible</span></div>
-      <section className="column pipeline-estimated">
-        <PanelHeader title="Estimated" count={estimated.length} />
-        {estimated.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} />)}
-        {estimated.length === 0 && <EmptyState>{query ? "No matching tasks" : data.board_empty_states.Estimated}</EmptyState>}
-      </section>
+  const [stageFilter, setStageFilter] = useState(null);
+  const stageCounts = pipelineStageCounts(tasksByStatus, data.needs_you);
+  const ledgerRows = COLUMNS.flatMap((status) => (tasksByStatus[status] || [])
+    .filter(visible)
+    .map((task) => ({ status, task })))
+    .filter(({ status }) => !stageFilter || status === stageFilter);
+
+  return <div className="board-layout pipeline-layout">
+    <div className="board-main pipeline-main">
+      <NextRequiredAction
+        projectId={projectId}
+        workspace={data.workspace}
+        cards={cards}
+        onOpenPlanning={() => onPlanningExpandedChange(true)}
+      />
+      <PipelineStageRail
+        projectId={projectId}
+        counts={stageCounts}
+        selectedBucket={stageFilter}
+        onSelectBucket={setStageFilter}
+      />
+      <Panel className="pipeline-ledger" id="pipeline-ledger">
+        <PanelHeader
+          title="Project ledger"
+          badge={(
+            <Button
+              size="small"
+              variant="secondary"
+              type="button"
+              onClick={() => setStageFilter(null)}
+              aria-pressed={stageFilter === null}
+            >
+              Show all work
+            </Button>
+          )}
+        />
+        <PanelBody>
+          <div className="board-filter-toolbar">
+            <input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter loaded tasks" />
+            <span className="column-count">{ledgerRows.length} of {cards.length} visible</span>
+          </div>
+          <DataTable
+            label="Project task ledger"
+            className="pipeline-ledger-table"
+            columns="7.5rem minmax(15rem, 1.3fr) minmax(13rem, 0.9fr) minmax(18rem, 1.2fr) minmax(13rem, 0.8fr)"
+          >
+            <Row header>
+              <ColumnHead>Workflow</ColumnHead>
+              <ColumnHead>Task</ColumnHead>
+              <ColumnHead>Estimated / actual</ColumnHead>
+              <ColumnHead>Evidence and provenance</ColumnHead>
+              <ColumnHead>Actions</ColumnHead>
+            </Row>
+            {ledgerRows.map(({ status, task }) => <TaskLedgerRow
+              key={task.id}
+              task={task}
+              status={status}
+              projectId={projectId}
+              adapters={data.adapters}
+              action={action}
+              openEvidence={openEvidence}
+            />)}
+            {ledgerRows.length === 0 && <Row className="pipeline-ledger-empty">
+              <DataCell>No matching tasks</DataCell>
+              <DataCell>Adjust the stage or text filter to inspect another authoritative bucket.</DataCell>
+              <DataCell />
+              <DataCell />
+              <DataCell />
+            </Row>}
+          </DataTable>
+        </PanelBody>
+      </Panel>
     </div>
     <PlanningPane
       projectId={projectId}
       onTurnComplete={onTurnComplete}
-      defaultExpanded
+      defaultExpanded={false}
       expanded={planningExpanded}
       onExpandedChange={onPlanningExpandedChange}
       initialMessage={investigationMessage(cards, investigateTaskId)}
+      pane="pipeline"
     />
+  </div>;
+}
+
+function NextRequiredAction({ projectId, workspace, cards, onOpenPlanning }) {
+  const attentionAction = workspace?.summary?.attention_actions?.[0];
+  const attentionHref = attentionAction?.href === `/projects/${projectId}/board`
+    ? `/projects/${projectId}`
+    : attentionAction?.href;
+  const estimatedCount = cards.filter((task) => task.status === "Estimated").length;
+  if (!attentionAction && estimatedCount === 0) {
+    return <Panel className="next-required-action">
+      <PanelBody>
+        <span className="section-label">Next required action</span>
+        <h2>Add or attach Markdown work</h2>
+        <p>Markdown intake remains authoritative before work can become an estimated Task.</p>
+        <Button type="button" onClick={onOpenPlanning}>Expand Planning Chat</Button>
+      </PanelBody>
+    </Panel>;
+  }
+  if (!attentionAction) {
+    return <Panel className="next-required-action">
+      <PanelBody>
+        <span className="section-label">Next required action</span>
+        <h2>Review Estimated work</h2>
+        <p>{estimatedCount} estimated task{estimatedCount === 1 ? " is" : "s are"} ready for a governed launch decision.</p>
+        <a className="btn" href="#pipeline-ledger">Open project ledger</a>
+      </PanelBody>
+    </Panel>;
+  }
+  return <Panel className="next-required-action">
+    <PanelBody>
+      <StatusPill tone={statusTone(attentionAction.tone)} label="Next required action" />
+      <h2>{attentionAction.label}</h2>
+      <p>{attentionAction.detail}</p>
+      <Button as={AppLink} to={attentionHref}>{attentionAction.label}</Button>
+    </PanelBody>
+  </Panel>;
+}
+
+function PipelineStageRail({ projectId, counts, selectedBucket, onSelectBucket }) {
+  return <nav className="pipeline-stage-rail" aria-label="Pipeline stages">
+    {PIPELINE_STAGE_MAP.map((stage) => {
+      const count = counts[stage.id] || 0;
+      if (stage.attention) {
+        return <AppLink
+          key={stage.id}
+          to={`/projects/${projectId}/needs-you`}
+          className="pipeline-stage"
+          data-pipeline-stage={stage.id}
+          aria-label={`${stage.label}: ${count}; open Needs You`}
+        >
+          <span>{stage.label}</span><strong>{count}</strong><small>Needs You</small>
+        </AppLink>;
+      }
+      return <button
+        key={stage.id}
+        className="pipeline-stage"
+        type="button"
+        data-pipeline-stage={stage.id}
+        aria-pressed={selectedBucket === stage.bucket}
+        aria-label={`${stage.label}: ${count}; filter ledger`}
+        onClick={() => onSelectBucket(stage.bucket)}
+      >
+        <span>{stage.label}</span><strong>{count}</strong><small>{stage.bucket}</small>
+      </button>;
+    })}
+  </nav>;
+}
+
+function taskText(value) {
+  return typeof value === "string" ? value : value?.text || "";
+}
+
+function TaskLedgerRow({ task, status, projectId, adapters = [], action, openEvidence }) {
+  const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
+  const trackingLabel = defaultAdapter?.tracking?.label || "Worker tracking unavailable";
+  const intakeReason = taskText(task.intake_decision_reason);
+  return <Row className="pipeline-ledger-row" data-task-status={status}>
+    <DataCell><StatusPill tone={taskStatusTone(status)} label={status} /></DataCell>
+    <DataCell>
+      <span className="task-id">{task.id}</span>
+      <strong className="ledger-task-title" title={taskText(task.summary) || task.id}>{taskDisplayName(task)}</strong>
+      {task.task_kind === "acceptance_verification" && <span className="pill">acceptance_verification</span>}
+    </DataCell>
+    <DataCell><TokenComparison estimate={task.estimate_tokens} actual={task.actual_tokens} /></DataCell>
+    <DataCell>
+      <div className="ledger-evidence">
+        <span>Current launch tracking · {trackingLabel}</span>
+        {task.intake_decision && <span>Intake · {task.intake_decision}{intakeReason ? ` — ${intakeReason}` : ""}</span>}
+        {task.launch_model && <span>Run model · {task.launch_model}</span>}
+        {task.task_branch && <span>{task.task_branch}</span>}
+        {task.harness_commit?.sha && <span title={taskText(task.harness_commit.message)}>{task.harness_commit.sha.slice(0, 7)}</span>}
+        {task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">Pull request</a>}
+        <BlockedCondition reason={task.blocked_condition?.reason} />
+        {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
+      </div>
+    </DataCell>
+    <DataCell><TaskLedgerActions
+      task={task}
+      projectId={projectId}
+      adapters={adapters}
+      action={action}
+      openEvidence={openEvidence}
+    /></DataCell>
+  </Row>;
+}
+
+function TaskLedgerActions({ task, projectId, adapters, action, openEvidence }) {
+  const controls = task.controls || {};
+  return <div className="ledger-actions">
+    {controls.can_launch && <LaunchPopover task={task} projectId={projectId} adapters={adapters} action={action} />}
+    {controls.can_refresh && <Button size="small" type="button" onClick={() => action(`/tasks/${task.id}/refresh`, reviewForm(projectId))}>Refresh</Button>}
+    {controls.can_archive && <Button size="small" variant="secondary" type="button" onClick={() => action(`/projects/${projectId}/tasks/${task.id}/archive`)}>Archive</Button>}
+    {controls.can_dismiss && <Button size="small" variant="secondary" type="button" onClick={() => action(`/projects/${projectId}/tasks/${task.id}/archive`)}>Dismiss</Button>}
+    {task.session_href && <Button size="small" variant="secondary" type="button" onClick={() => openEvidence(task)}>View evidence</Button>}
+  </div>;
+}
+
+function LaunchPopover({ task, projectId, adapters = [], action }) {
+  const controls = task.controls || {};
+  const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
+  const [open, setOpen] = useState(false);
+  const [adapterId, setAdapterId] = useState(defaultAdapter?.id || "");
+  const selectedAdapter = adapters.find((adapter) => adapter.id === adapterId) || defaultAdapter;
+  const initialModel = selectedAdapter?.allowed_models.includes(task.recommended_model)
+    ? task.recommended_model
+    : selectedAdapter?.allowed_models[0] || "";
+  const [model, setModel] = useState(initialModel);
+  const [budgetOverride, setBudgetOverride] = useState(false);
+  const [nativeAcknowledged, setNativeAcknowledged] = useState(false);
+  const [manualEstimate, setManualEstimate] = useState("");
+  const popoverId = React.useId();
+  const triggerId = `${popoverId}-trigger`;
+  const launchGuardrails = Boolean(
+    controls.requires_manual_estimate ||
+    controls.budget_override_available ||
+    controls.native_usage_override_ack_required,
+  );
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      document.getElementById(triggerId)?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, triggerId]);
+
+  const launch = () => {
+    const form = new FormData();
+    form.set("project_id", projectId);
+    if (adapterId) form.set("adapter_id", adapterId);
+    if (model) form.set("model", model);
+    if (budgetOverride) form.set("budget_override", "on");
+    if (nativeAcknowledged) form.set("native_budget_acknowledged", "on");
+    if (controls.requires_manual_estimate && Number(manualEstimate) > 0) form.set("estimate_tokens", manualEstimate);
+    action(`/tasks/${task.id}/launch`, form);
+  };
+
+  return <div className="launch-popover">
+    <Button
+      id={triggerId}
+      size="small"
+      type="button"
+      variant="secondary"
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-controls={popoverId}
+      onClick={() => setOpen((current) => !current)}
+    >
+      Launch options
+    </Button>
+    <div
+      id={popoverId}
+      className="launch-popover-panel"
+      role="dialog"
+      aria-label={`Launch controls for ${taskDisplayName(task)}`}
+      hidden={!open}
+    >
+      <label>Worker Adapter<select className="board-input" aria-describedby={selectedAdapter?.tracking?.label ? `adapter-tracking-${task.id}` : undefined} value={adapterId} onChange={(event) => {
+        const nextId = event.target.value;
+        const nextAdapter = adapters.find((adapter) => adapter.id === nextId);
+        setAdapterId(nextId);
+        setModel(nextAdapter?.allowed_models.includes(task.recommended_model) ? task.recommended_model : nextAdapter?.allowed_models[0] || "");
+      }}>{adapters.map((adapter) => <option key={adapter.id} value={adapter.id}>{adapter.name}{adapter.is_default ? " · Default" : ""}</option>)}</select>{selectedAdapter?.tracking?.label && <small className="card-hint" id={`adapter-tracking-${task.id}`}>Spend tracking · {selectedAdapter.tracking.label}</small>}</label>
+      <label>Worker model<select className="board-input" value={model} onChange={(event) => setModel(event.target.value)}>{(selectedAdapter?.allowed_models || []).map((modelId) => <option key={modelId} value={modelId}>{modelId}</option>)}</select></label>
+      {launchGuardrails && <details className="card-guardrails" open>
+        <summary>Launch guardrails</summary>
+        <div className="card-guardrails-fields">
+          {controls.requires_manual_estimate && <label>Manual token estimate<input className="board-input" type="number" min="1" step="1" aria-describedby={`manual-estimate-${task.id}`} value={manualEstimate} onChange={(event) => setManualEstimate(event.target.value)} required /><small className="card-hint" id={`manual-estimate-${task.id}`}>No automatic estimate is available. Enter the token budget to reserve for this run.</small></label>}
+          {controls.budget_override_available && <><label className="check-row"><input type="checkbox" aria-describedby={`budget-override-${task.id}`} checked={budgetOverride} onChange={(event) => setBudgetOverride(event.target.checked)} /> Approve budget override</label><small className="card-hint" id={`budget-override-${task.id}`}>This estimate is over your remaining budget. Approving launches it anyway and records an audited budget override.</small></>}
+          {controls.native_usage_override_ack_required && <><label className="check-row"><input type="checkbox" aria-describedby={`native-ack-${task.id}`} checked={nativeAcknowledged} onChange={(event) => setNativeAcknowledged(event.target.checked)} /> {controls.native_usage_override_ack_text}</label><small className="card-hint" id={`native-ack-${task.id}`}>Native usage can't be throttled mid-run — it may reconcile as an overrun after the run finishes.</small></>}
+        </div>
+      </details>}
+      <Button size="small" type="button" onClick={launch} disabled={controls.requires_manual_estimate && !(Number(manualEstimate) > 0)} disabledReason="Enter a positive manual token estimate before launch.">Launch</Button>
+      {controls.setup_href && (!selectedAdapter?.launchable || !controls.setup_href.startsWith("/settings/workers")) && <a href={controls.setup_href}>{controls.setup_href.startsWith("/settings/workers") ? "Open Worker Setup" : "Open project settings"}</a>}
+    </div>
   </div>;
 }
 
@@ -468,11 +763,12 @@ export function PlanningPane({
   projectId,
   onTurnComplete,
   defaultExpanded,
+  pane = defaultExpanded ? "pipeline" : "floor",
   expanded,
   onExpandedChange,
   initialMessage = "",
 }) {
-  const contentId = `planning-pane-${projectId}-${defaultExpanded ? "pipeline" : "floor"}`;
+  const contentId = `planning-pane-${projectId}-${pane}`;
   return <section className={`board-pane planning-pane ${expanded ? "is-expanded" : "is-collapsed"}`}>
     <div className="planning-pane-shell">
       <div className="panel-header planning-pane-header">
@@ -572,6 +868,7 @@ function FloorSurface({
       defaultExpanded={false}
       expanded={planningExpanded}
       onExpandedChange={onPlanningExpandedChange}
+      pane="floor"
     />
     <div className="floor-main board-main">
       <div className="board-command-bar">

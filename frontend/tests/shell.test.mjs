@@ -1434,7 +1434,7 @@ test("archived Pipeline is restore-first and does not expose active workflow con
   assert.doesNotMatch(needsYouMarkup, /Needs You|Enter manual estimate/);
 });
 
-test("Pipeline renders project readiness, Planning Chat, and Estimated work only", () => {
+test("Pipeline makes the next action and one four-bucket ledger primary without duplicating Needs You", async () => {
   const loading = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: null, error: null, loading: true,
   }));
@@ -1444,68 +1444,86 @@ test("Pipeline renders project readiness, Planning Chat, and Estimated work only
     projectId: "demo-999", data: null, error: { message: "offline", status: 500 }, loading: false,
   }));
   assert.match(failed, /Could not load board/);
-  assert.doesNotMatch(failed, /offline/);
-  assert.doesNotMatch(failed, /server-rendered/);
+  assert.doesNotMatch(failed, /offline|server-rendered/);
   assert.doesNotMatch(failed, /href="\/projects\/demo-999\/board"/);
 
-  const pipeline = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999",
-    surface: "pipeline",
-    data: boardData(),
-    error: null,
-    loading: false,
-    query: "",
-    notice: null,
-    action: () => {},
-  }));
+  const data = boardData();
+  data.tasks_by_status.Estimated[0].launch_failure = {
+    retryable: true,
+    diagnostic: { text: "Verify the Worker adapter, then retry." },
+    error: { text: "Worker returned a nonzero exit." },
+    summary: { text: "DEMO launch failure" },
+    next_action: { text: "Open Worker Setup." },
+  };
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false, action: () => {},
+    }));
+  });
+  const pipeline = JSON.stringify(renderer.toJSON());
   for (const text of [
-    "Pipeline",
-    "Connected repo",
-    "/DEMO/2099/repo",
-    "Repo profile",
-    "Branch</dt><dd>implementation/demo-999",
-    "Stack</dt><dd>Python · JavaScript · FastAPI · React · uv · npm",
-    "Test</dt><dd>uv run pytest",
-    "Run</dt><dd>uv run foremanctl serve",
-    "Docs</dt><dd>README.md, CONTEXT.md",
-    "Sessions",
-    "Worker Setup",
-    "Project Settings",
-    "launch ready",
-    "Planning Chat",
-    "Filter loaded tasks",
-    "Codex",
-    "gpt-5.4",
+    "Next required action",
+    "Pipeline stages",
+    "Project task ledger",
+    "Evidence and provenance",
+    "Estimated DEMO task",
+    "Running DEMO task",
+    "Review DEMO task",
+    "Done DEMO task",
+    "Current launch tracking",
+    "Needs operator disposition",
+    "Last launch failed · retryable",
+    "Launch options",
+    "Manual token estimate",
     "Approve budget override",
     "Acknowledge native usage overrun risk",
-    "Dismiss",
-    "Estimate 100",
-    "Manual token estimate",
-  ]) {
-    assert.match(pipeline, new RegExp(text));
-  }
-  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">✓<\/span><span class="status-pill-label">launch ready<\/span>/);
-  assert.doesNotMatch(pipeline, /status-pill-label">proposed<\/span>/);
-  assert.match(pipeline, /type="file"/);
-  assert.match(pipeline, /type="number"/);
-  assert.match(pipeline, /type="checkbox"/);
-  assert.match(pipeline, /aria-expanded="true"/);
-  assert.match(pipeline, />Collapse</);
-  assert.doesNotMatch(pipeline, /Needs You|Review proposed Task Breakdown|DEMO_INTAKE_2099_999\.md|Planning Inbox|Active Worker Runs|Review queue|Recently finished|Server board/);
+  ]) assert.match(pipeline, new RegExp(text));
+  assert.match(pipeline, /"aria-expanded":false/);
+  assert.match(pipeline, /"hidden":true/);
+  assert.match(pipeline, /"data-pipeline-stage":"intake"/);
+  assert.match(pipeline, /"data-pipeline-stage":"review"/);
+  assert.match(pipeline, /"data-pipeline-stage":"acceptance"/);
+  assert.doesNotMatch(pipeline, /"data-pipeline-stage":"done"/);
+  assert.doesNotMatch(pipeline, /Planning Inbox|Review proposed Task Breakdown|DEMO_INTAKE_2099_999\.md/);
+
+  const stage = (id) => renderer.root.findByProps({ "data-pipeline-stage": id });
+  const attentionStage = (id) => renderer.root.findAllByType("a").find((link) => link.props["data-pipeline-stage"] === id);
+  assert.equal(attentionStage("intake").props.href, "/projects/demo-999/needs-you");
+  assert.equal(attentionStage("review").props.href, "/projects/demo-999/needs-you");
+  await act(async () => { stage("estimated").props.onClick(); });
+  let filtered = JSON.stringify(renderer.toJSON());
+  assert.match(filtered, /"data-task-status":"Estimated"/);
+  assert.doesNotMatch(filtered, /"data-task-status":"Running"|"data-task-status":"Review"|"data-task-status":"Done"/);
+  await act(async () => { stage("running").props.onClick(); });
+  filtered = JSON.stringify(renderer.toJSON());
+  assert.match(filtered, /"data-task-status":"Running"/);
+  assert.doesNotMatch(filtered, /"data-task-status":"Estimated"|"data-task-status":"Review"|"data-task-status":"Done"/);
+  await act(async () => { stage("acceptance").props.onClick(); });
+  filtered = JSON.stringify(renderer.toJSON());
+  assert.match(filtered, /"data-task-status":"Review"/);
+  assert.doesNotMatch(filtered, /"data-task-status":"Estimated"|"data-task-status":"Running"|"data-task-status":"Done"/);
+  const showAll = renderer.root.findAllByType("button").find((button) => button.props.children === "Show all work");
+  await act(async () => { showAll.props.onClick(); });
+
+  const launchOptions = renderer.root.findAllByType("button").find((button) => button.props.children === "Launch options");
+  await act(async () => { launchOptions.props.onClick(); });
+  assert.equal(renderer.root.findByProps({ role: "dialog" }).props.hidden, false);
+  await act(async () => { renderer.unmount(); });
 
   const emptyData = boardData();
-  emptyData.tasks_by_status.Estimated = [];
+  emptyData.tasks_by_status = Object.fromEntries(["Estimated", "Running", "Review", "Done"].map((status) => [status, []]));
   const empty = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: emptyData, error: null, loading: false, action: () => {},
   }));
-  assert.match(empty, /No Estimated tasks/);
+  assert.match(empty, /Add or attach Markdown work|No matching tasks/);
 
-  const filtered = renderToStaticMarkup(React.createElement(BoardState, {
+  const textFiltered = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: boardData(), error: null, loading: false,
     query: "no-such-task", action: () => {},
   }));
-  assert.match(filtered, /0 of 4 visible/);
-  assert.match(filtered, /No matching tasks/);
+  assert.match(textFiltered, /0 of 4 visible/);
+  assert.match(textFiltered, /No matching tasks/);
 });
 
 test("Needs You is a projection-backed route with inline manual estimates", async () => {
@@ -1606,8 +1624,9 @@ test("Planning pane disclosure survives a board refresh", async (t) => {
     }));
   });
   const disclosure = () => renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-pipeline" });
-  await act(async () => { disclosure().props.onClick(); });
   assert.equal(disclosure().props["aria-expanded"], false);
+  await act(async () => { disclosure().props.onClick(); });
+  assert.equal(disclosure().props["aria-expanded"], true);
 
   await act(async () => {
     renderer.update(React.createElement(BoardState, {
@@ -1620,7 +1639,7 @@ test("Planning pane disclosure survives a board refresh", async (t) => {
       projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
     }));
   });
-  assert.equal(disclosure().props["aria-expanded"], false);
+  assert.equal(disclosure().props["aria-expanded"], true);
   await act(async () => { renderer.unmount(); });
 });
 
@@ -1721,7 +1740,8 @@ test("Planning Chat investigation links prefill bounded Task context", () => {
     loading: false,
     investigateTaskId: "task-estimated-999",
   }));
-  assert.match(markup, />Investigate Task task-estimated-999 before re-estimation:\nEstimated DEMO task<\/textarea>/);
+  assert.match(markup, /aria-expanded="false"/);
+  assert.doesNotMatch(markup, /Investigate Task task-estimated-999 before re-estimation|<textarea/);
 });
 
 test("Evidence Drawer fetches its Session Report handoff and reuses bounded evidence components", async () => {
@@ -2365,7 +2385,10 @@ test("rendered Portal surfaces preserve focus, motion, select, and panel contrac
   }));
 
   assert.doesNotMatch(board, /<select[^>]*name="task_kind"/);
-  assert.match(board, /Describe the task or goal…/);
+  assert.match(board, /Next required action/);
+  assert.match(board, /class="data-table pipeline-ledger-table"/);
+  assert.match(board, /aria-expanded="false"/);
+  assert.doesNotMatch(board, /Describe the task or goal…/);
   assert.match(review, /<select[^>]*>.*?<option value="implementation"[^>]*>/s);
   assert.doesNotMatch(board, /class="board-intake-progress-bar"/);
   assert.match(floor, /class="live-pulse-dot"/);
