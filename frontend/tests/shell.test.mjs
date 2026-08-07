@@ -1462,7 +1462,6 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   let renderer;
   const runProvenance = {
     "/sessions/session-demo-999": {
-      available: true,
       adapterId: "opencode",
       trackingMode: "native_usage",
     },
@@ -1486,7 +1485,7 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     "Review DEMO task",
     "Done DEMO task",
     "Current launch · CLI: Track native usage after run",
-    "opencode · native_usage · CLI usage reconciled after the run",
+    "opencode · native_usage · Session Report",
     "Needs operator disposition",
     "Last launch failed · retryable",
     "Launch options",
@@ -1543,10 +1542,68 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   });
   assert.equal(reportUrl, "/api/sessions/session-demo-999/report");
   assert.deepEqual(loadedProvenance["/sessions/session-demo-999"], {
-    available: true,
     adapterId: "opencode",
     trackingMode: "native_usage",
   });
+  const cachedProvenance = await loadBoardRunProvenance(
+    data.tasks_by_status,
+    async () => { throw new Error("cached Session Reports must not refetch"); },
+    loadedProvenance,
+  );
+  assert.deepEqual(cachedProvenance, loadedProvenance);
+
+  let retryAttempts = 0;
+  const failedProvenance = await loadBoardRunProvenance(data.tasks_by_status, async () => {
+    retryAttempts += 1;
+    throw new Error("temporary report failure");
+  });
+  assert.equal(failedProvenance["/sessions/session-demo-999"].retryable, true);
+  const recoveredProvenance = await loadBoardRunProvenance(data.tasks_by_status, async () => {
+    retryAttempts += 1;
+    return reportData();
+  }, failedProvenance);
+  assert.equal(retryAttempts, 2);
+  assert.deepEqual(recoveredProvenance["/sessions/session-demo-999"], {
+    adapterId: "opencode",
+    trackingMode: "native_usage",
+  });
+
+  let activeReportLoads = 0;
+  let peakReportLoads = 0;
+  const boundedTasks = {
+    Estimated: [],
+    Running: [],
+    Review: Array.from({ length: 7 }, (_, index) => ({
+      ...data.tasks_by_status.Review[0],
+      id: `bounded-task-${index}`,
+      session_href: `/sessions/bounded-session-${index}`,
+    })),
+    Done: [],
+  };
+  await loadBoardRunProvenance(boundedTasks, async () => {
+    activeReportLoads += 1;
+    peakReportLoads = Math.max(peakReportLoads, activeReportLoads);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    activeReportLoads -= 1;
+    return reportData();
+  });
+  assert.equal(peakReportLoads, 3);
+
+  const retryableData = boardData();
+  retryableData.tasks_by_status.Estimated[0].session_href = "/sessions/failed-demo-999";
+  retryableData.tasks_by_status.Estimated[0].launch_failure = data.tasks_by_status.Estimated[0].launch_failure;
+  const retryable = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    surface: "pipeline",
+    data: retryableData,
+    error: null,
+    loading: false,
+    runProvenance: {
+      "/sessions/failed-demo-999": { adapterId: "adapter-a", trackingMode: "missing tracking-mode evidence" },
+    },
+  }));
+  assert.match(retryable, /adapter-a · missing tracking-mode evidence · Session Report/);
+  assert.doesNotMatch(retryable, /Current launch · CLI: Track native usage after run/);
 
   const advisoryData = boardData();
   advisoryData.needs_you = { project_id: "demo-999", count: 1, items: [lowConfidenceItem()] };

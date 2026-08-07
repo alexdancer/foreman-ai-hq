@@ -131,26 +131,39 @@ export function mergeBoardLiveEvents(current, sessionId, events) {
   return changed ? { ...current, data: { ...current.data, tasks_by_status: tasksByStatus } } : current;
 }
 
-export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSON) {
+function provenanceFromReport(report) {
+  return {
+    adapterId: report?.summary?.adapter_id || null,
+    trackingMode: report?.summary?.tracking_mode || null,
+  };
+}
+
+export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSON, cached = {}) {
   const tasksBySession = new Map();
   for (const status of COLUMNS) {
     for (const task of tasksByStatus?.[status] || []) {
       if (task.session_href) tasksBySession.set(task.session_href, task);
     }
   }
-  const entries = await Promise.all([...tasksBySession].map(async ([sessionHref, task]) => {
-    try {
-      const report = await loadEvidenceDrawer(task, getJSONImpl);
-      return [sessionHref, {
-        available: Boolean(report?.summary?.tracking_mode),
-        adapterId: report?.summary?.adapter_id || null,
-        trackingMode: report?.summary?.tracking_mode || null,
-      }];
-    } catch {
-      return [sessionHref, { available: false, adapterId: null, trackingMode: null }];
+  const provenance = { ...cached };
+  const pending = [...tasksBySession].filter(([sessionHref]) => (
+    !Object.hasOwn(provenance, sessionHref) || provenance[sessionHref]?.retryable
+  ));
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const [sessionHref, task] = pending[cursor];
+      cursor += 1;
+      try {
+        const report = await loadEvidenceDrawer(task, getJSONImpl);
+        provenance[sessionHref] = provenanceFromReport(report);
+      } catch {
+        provenance[sessionHref] = { retryable: true, adapterId: null, trackingMode: null };
+      }
     }
-  }));
-  return Object.fromEntries(entries);
+  };
+  await Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
+  return provenance;
 }
 
 export function launchPopoverPlacement(triggerRect, viewportWidth, viewportHeight) {
@@ -177,6 +190,7 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   const [notice, setNotice] = useState(() => boardNoticeFromSearch(window.location.search));
   const [selectedTask, setSelectedTask] = useState(null);
   const [runProvenance, setRunProvenance] = useState({});
+  const runProvenanceCache = React.useRef({});
   const investigateTaskId = new URLSearchParams(window.location.search).get("investigate_task");
   const eventCursors = React.useRef(new Map());
   const eventPollInFlight = React.useRef(false);
@@ -227,14 +241,20 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   useEffect(() => { load(); }, [projectId, surface]);
   useEffect(() => {
     let current = true;
-    if (surface !== "pipeline" || !state.data?.tasks_by_status) {
+    if (surface !== "pipeline" || state.loading || !state.data?.tasks_by_status) {
       setRunProvenance({});
       return () => { current = false; };
     }
-    loadBoardRunProvenance(state.data.tasks_by_status)
-      .then((provenance) => { if (current) setRunProvenance(provenance); });
+    loadBoardRunProvenance(state.data.tasks_by_status, getJSON, runProvenanceCache.current)
+      .then((provenance) => {
+        if (!current) return;
+        runProvenanceCache.current = Object.fromEntries(
+          Object.entries(provenance).filter(([, value]) => !value.retryable),
+        );
+        setRunProvenance(provenance);
+      });
     return () => { current = false; };
-  }, [projectId, surface, ledgerSessionKey]);
+  }, [projectId, surface, ledgerSessionKey, state.loading]);
   useEffect(() => {
     if (!state.data?.automation?.live_refresh_enabled) return undefined;
     const timer = window.setInterval(async () => {
@@ -699,21 +719,18 @@ function taskText(value) {
 
 function trackingProvenanceLabel(task, status, adapters, runProvenance) {
   const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
+  if (task.session_href) {
+    const provenance = runProvenance[task.session_href];
+    if (!provenance) return "Session Report provenance loading";
+    if (provenance.retryable) return "Session Report provenance temporarily unavailable";
+    return [
+      provenance.adapterId,
+      provenance.trackingMode || "tracking mode unavailable",
+      "Session Report",
+    ].filter(Boolean).join(" · ");
+  }
   if (status === "Estimated") return `Current launch · ${defaultAdapter?.tracking?.label || "Worker tracking unavailable"}`;
-  if (!task.session_href) return "No Worker session recorded; run provenance unavailable";
-  const provenance = runProvenance[task.session_href];
-  if (!provenance) return "Loading authoritative Session Report";
-  if (!provenance.available) return "Session Report unavailable; tracking mode not loaded";
-  const reasonByMode = {
-    native_usage: "CLI usage reconciled after the run",
-    proxy_governed: "Harness Proxy governed the model requests",
-    observed_only: "command observed; token usage is not authoritative",
-  };
-  return [
-    provenance.adapterId,
-    provenance.trackingMode,
-    reasonByMode[provenance.trackingMode] || "authoritative Session Report evidence",
-  ].filter(Boolean).join(" · ");
+  return "No Worker session recorded; run provenance unavailable";
 }
 
 function TaskLedgerRow({ task, status, projectId, adapters = [], runProvenance = {}, action, openEvidence }) {
@@ -803,8 +820,8 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
   };
 
   const afterPaint = (callback) => {
-    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(callback);
+    if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+      window.setTimeout(callback, 0);
     } else {
       callback();
     }
@@ -840,7 +857,7 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
   }, []);
 
   useEffect(() => {
-    if (!open || typeof document === "undefined" || typeof popoverRef.current?.showPopover === "function") return undefined;
+    if (!open || typeof document === "undefined") return undefined;
     const onPointerDown = (event) => {
       if (!rootRef.current?.contains(event.target)) closePopover(false);
     };
