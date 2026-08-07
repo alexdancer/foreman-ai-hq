@@ -206,7 +206,7 @@ function PageList({ title, page, render }) {
   return <div><strong>{title}</strong><ul>{state.items.map((item, index) => <li key={index}>{render(item)}</li>)}</ul>{state.pagination.has_more && <button type="button" onClick={load}>Load more {title.toLowerCase()}</button>}</div>;
 }
 
-export function EvidenceSection({ title, page, renderItem, nested = false }) {
+export function EvidenceSection({ title, page, renderItem, nested = false, open = false }) {
   const [state, setState] = React.useState(page);
   const [error, setError] = React.useState(null);
   const load = async () => {
@@ -225,6 +225,7 @@ export function EvidenceSection({ title, page, renderItem, nested = false }) {
       label={title}
       count={count}
       countLabel={`${count} ${title.toLowerCase()} rows`}
+      open={open}
     >
       {state.items.length ? state.items.map(renderItem) : <p className="muted">No {title.toLowerCase()} evidence.</p>}
       {state.pagination.has_more && <button type="button" onClick={load}>Load more {title}</button>}

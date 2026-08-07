@@ -42,6 +42,20 @@ const pipelineTask = {
 const drawerReport = {
   summary: { adapter_id: "browser-adapter", tracking_mode: "native_usage" },
   freshness: { active: false },
+  tokens: {
+    log: {
+      items: [{ usage_kind: "worker", model: "gpt-browser-999", prompt_tokens: 8, completion_tokens: 4, total_tokens: 12, cost: null, raw_usage: null }],
+      pagination: { total: 1, has_more: false, next_href: null },
+    },
+  },
+  zone_timeline: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+  worker_timeline: {
+    items: [{ id: 1, created_at: "2099-01-01T00:00:00Z", level: "info", layer: "worker", kind: "token", title: "Usage recorded", detail_summary: "total_tokens=12", detail: null }],
+    pagination: { total: 1, has_more: false, next_href: null },
+  },
+  repo_context_briefs: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+  alarms: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+  checkpoints: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
 };
 
 const pipelineData = {
@@ -309,6 +323,26 @@ async function inspect() {
   requireContract(
     evidenceDrawer.querySelector(".token-comparison-provenance")?.textContent.includes("browser-adapter · native_usage"),
     "Evidence Drawer omits adjacent spend-tracking provenance",
+  );
+  const evidenceDisclosures = [...evidenceDrawer.querySelectorAll(".evidence-disclosure")];
+  const evidenceLabels = evidenceDisclosures.map((disclosure) => disclosure.querySelector(".disclosure-label")?.textContent);
+  requireContract(
+    JSON.stringify(evidenceLabels) === JSON.stringify([
+      "Live Worker Run feed",
+      "Worker Run timeline",
+      "Token log",
+      "Budget-zone timeline",
+      "Repo Context Brief",
+      "Alarms",
+      "Checkpoint results",
+    ]),
+    `Evidence Drawer hierarchy is incorrect: ${evidenceLabels.join(", ")}`,
+  );
+  requireContract(evidenceDisclosures[0].open, "Evidence Drawer live feed is initially collapsed");
+  requireContract(evidenceDisclosures[1].open, "Evidence Drawer Worker Run timeline is initially collapsed");
+  requireContract(
+    evidenceDisclosures.slice(2).every((disclosure) => !disclosure.open),
+    "Evidence Drawer raw evidence disclosures are not initially collapsed",
   );
   const evidenceControls = [...evidenceDrawer.querySelectorAll(
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
