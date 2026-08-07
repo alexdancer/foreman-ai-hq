@@ -59,10 +59,12 @@ export function LiveRunDock({ runs, embedded = false }) {
         <StatusPill className="live-run-badge" tone="running" label="live" />
       </div>
       <div className="live-run-dock-body">
-        {!embedded && <p className="live-run-dock-task">
-          <span className="task-id">{active.taskId}</span>
-          <span className="live-run-dock-title">{active.title}</span>
-          {active.sessionHref && <a href={active.sessionHref}>Session report</a>}
+        {(!embedded || active.sessionHref) && <p className="live-run-dock-task">
+          {!embedded && <>
+            <span className="task-id">{active.taskId}</span>
+            <span className="live-run-dock-title">{active.title}</span>
+          </>}
+          {active.sessionHref && <a href={active.sessionHref}>Session Report</a>}
         </p>}
         <div aria-live="polite">
           <LiveEventFeed events={active.events} active />

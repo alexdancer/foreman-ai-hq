@@ -373,6 +373,20 @@ async function inspect() {
   const activePanel = activeGrid.querySelector(".floor-active-run");
   requireContract(activePanel?.querySelector(".live-run-dock"), "live-run dock is not folded into the active Worker Run panel");
   requireContract(!floor.querySelector(".floor-main > .live-run-dock"), "live-run dock remains detached from the active Worker Run panel");
+  const sessionReportLinks = [...activePanel.querySelectorAll('a[href="/sessions/floor-running-999"]')];
+  requireContract(
+    sessionReportLinks.length === 1 && sessionReportLinks[0].textContent.trim() === "Session Report",
+    "embedded live-run dock does not preserve its direct Session Report permalink",
+  );
+  requireContract(
+    activePanel.querySelectorAll(".task-heading .task-id").length === 1
+      && !activePanel.querySelector(".live-run-dock-task .task-id, .live-run-dock-title"),
+    "embedded live-run dock duplicates the active task identity",
+  );
+  requireContract(
+    [...activePanel.querySelectorAll("button")].some((button) => button.textContent.trim() === "View evidence"),
+    "active Worker Run loses its Evidence Drawer entry point",
+  );
   requireContract(activePanel.querySelector(".event-row"), "active Worker Run does not preserve shared live-event treatment");
   requireContract(getComputedStyle(activeGrid).gridTemplateColumns.split(" ").length === 1, "active Worker Runs are not full-width panels");
   requireContract(
