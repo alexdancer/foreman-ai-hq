@@ -131,12 +131,52 @@ export function mergeBoardLiveEvents(current, sessionId, events) {
   return changed ? { ...current, data: { ...current.data, tasks_by_status: tasksByStatus } } : current;
 }
 
+export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSON) {
+  const tasksBySession = new Map();
+  for (const status of COLUMNS) {
+    for (const task of tasksByStatus?.[status] || []) {
+      if (task.session_href) tasksBySession.set(task.session_href, task);
+    }
+  }
+  const entries = await Promise.all([...tasksBySession].map(async ([sessionHref, task]) => {
+    try {
+      const report = await loadEvidenceDrawer(task, getJSONImpl);
+      return [sessionHref, {
+        available: Boolean(report?.summary?.tracking_mode),
+        adapterId: report?.summary?.adapter_id || null,
+        trackingMode: report?.summary?.tracking_mode || null,
+      }];
+    } catch {
+      return [sessionHref, { available: false, adapterId: null, trackingMode: null }];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+export function launchPopoverPlacement(triggerRect, viewportWidth, viewportHeight) {
+  const edge = 16;
+  const gap = 8;
+  const width = Math.min(320, Math.max(0, viewportWidth - (edge * 2)));
+  const spaceBelow = Math.max(0, viewportHeight - triggerRect.bottom - gap - edge);
+  const spaceAbove = Math.max(0, triggerRect.top - gap - edge);
+  const placeAbove = spaceAbove > spaceBelow;
+  return {
+    placement: placeAbove ? "above" : "below",
+    width,
+    left: Math.min(Math.max(triggerRect.left, edge), Math.max(edge, viewportWidth - width - edge)),
+    top: placeAbove ? "auto" : `${triggerRect.bottom + gap}px`,
+    bottom: placeAbove ? `${viewportHeight - triggerRect.top + gap}px` : "auto",
+    maxHeight: Math.max(spaceAbove, spaceBelow),
+  };
+}
+
 export default function Board({ projectId, surface = "pipeline", onStateChanged = () => {} }) {
   const navigate = React.useContext(NavContext);
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState(() => boardNoticeFromSearch(window.location.search));
   const [selectedTask, setSelectedTask] = useState(null);
+  const [runProvenance, setRunProvenance] = useState({});
   const investigateTaskId = new URLSearchParams(window.location.search).get("investigate_task");
   const eventCursors = React.useRef(new Map());
   const eventPollInFlight = React.useRef(false);
@@ -145,6 +185,12 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
     .filter(Boolean)
     .sort()
     .join(","), [state.data?.tasks_by_status?.Running]);
+  const ledgerSessionKey = useMemo(() => COLUMNS
+    .flatMap((status) => state.data?.tasks_by_status?.[status] || [])
+    .map((task) => task.session_href || "")
+    .filter(Boolean)
+    .sort()
+    .join(","), [state.data?.tasks_by_status]);
 
   const load = async () => {
     setState((current) => ({ ...current, loading: true, error: null }));
@@ -179,6 +225,16 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   };
 
   useEffect(() => { load(); }, [projectId, surface]);
+  useEffect(() => {
+    let current = true;
+    if (surface !== "pipeline" || !state.data?.tasks_by_status) {
+      setRunProvenance({});
+      return () => { current = false; };
+    }
+    loadBoardRunProvenance(state.data.tasks_by_status)
+      .then((provenance) => { if (current) setRunProvenance(provenance); });
+    return () => { current = false; };
+  }, [projectId, surface, ledgerSessionKey]);
   useEffect(() => {
     if (!state.data?.automation?.live_refresh_enabled) return undefined;
     const timer = window.setInterval(async () => {
@@ -257,6 +313,7 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
       notice={notice}
       action={action}
       openEvidence={setSelectedTask}
+      runProvenance={runProvenance}
       onRetry={load}
       onTurnComplete={load}
       investigateTaskId={investigateTaskId}
@@ -281,6 +338,7 @@ export function BoardState({
   notice = null,
   action = () => {},
   openEvidence = () => {},
+  runProvenance = {},
   onRetry = () => {},
   onTurnComplete = () => {},
   investigateTaskId = null,
@@ -348,6 +406,7 @@ export function BoardState({
     visible,
     action,
     openEvidence,
+    runProvenance,
     planningExpanded: planningExpanded[surface],
     onPlanningExpandedChange: setCurrentPlanningExpanded,
   };
@@ -456,6 +515,7 @@ function PipelineSurface({
   visible,
   action,
   openEvidence,
+  runProvenance,
   query,
   setQuery,
   cards,
@@ -524,6 +584,7 @@ function PipelineSurface({
               status={status}
               projectId={projectId}
               adapters={data.adapters}
+              runProvenance={runProvenance}
               action={action}
               openEvidence={openEvidence}
             />)}
@@ -541,7 +602,6 @@ function PipelineSurface({
     <PlanningPane
       projectId={projectId}
       onTurnComplete={onTurnComplete}
-      defaultExpanded={false}
       expanded={planningExpanded}
       onExpandedChange={onPlanningExpandedChange}
       initialMessage={investigationMessage(cards, investigateTaskId)}
@@ -550,8 +610,13 @@ function PipelineSurface({
   </div>;
 }
 
+function NextActionLink({ href, label }) {
+  if (href.includes("#")) return <a className="btn" href={href}>{label}</a>;
+  return <Button as={AppLink} to={href}>{label}</Button>;
+}
+
 function NextRequiredAction({ projectId, workspace, needsYou, cards, onOpenPlanning }) {
-  const needsYouAction = needsYou?.items?.[0];
+  const needsYouAction = needsYou?.items?.find((item) => !item.advisory);
   if (needsYouAction) {
     const actionHref = needsYouAction.href || `/projects/${projectId}/needs-you`;
     return <Panel className="next-required-action">
@@ -559,14 +624,14 @@ function NextRequiredAction({ projectId, workspace, needsYou, cards, onOpenPlann
         <StatusPill tone="warning" label="Next required action" />
         <h2>{needsYouAction.title}</h2>
         <p>{needsYouAction.reason}</p>
-        <Button as={AppLink} to={actionHref}>{needsYouAction.action_label || "Open Needs You"}</Button>
+        <NextActionLink href={actionHref} label={needsYouAction.action_label || "Open Needs You"} />
       </PanelBody>
     </Panel>;
   }
   const attentionAction = workspace?.summary?.attention_actions?.[0];
   const attentionHref = attentionAction?.href === `/projects/${projectId}/board`
     ? `/projects/${projectId}`
-    : attentionAction?.href;
+    : attentionAction?.href || `/projects/${projectId}`;
   const estimatedCount = cards.filter((task) => task.status === "Estimated").length;
   if (!attentionAction && estimatedCount === 0) {
     return <Panel className="next-required-action">
@@ -593,7 +658,7 @@ function NextRequiredAction({ projectId, workspace, needsYou, cards, onOpenPlann
       <StatusPill tone={statusTone(attentionAction.tone)} label="Next required action" />
       <h2>{attentionAction.label}</h2>
       <p>{attentionAction.detail}</p>
-      <Button as={AppLink} to={attentionHref}>{attentionAction.label}</Button>
+      <NextActionLink href={attentionHref} label={attentionAction.label} />
     </PanelBody>
   </Panel>;
 }
@@ -632,13 +697,27 @@ function taskText(value) {
   return typeof value === "string" ? value : value?.text || "";
 }
 
-function TaskLedgerRow({ task, status, projectId, adapters = [], action, openEvidence }) {
+function trackingProvenanceLabel(task, status, adapters, runProvenance) {
   const defaultAdapter = adapters.find((adapter) => adapter.is_default) || adapters[0];
-  const trackingLabel = status === "Estimated"
-    ? `Current launch tracking · ${defaultAdapter?.tracking?.label || "Worker tracking unavailable"}`
-    : task.session_href
-      ? "Run tracking · Authoritative Session Report"
-      : "Run tracking · No Worker session recorded";
+  if (status === "Estimated") return `Current launch · ${defaultAdapter?.tracking?.label || "Worker tracking unavailable"}`;
+  if (!task.session_href) return "No Worker session recorded; run provenance unavailable";
+  const provenance = runProvenance[task.session_href];
+  if (!provenance) return "Loading authoritative Session Report";
+  if (!provenance.available) return "Session Report unavailable; tracking mode not loaded";
+  const reasonByMode = {
+    native_usage: "CLI usage reconciled after the run",
+    proxy_governed: "Harness Proxy governed the model requests",
+    observed_only: "command observed; token usage is not authoritative",
+  };
+  return [
+    provenance.adapterId,
+    provenance.trackingMode,
+    reasonByMode[provenance.trackingMode] || "authoritative Session Report evidence",
+  ].filter(Boolean).join(" · ");
+}
+
+function TaskLedgerRow({ task, status, projectId, adapters = [], runProvenance = {}, action, openEvidence }) {
+  const trackingProvenance = trackingProvenanceLabel(task, status, adapters, runProvenance);
   const intakeReason = taskText(task.intake_decision_reason);
   return <Row id={`task-${task.id}`} className="pipeline-ledger-row" data-task-status={status}>
     <DataCell><StatusPill tone={taskStatusTone(status)} label={status} /></DataCell>
@@ -647,10 +726,9 @@ function TaskLedgerRow({ task, status, projectId, adapters = [], action, openEvi
       <strong className="ledger-task-title" title={taskText(task.summary) || task.id}>{taskDisplayName(task)}</strong>
       {task.task_kind === "acceptance_verification" && <span className="pill">acceptance_verification</span>}
     </DataCell>
-    <DataCell><TokenComparison estimate={task.estimate_tokens} actual={task.actual_tokens} /></DataCell>
+    <DataCell><TokenComparison estimate={task.estimate_tokens} actual={task.actual_tokens} provenance={trackingProvenance} /></DataCell>
     <DataCell>
       <div className="ledger-evidence">
-        <span>{trackingLabel}</span>
         {task.intake_decision && <span>Intake · {task.intake_decision}{intakeReason ? ` — ${intakeReason}` : ""}</span>}
         {task.launch_model && <span>Run model · {task.launch_model}</span>}
         {task.task_branch && <span>{task.task_branch}</span>}
@@ -709,6 +787,21 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
     firstControl?.focus();
   };
 
+  const positionPopover = () => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const panel = popoverRef.current;
+    const trigger = document.getElementById(triggerId);
+    if (!panel || !trigger) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const placement = launchPopoverPlacement(triggerRect, window.innerWidth, window.innerHeight);
+    panel.dataset.placement = placement.placement;
+    panel.style.width = `${placement.width}px`;
+    panel.style.left = `${placement.left}px`;
+    panel.style.top = placement.top;
+    panel.style.bottom = placement.bottom;
+    panel.style.maxHeight = `${placement.maxHeight}px`;
+  };
+
   const afterPaint = (callback) => {
     if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(callback);
@@ -732,6 +825,7 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
       return;
     }
     const panel = popoverRef.current;
+    positionPopover();
     if (typeof panel?.showPopover === "function") panel.showPopover();
     setOpen(true);
     afterPaint(focusFirstControl);
@@ -752,6 +846,16 @@ function LaunchPopover({ task, projectId, adapters = [], action }) {
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return undefined;
+    window.addEventListener("resize", positionPopover);
+    window.addEventListener("scroll", positionPopover, true);
+    return () => {
+      window.removeEventListener("resize", positionPopover);
+      window.removeEventListener("scroll", positionPopover, true);
+    };
   }, [open]);
 
   const launch = () => {
@@ -843,8 +947,7 @@ export function investigationMessage(tasks, taskId) {
 export function PlanningPane({
   projectId,
   onTurnComplete,
-  defaultExpanded,
-  pane = defaultExpanded ? "pipeline" : "floor",
+  pane,
   expanded,
   onExpandedChange,
   initialMessage = "",
@@ -946,7 +1049,6 @@ function FloorSurface({
     <PlanningPane
       projectId={projectId}
       onTurnComplete={onTurnComplete}
-      defaultExpanded={false}
       expanded={planningExpanded}
       onExpandedChange={onPlanningExpandedChange}
       pane="floor"

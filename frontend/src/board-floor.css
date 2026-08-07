@@ -279,23 +279,17 @@
   gap: 8px;
   min-width: 0;
 }
-.launch-popover > .btn {
-  anchor-name: --launch-popover-trigger;
-}
 .launch-popover-panel {
   position: fixed;
-  position-anchor: --launch-popover-trigger;
-  top: anchor(bottom);
-  left: anchor(left);
-  right: auto;
-  bottom: auto;
+  inset: auto;
   display: grid;
   gap: 10px;
   width: min(20rem, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
-  margin: 8px 0 0;
+  margin: 0;
   padding: 12px;
   overflow: auto;
+  box-sizing: border-box;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   background: var(--surface-panel);
@@ -313,15 +307,6 @@
 }
 .launch-popover-panel .card-guardrails {
   min-width: 0;
-}
-
-@supports not (top: anchor(bottom)) {
-  .launch-popover-panel {
-    top: 50%;
-    left: 50%;
-    margin: 0;
-    transform: translate(-50%, -50%);
-  }
 }
 
 @media (max-width: 700px) {

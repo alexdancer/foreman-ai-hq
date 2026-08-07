@@ -23,6 +23,8 @@ let DashboardState;
 let BoardState;
 let EvidenceDrawerState;
 let loadEvidenceDrawer;
+let loadBoardRunProvenance;
+let launchPopoverPlacement;
 let boardNoticeFromSearch;
 let mergeBoardStatus;
 let taskDisplayName;
@@ -120,6 +122,8 @@ before(async () => {
     boardNoticeFromSearch,
     EvidenceDrawerState,
     loadEvidenceDrawer,
+    loadBoardRunProvenance,
+    launchPopoverPlacement,
     mergeBoardStatus,
     pollBoardStatus,
     submitBoardAction,
@@ -1456,9 +1460,16 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     next_action: { text: "Open Worker Setup." },
   };
   let renderer;
+  const runProvenance = {
+    "/sessions/session-demo-999": {
+      available: true,
+      adapterId: "opencode",
+      trackingMode: "native_usage",
+    },
+  };
   await act(async () => {
     renderer = create(React.createElement(BoardState, {
-      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false, action: () => {},
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false, action: () => {}, runProvenance,
     }));
   });
   const pipeline = JSON.stringify(renderer.toJSON());
@@ -1474,8 +1485,8 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     "Running DEMO task",
     "Review DEMO task",
     "Done DEMO task",
-    "Current launch tracking",
-    "Run tracking · Authoritative Session Report",
+    "Current launch · CLI: Track native usage after run",
+    "opencode · native_usage · CLI usage reconciled after the run",
     "Needs operator disposition",
     "Last launch failed · retryable",
     "Launch options",
@@ -1524,6 +1535,64 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   await act(async () => { launchDialog.props.onKeyDown({ key: "Escape", preventDefault() {} }); });
   assert.equal(launchOptions.props["aria-expanded"], false);
   await act(async () => { renderer.unmount(); });
+
+  let reportUrl;
+  const loadedProvenance = await loadBoardRunProvenance(data.tasks_by_status, async (url) => {
+    reportUrl = url;
+    return reportData();
+  });
+  assert.equal(reportUrl, "/api/sessions/session-demo-999/report");
+  assert.deepEqual(loadedProvenance["/sessions/session-demo-999"], {
+    available: true,
+    adapterId: "opencode",
+    trackingMode: "native_usage",
+  });
+
+  const advisoryData = boardData();
+  advisoryData.needs_you = { project_id: "demo-999", count: 1, items: [lowConfidenceItem()] };
+  const advisory = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999", surface: "pipeline", data: advisoryData, error: null, loading: false,
+  }));
+  assert.match(advisory, /Running work/);
+  assert.doesNotMatch(advisory, /Low confidence estimate/);
+
+  const mixedAttentionData = boardData();
+  mixedAttentionData.needs_you.items = [lowConfidenceItem(), mixedAttentionData.needs_you.items[0]];
+  const mixedAttention = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999", surface: "pipeline", data: mixedAttentionData, error: null, loading: false,
+  }));
+  assert.match(mixedAttention, /Review proposed Task Breakdown/);
+  assert.doesNotMatch(mixedAttention, /Low confidence estimate/);
+
+  const fragmentData = boardData();
+  fragmentData.needs_you.items = [fragmentData.needs_you.items[1]];
+  let fragmentRenderer;
+  await act(async () => {
+    fragmentRenderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data: fragmentData, error: null, loading: false,
+    }));
+  });
+  const fragmentLink = fragmentRenderer.root.findAllByType("a")
+    .find((link) => link.props.href === "/projects/demo-999#task-task-estimated-999");
+  assert.equal(fragmentLink.props.onClick, undefined);
+  await act(async () => { fragmentRenderer.unmount(); });
+
+  assert.deepEqual(launchPopoverPlacement({ top: 700, bottom: 730, left: 900 }, 1100, 900), {
+    placement: "above",
+    width: 320,
+    left: 764,
+    top: "auto",
+    bottom: "208px",
+    maxHeight: 676,
+  });
+  assert.deepEqual(launchPopoverPlacement({ top: 40, bottom: 70, left: 4 }, 300, 900), {
+    placement: "below",
+    width: 268,
+    left: 16,
+    top: "78px",
+    bottom: "auto",
+    maxHeight: 806,
+  });
 
   const emptyData = boardData();
   emptyData.tasks_by_status = Object.fromEntries(["Estimated", "Running", "Review", "Done"].map((status) => [status, []]));
