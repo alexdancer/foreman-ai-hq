@@ -19,15 +19,15 @@ function ContractSurface() {
           <section className="rail-group" aria-label="Project">
             <h2 className="rail-group-title">Project</h2>
             <nav>
-              <a id="rail-contract-link" data-rail-link="true" aria-label="Pipeline, 3 Needs You" href="/projects/demo-999">
-                <span className="nav-glyph" aria-hidden="true">P</span><span className="rail-label">Pipeline</span>
+              <a id="rail-contract-link" data-rail-link="true" aria-label="Needs You, 3 Needs You" href="/projects/demo-999/needs-you">
+                <span className="nav-glyph" aria-hidden="true">N</span><span className="rail-label">Needs You</span>
                 <span className="nav-badge nav-badge-needs-you" aria-label="3 Needs You"><span aria-hidden="true">3</span></span>
               </a>
             </nav>
           </section>
         </aside>
         <div className="shell-workbench">
-          <div className="context-bar" aria-label="Page context">Project / Pipeline</div>
+          <div className="context-bar" aria-label="Page context">Project / Needs You</div>
           <div className="main">
             <div className="task-breakdown-workbench" id="review-grid-contract">
               <header className="review-workbench-header">Review header</header>
@@ -136,7 +136,7 @@ async function inspect() {
   requireContract(getComputedStyle(railLabel).position === "absolute", "collapsed rail still renders full-width labels");
   railLink.focus();
   requireContract(railLink.matches(":focus-visible"), "collapsed rail link is not keyboard focusable");
-  requireContract(railLink.getAttribute("aria-label") === "Pipeline, 3 Needs You", "collapsed rail link loses its badge state");
+  requireContract(railLink.getAttribute("aria-label") === "Needs You, 3 Needs You", "collapsed rail link loses its badge state");
   requireContract(getComputedStyle(railLabel).clip === "auto", "focused collapsed rail label stays clipped");
   requireContract(railLabel.getBoundingClientRect().width > 1, "focused collapsed rail label is not visible");
   const contentBadge = document.querySelector("#content-contract-badge");

@@ -152,10 +152,10 @@ test("Panel trio composes header markers three ways", () => {
   assert.match(bare, /^<div class="panel-header"><h3>Only<\/h3><\/div>$/);
 
   const panel = html(
-    React.createElement(Panel, { className: "planning-inbox", id: "p" },
+    React.createElement(Panel, { className: "needs-you", id: "p" },
       React.createElement(PanelBody, { className: "needs-you-list" }, "body")),
   );
-  assert.match(panel, /^<section class="panel planning-inbox" id="p">/);
+  assert.match(panel, /^<section class="panel needs-you" id="p">/);
   assert.match(panel, /<div class="panel-body needs-you-list">body<\/div>/);
 
   const asHeader = html(React.createElement(Panel, { as: "header", className: "pipeline-header" }, "x"));

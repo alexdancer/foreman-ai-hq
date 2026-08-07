@@ -258,7 +258,7 @@ def project_workspace_summary(database_path: Path | str, project: dict[str, Any]
         attention_actions.append(
             {
                 "label": "Blocked work",
-                "href": f"/projects/{project_id}#needs-you",
+                "href": f"/projects/{project_id}/needs-you",
                 "tone": "yellow",
                 "detail": f"{blocked_count} slices need guardrail, setup, or manual-estimate attention.",
             }

@@ -113,6 +113,41 @@ def test_project_board_redirects_to_pipeline_and_floor_checks_project(tmp_path, 
     assert missing.status_code == 404
 
 
+@pytest.mark.parametrize(("complete", "expected_status"), [(True, 200), (False, 503)])
+def test_canonical_needs_you_route_uses_the_authenticated_shell_or_recovery_boundary(
+    tmp_path, monkeypatch, complete, expected_status
+):
+    """Needs You owns one project route and validates project existence before build state."""
+
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    build_dir = _build_react_assets(tmp_path) if complete else _build_partial_react_assets(tmp_path)
+    monkeypatch.setattr(react_shell, "react_build_dir", lambda: build_dir)
+    database_path = tmp_path / "harness.db"
+    with _client(tmp_path) as client:
+        project = _connect_project(database_path, tmp_path / "needs-you-route-repo")
+        unauthorized = client.get(f"/projects/{project['id']}/needs-you")
+        response = client.get(
+            f"/projects/{project['id']}/needs-you", headers=_portal_headers()
+        )
+        missing = client.get(
+            "/projects/missing-DEMO-999/needs-you", headers=_portal_headers()
+        )
+        app_alias = client.get(
+            f"/app/projects/{project['id']}/needs-you",
+            headers=_portal_headers(),
+            follow_redirects=False,
+        )
+
+    assert unauthorized.status_code == 401
+    assert response.status_code == expected_status
+    if complete:
+        assert 'id="root"' in response.text
+    else:
+        assert "not built" in response.text
+    assert missing.status_code == 404
+    assert app_alias.status_code == 404
+
+
 def test_needs_you_aggregates_project_decisions_and_drives_nav_badge(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     database_path = tmp_path / "harness.db"
@@ -1095,6 +1130,15 @@ def test_react_workspace_state_uses_exact_contract_and_route_ownership(tmp_path,
             status="Running",
             metadata=project_task_metadata(project),
         )
+        db.create_task(
+            database_path,
+            description="DEMO blocked workspace slice 999",
+            status="Estimated",
+            metadata={
+                **project_task_metadata(project),
+                "blocked_condition": {"reason": "Manual estimate required"},
+            },
+        )
         response = client.get(
             f"/api/projects/{project['id']}/workspace", headers=_portal_headers()
         )
@@ -1139,6 +1183,11 @@ def test_react_workspace_state_uses_exact_contract_and_route_ownership(tmp_path,
     )
     assert running["href"] == f"/projects/{project['id']}/floor"
     assert set(running) == {"label", "detail", "href", "tone"}
+    blocked = next(
+        action for action in payload["summary"]["attention_actions"]
+        if action["label"] == "Blocked work"
+    )
+    assert blocked["href"] == f"/projects/{project['id']}/needs-you"
     serialized = json.dumps(payload)
     for excluded in (
         "backend_id", "archived_by", "created_at", "updated_at", "can_launch",

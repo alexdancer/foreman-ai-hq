@@ -897,6 +897,7 @@ def _workspace_action_href(value, project_id: str) -> str | None:
         f"/projects/{project_id}/board": board_href,
         f"/app/projects/{project_id}/board": board_href,
         f"/projects/{project_id}": board_href,
+        f"/projects/{project_id}/needs-you": f"/projects/{project_id}/needs-you",
         f"/projects/{project_id}/floor": f"/projects/{project_id}/floor",
         f"/projects/{project_id}/task-history": f"/projects/{project_id}/task-history",
         "/sessions": "/sessions",

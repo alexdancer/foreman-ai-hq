@@ -65,8 +65,8 @@ Wraps `.panel` / `.panel-header` / `.panel-body`. `Panel` is polymorphic (`as`,
 default `<section>`); `id` and extra classes pass through.
 
 ```jsx
-<Panel className="planning-inbox">
-  <PanelHeader title="Planning Inbox" count={planning.length} />
+<Panel className="needs-you">
+  <PanelHeader title="Needs You" badge={<span className="nav-badge">{count}</span>} />
   <PanelBody className="needs-you-list">{/* … */}</PanelBody>
 </Panel>
 
