@@ -52,9 +52,9 @@ capability rather than a Task kind.**
    panel was, on the existing project-home route. This is explicitly *not* a new surface:
    the Pipeline Surface already replaced the Workspace column preview for duplicating
    board state as a third surface, and a chat pane must not reintroduce that. One
-   collapsible chat component serves both surfaces — open by default on the Pipeline
-   Surface, collapsed to a rail on the Execution Floor so the Evidence Drawer keeps its
-   width. Collapse is also the narrow-viewport answer.
+   collapsible chat component serves both surfaces. The later accepted
+   [Portal operator workbench specification](../design/portal-operator-workbench-spec.md)
+   owns its presentation and supersedes the original default-open behavior.
 
 4. **A completed chat turn refreshes the board** regardless of
    `automation.live_refresh_enabled`. That flag governs background polling; a resolved

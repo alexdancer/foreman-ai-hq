@@ -11,7 +11,7 @@ The harness is structurally single-threaded (`board_automation` tracks a singula
 
 ## Decision
 
-We will present the Orchestration Board as two surfaces — a **Pipeline Surface** for planning (intake and Estimated tasks) at the project home `/projects/{id}`, and an **Execution Floor** for running, review, and recently-completed work at `/projects/{id}/floor` — retiring the single five-column kanban and the duplicate Workspace column preview. Pending operator decisions, including Proposed Task Breakdowns, live at the canonical project-scoped Needs You route `/projects/{id}/needs-you` rather than in a second Planning Inbox projection.
+We will present the Orchestration Board as two surfaces — a **Pipeline Surface** at the project home `/projects/{id}` and an **Execution Floor** at `/projects/{id}/floor` — retiring the single five-column kanban and the duplicate Workspace column preview. The later accepted [Portal operator workbench specification](../design/portal-operator-workbench-spec.md) owns the Pipeline presentation and expands it from intake and Estimated work into the project ledger. Pending operator decisions, including Proposed Task Breakdowns, live at the canonical project-scoped Needs You route `/projects/{id}/needs-you` rather than in a second Planning Inbox projection.
 
 ## Alternatives considered
 

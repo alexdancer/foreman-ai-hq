@@ -82,7 +82,7 @@ This updates the global `foremanctl` CLI and preserves repo-local `.foreman/` st
 4. Run `pi /login` to authenticate with your provider, then choose an Orchestrator Model from pi's inventory and verify it.
 5. Connect a local repository from `/projects`.
 6. Open `/settings/workers`, choose a Worker Adapter, discover/allow Worker models, then verify token tracking.
-7. Open the project's Pipeline at `/projects/{project_id}`, shape a tiny task in Planning Chat, select **Create governed work**, and launch the resulting Estimated Task.
+7. Open the project's Pipeline at `/projects/{project_id}`. When intake is the next action, expand Planning Chat, shape a tiny task, and select **Create governed work**; launch the resulting Estimated Task from its ledger-row popover.
 8. Follow the run on `/projects/{project_id}/floor`; open its Evidence Drawer before marking the task done.
 
 Default loopback `foremanctl serve` opens the local Portal without a login token. If you bind the Portal to `0.0.0.0`, run it behind a proxy, or use Docker/shared access, keep the portal token from ignored `.foreman/secrets.env` and sign in through `/login`.
@@ -112,7 +112,7 @@ Representative local Portal screens using synthetic/public-safe data:
 2. **Estimate** with the Orchestrator Model.
 3. **Launch** through a verified Worker Adapter.
 4. **Run async** on the Execution Floor while the Portal stays responsive.
-5. **Review evidence** in the card's side drawer: command plan, Worker events, token usage, checkpoints, and Agent Review; the Session Report remains the full permalink.
+5. **Review evidence** from a Pipeline ledger row or Execution Floor card: command plan, Worker events, token usage, checkpoints, and Agent Review appear in the Evidence Drawer; the Session Report remains the full permalink.
 6. **Accept or block** as the human operator.
 
 Task lifecycle states are:
