@@ -1983,7 +1983,7 @@ function breakdownReviewData(status = "proposed") {
   };
 }
 
-function breakdownDraft(data, { overflow = false } = {}) {
+function breakdownDraft(data, { overflow = false, total = data.candidates.pagination.total } = {}) {
   const fields = Object.fromEntries(Object.entries(data.candidates.items[0] || {})
     .filter(([, value]) => value && typeof value === "object" && "preview" in value)
     .map(([field, value]) => [field, {
@@ -1995,7 +1995,7 @@ function breakdownDraft(data, { overflow = false } = {}) {
       index: 0, selected: true, kind: "implementation", executionMode: "AFK",
       kindTouched: false, executionModeTouched: false, fields,
     }] : [],
-    candidatePagination: { ...data.candidates.pagination, has_more: overflow, next_href: overflow ? "/api/task-breakdowns/demo/evidence/candidates?offset=1&limit=50" : null },
+    candidatePagination: { ...data.candidates.pagination, total, has_more: overflow, next_href: overflow ? "/api/task-breakdowns/demo/evidence/candidates?offset=1&limit=50" : null },
     globalContract: { value: "DEMO global contract 999", loaded: true, touched: false, error: null },
     globalConstraints: { value: "DEMO global constraint 999", loaded: true, touched: false, error: null },
     verification: { value: "Run DEMO verification 999", loaded: true, touched: false, error: null },
@@ -2004,6 +2004,7 @@ function breakdownDraft(data, { overflow = false } = {}) {
 
 function renderBreakdown(status, options = {}) {
   const data = breakdownReviewData(status);
+  if (options.repoContextAvailable === false) data.repo_context.available = false;
   if (options.acceptanceClaim) {
     data.controls = {
       can_accept: false,
@@ -2026,8 +2027,9 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
   const markup = renderBreakdown("proposed", { dirty: true });
   for (const text of [
     "Task Breakdown Review", "DEMO title 999", "Candidate kind", "Execution mode",
-    "Acceptance criteria", "Candidate proof / verification path", "Task slicing evidence",
+    "Acceptance criteria", "Candidate proof / verification path", "Slicing rationale",
     "Global contract summary", "Rejected as Tasks", "Repo Context Brief",
+    "4 context groups",
     "Intake decision", "needs_breakdown", "Intake reason", "DEMO intake reason 999",
     "Accept selected and estimate", "Unsaved browser-local edits",
   ]) assert.match(markup, new RegExp(text));
@@ -2035,9 +2037,138 @@ test("Task Breakdown Review renders proposed parity and bounded edit gates", () 
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-describedby="[^"]+-disabled-reason"/);
   assert.match(markup, /Complete text must load before this field can be edited\./);
+  assert.match(renderBreakdown("proposed", { repoContextAvailable: false }), /3 context groups/);
   assertDisabledControlsHaveReasons(markup);
   assertStatusPillsHaveGlyphs(markup);
   assert.match(markup, /class="status-pill-label">proposed<\/span>/);
+});
+
+test("Task Breakdown Review workbench keeps focus, selection, disclosure, and confirmation distinct", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const originalActFlag = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = originalActFlag;
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const data = breakdownReviewData("proposed");
+  data.review.source_text = bounded("Complete DEMO source 2099");
+  data.candidates.items.push({
+    ...data.candidates.items[0],
+    index: 1,
+    accepted_by_default: false,
+    title: bounded("DEMO title 2"),
+  });
+  data.candidates.pagination = { offset: 0, limit: 50, total: 2, has_more: false, next_href: null };
+  const posted = [];
+  globalThis.window = {
+    location: { pathname: data.links.self_href, assign: () => {} },
+    confirm: () => true,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === data.links.api_href) return { ok: true, json: async () => data };
+    if (options.method === "POST") {
+      posted.push({ url, body: Object.fromEntries(options.body.entries()) });
+      return { ok: true, json: async () => ({ ok: true, next_href: data.links.board_href }) };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  let renderer;
+  await act(async () => { renderer = create(mountedReview(data.review.id)); });
+  const navigator = renderer.root.findByProps({ "aria-label": "Candidate navigator" });
+  let rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].props["aria-current"], "true");
+  assert.equal(rows[0].props.tabIndex, 0);
+  assert.equal(rows[1].props.tabIndex, -1);
+  assert.match(rows[0].parent.props.className, /is-disabled/, "unloaded text is visibly disabled");
+  assert.match(JSON.stringify(renderer.toJSON()), /Identity|Contract|Proof of done|Slicing rationale/);
+  assert.match(JSON.stringify(renderer.toJSON()), /5 rationale fields/);
+  assert.match(navigator.props.className, /review-navigator/);
+
+  const keyDown = (key) => ({ key, preventDefault: () => {} });
+  await act(async () => { rows[0].props.onKeyDown(keyDown("ArrowDown")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[1].props.tabIndex, 0);
+  assert.equal(rows[1].props["aria-current"], "true");
+  assert.equal(rows[0].props.tabIndex, -1);
+
+  await act(async () => { rows[1].props.onKeyDown(keyDown("ArrowUp")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[0].props.tabIndex, 0, "ArrowUp moves focus backward");
+  await act(async () => { rows[0].props.onKeyDown(keyDown("j")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[1].props.tabIndex, 0, "j moves focus forward");
+  await act(async () => { rows[1].props.onKeyDown(keyDown("k")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.equal(rows[0].props.tabIndex, 0, "k moves focus backward");
+  await act(async () => { rows[0].props.onKeyDown(keyDown("j")); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+
+  await act(async () => { rows[0].props.onKeyDown(keyDown(" ")); });
+  let candidates = renderer.root.findAllByType("input").filter((input) => input.props.type === "checkbox");
+  assert.deepEqual(candidates.map((input) => input.props.checked), [true, false], "Space ignores an unfocused row");
+  await act(async () => { rows[1].props.onKeyDown(keyDown(" ")); });
+  candidates = renderer.root.findAllByType("input").filter((input) => input.props.type === "checkbox");
+  assert.deepEqual(candidates.map((input) => input.props.checked), [true, true]);
+  const editableTitle = renderer.root.findAllByType("input").find((input) => input.props.value === "DEMO title 2");
+  assert.equal(editableTitle.props.onKeyDown, undefined, "text editing keeps native arrow-key behavior");
+
+  await act(async () => { rows[1].props.onKeyDown(keyDown("Enter")); });
+  assert.equal(renderer.root.findByProps({ "data-slicing-rationale": "1" }).props.open, true);
+
+  await act(async () => { editableTitle.props.onChange({ target: { value: "" } }); });
+  rows = renderer.root.findAll((node) => node.props["data-candidate-index"] !== undefined);
+  assert.match(rows[1].parent.props.className, /is-edited/, "edited state is distinct from selection");
+  assert.match(rows[1].parent.props.className, /is-incomplete/, "blank required fields are visibly incomplete");
+  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, true);
+  assert.match(JSON.stringify(renderer.toJSON()), /Complete required text for 1 selected candidate before acceptance\./);
+
+  await act(async () => { editableTitle.props.onChange({ target: { value: "DEMO title 2" } }); });
+  const globalContract = renderer.root.findAllByType("textarea").find((field) => field.props.value === "DEMO global contract 999");
+  await act(async () => { globalContract.props.onChange({ target: { value: "" } }); });
+  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, true);
+  assert.match(JSON.stringify(renderer.toJSON()), /Complete the required global contract summary before acceptance\./);
+  await act(async () => { globalContract.props.onChange({ target: { value: "DEMO global contract 999" } }); });
+  assert.equal(reviewButton(renderer.root, "Accept selected").props.disabled, undefined);
+
+  await act(async () => { reviewButton(renderer.root, "Accept selected").props.onClick(); });
+  assert.equal(posted.length, 0, "opening confirmation never mutates");
+  let confirmation = renderer.root.findByProps({ role: "dialog" });
+  assert.ok(confirmation, "confirmation opens before the acceptance mutation");
+  let escapePrevented = false;
+  let escapeStopped = false;
+  await act(async () => {
+    confirmation.props.onKeyDown({
+      key: "Escape",
+      preventDefault: () => { escapePrevented = true; },
+      stopPropagation: () => { escapeStopped = true; },
+    });
+  });
+  assert.equal(escapePrevented, true);
+  assert.equal(escapeStopped, true);
+  assert.throws(() => renderer.root.findByProps({ role: "dialog" }), "Escape closes the confirmation overlay");
+
+  await act(async () => { reviewButton(renderer.root, "Accept selected").props.onClick(); });
+  confirmation = renderer.root.findByProps({ role: "dialog" });
+  assert.match(JSON.stringify(renderer.toJSON()), /DEMO title 999|DEMO title 2/);
+  await act(async () => { reviewButton(renderer.root, "Accept and estimate").props.onClick(); });
+  assert.deepEqual(posted, [{
+    url: data.links.accept_href,
+    body: {
+      accept_0: "1",
+      accept_1: "1",
+      title_1: "DEMO title 2",
+      global_contract_summary: "DEMO global contract 999",
+    },
+  }]);
+  await act(async () => { renderer.unmount(); });
 });
 
 test("Task Breakdown Review renders failed recovery, accepted evidence, and overflow gate", () => {
@@ -2059,9 +2190,10 @@ test("Task Breakdown Review renders failed recovery, accepted evidence, and over
   assert.doesNotMatch(accepted, /Accept selected and estimate/);
   assertNoNestedPanels(accepted);
 
-  const overflow = renderBreakdown("proposed", { overflow: true });
+  const overflow = renderBreakdown("proposed", { overflow: true, total: 21 });
   assert.match(overflow, /Load remaining candidates/);
   assert.match(overflow, /Load every candidate before acceptance/);
+  assert.match(overflow, /1 of 21 candidates selected\./);
   assert.match(overflow, /Accept selected and estimate<\/button>/);
   assert.match(overflow, /class="disabled-reason"[^>]*>Load every candidate before acceptance\.<\/span>/);
   assertDisabledControlsHaveReasons(overflow);

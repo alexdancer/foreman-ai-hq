@@ -27,8 +27,16 @@ export const ConfirmSheet = forwardRef(function ConfirmSheet({
   onCloseRef.current = onClose;
   useImperativeHandle(forwardedRef, () => dialogRef.current);
 
+  const dismissOnEscape = (event) => {
+    if (event.key !== "Escape") return false;
+    event.preventDefault();
+    onCloseRef.current();
+    return true;
+  };
+
   useEffect(() => {
-    if (!open) return undefined;
+    // SSR renders the sheet markup but has no DOM for focus handling.
+    if (!open || typeof document === "undefined") return undefined;
     const dialog = dialogRef.current;
     const opener = document.activeElement;
     if (!dialog) return undefined;
@@ -38,11 +46,7 @@ export const ConfirmSheet = forwardRef(function ConfirmSheet({
     initialTarget.focus();
 
     const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
+      if (dismissOnEscape(event)) return;
       if (event.key !== "Tab") return;
       const targets = focusable();
       if (targets.length === 0) {
@@ -75,6 +79,13 @@ export const ConfirmSheet = forwardRef(function ConfirmSheet({
   if (!open) return null;
   const titleId = `${generatedId}-title`;
   const descriptionId = description ? `${generatedId}-description` : undefined;
+  const onDialogKeyDown = (event) => {
+    if (dismissOnEscape(event)) {
+      event.stopPropagation();
+      return;
+    }
+    rest.onKeyDown?.(event);
+  };
 
   return (
     <div className="confirm-sheet-backdrop" role="presentation">
@@ -87,6 +98,7 @@ export const ConfirmSheet = forwardRef(function ConfirmSheet({
         aria-describedby={descriptionId}
         tabIndex={-1}
         {...rest}
+        onKeyDown={onDialogKeyDown}
       >
         <header className="confirm-sheet-header">
           <h2 id={titleId}>{title}</h2>
