@@ -463,7 +463,33 @@ function boardData() {
       is_default: true,
       launchable: true,
       allowed_models: ["gpt-5.4"],
-      tracking: { mode: "native_usage", label: "CLI: Track native usage after run" },
+      tracking: {
+        mode: "native_usage",
+        label: "CLI: Track native usage after run",
+        accounting: "Budget-authoritative after run",
+      },
+    }, {
+      id: "proxy-adapter",
+      name: "Proxy Adapter",
+      is_default: false,
+      launchable: true,
+      allowed_models: ["gpt-5.4"],
+      tracking: {
+        mode: "proxy_governed",
+        label: "API / Proxy: Governed through Harness Proxy",
+        accounting: "Budget-authoritative during run",
+      },
+    }, {
+      id: "observed-adapter",
+      name: "Observed Adapter",
+      is_default: false,
+      launchable: false,
+      allowed_models: ["gpt-5.4"],
+      tracking: {
+        mode: "observed_only",
+        label: "CLI: Observe command only",
+        accounting: "Not budget-authoritative",
+      },
     }],
     tasks_by_status: {
       Estimated: [card("Estimated", {
@@ -519,6 +545,18 @@ function reportData() {
     freshness: { session_id: "sess-demo-999", status: "running", active: true, version: "a".repeat(64), last_evidence_at: "2099-01-01T00:00:04Z" },
     links: { sessions_href: "/sessions", self_href: "/sessions/sess-demo-999" },
   };
+}
+
+function completedReportData() {
+  const data = reportData();
+  data.session.status = "completed";
+  data.session.active = false;
+  data.summary.status = "completed";
+  data.summary.result = sessionBounded("Worker completed");
+  data.summary.missing_labels = [];
+  data.freshness.status = "completed";
+  data.freshness.active = false;
+  return data;
 }
 
 test("only exact React routes are parsed as owned views", () => {
@@ -1459,11 +1497,21 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     summary: { text: "DEMO launch failure" },
     next_action: { text: "Open Worker Setup." },
   };
+  data.tasks_by_status.Running[0].session_href = "/sessions/proxy-demo-999";
+  data.tasks_by_status.Done[0].session_href = "/sessions/observed-demo-999";
   let renderer;
   const runProvenance = {
     "/sessions/session-demo-999": {
       adapterId: "opencode",
       trackingMode: "native_usage",
+    },
+    "/sessions/proxy-demo-999": {
+      adapterId: "proxy-adapter",
+      trackingMode: "proxy_governed",
+    },
+    "/sessions/observed-demo-999": {
+      adapterId: "observed-adapter",
+      trackingMode: "observed_only",
     },
   };
   await act(async () => {
@@ -1485,7 +1533,9 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     "Review DEMO task",
     "Done DEMO task",
     "Current launch · CLI: Track native usage after run",
-    "opencode · native_usage · Session Report",
+    "opencode · native_usage · Budget-authoritative after run · Session Report",
+    "proxy-adapter · proxy_governed · Budget-authoritative during run · Session Report",
+    "observed-adapter · observed_only · Not budget-authoritative · Session Report",
     "Needs operator disposition",
     "Last launch failed · retryable",
     "Launch options",
@@ -1535,15 +1585,20 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   assert.equal(launchOptions.props["aria-expanded"], false);
   await act(async () => { renderer.unmount(); });
 
-  let reportUrl;
+  const reportUrls = [];
   const loadedProvenance = await loadBoardRunProvenance(data.tasks_by_status, async (url) => {
-    reportUrl = url;
-    return reportData();
+    reportUrls.push(url);
+    return completedReportData();
   });
-  assert.equal(reportUrl, "/api/sessions/session-demo-999/report");
+  assert.deepEqual(reportUrls.sort(), [
+    "/api/sessions/observed-demo-999/report",
+    "/api/sessions/proxy-demo-999/report",
+    "/api/sessions/session-demo-999/report",
+  ]);
   assert.deepEqual(loadedProvenance["/sessions/session-demo-999"], {
     adapterId: "opencode",
     trackingMode: "native_usage",
+    retryable: false,
   });
   const cachedProvenance = await loadBoardRunProvenance(
     data.tasks_by_status,
@@ -1560,12 +1615,13 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
   assert.equal(failedProvenance["/sessions/session-demo-999"].retryable, true);
   const recoveredProvenance = await loadBoardRunProvenance(data.tasks_by_status, async () => {
     retryAttempts += 1;
-    return reportData();
+    return completedReportData();
   }, failedProvenance);
-  assert.equal(retryAttempts, 2);
+  assert.equal(retryAttempts, 6);
   assert.deepEqual(recoveredProvenance["/sessions/session-demo-999"], {
     adapterId: "opencode",
     trackingMode: "native_usage",
+    retryable: false,
   });
 
   let activeReportLoads = 0;
@@ -1585,9 +1641,54 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     peakReportLoads = Math.max(peakReportLoads, activeReportLoads);
     await new Promise((resolve) => setTimeout(resolve, 0));
     activeReportLoads -= 1;
-    return reportData();
+    return completedReportData();
   });
   assert.equal(peakReportLoads, 3);
+
+  const activeTasks = {
+    Estimated: [],
+    Running: [],
+    Review: [data.tasks_by_status.Review[0]],
+    Done: [],
+  };
+  const activeProvenance = await loadBoardRunProvenance(activeTasks, async () => reportData());
+  assert.deepEqual(activeProvenance["/sessions/session-demo-999"], {
+    adapterId: "opencode",
+    trackingMode: "native_usage",
+    retryable: true,
+  });
+  let activeRetry = 0;
+  const settledProvenance = await loadBoardRunProvenance(activeTasks, async () => {
+    activeRetry += 1;
+    return completedReportData();
+  }, activeProvenance);
+  assert.equal(activeRetry, 1);
+  assert.equal(settledProvenance["/sessions/session-demo-999"].retryable, false);
+
+  const missingReport = completedReportData();
+  missingReport.summary.adapter_id = "missing Worker Adapter evidence";
+  missingReport.summary.tracking_mode = "missing tracking-mode evidence";
+  missingReport.summary.missing_labels = ["missing Worker Run evidence"];
+  const missingProvenance = await loadBoardRunProvenance(activeTasks, async () => missingReport);
+  assert.deepEqual(missingProvenance["/sessions/session-demo-999"], {
+    adapterId: null,
+    trackingMode: null,
+    retryable: true,
+  });
+
+  const cancellation = new AbortController();
+  const releases = [];
+  let canceledReportLoads = 0;
+  const canceledLoad = loadBoardRunProvenance(boundedTasks, async () => {
+    canceledReportLoads += 1;
+    await new Promise((resolve) => { releases.push(resolve); });
+    return completedReportData();
+  }, {}, cancellation.signal);
+  while (canceledReportLoads < 3) await new Promise((resolve) => setImmediate(resolve));
+  cancellation.abort();
+  releases.forEach((release) => release());
+  await canceledLoad;
+  assert.equal(canceledReportLoads, 3);
 
   const retryableData = boardData();
   retryableData.tasks_by_status.Estimated[0].session_href = "/sessions/failed-demo-999";
@@ -1599,10 +1700,10 @@ test("Pipeline makes the next action and one four-bucket ledger primary without 
     error: null,
     loading: false,
     runProvenance: {
-      "/sessions/failed-demo-999": { adapterId: "adapter-a", trackingMode: "missing tracking-mode evidence" },
+      "/sessions/failed-demo-999": { adapterId: "adapter-a", trackingMode: "native_usage", retryable: false },
     },
   }));
-  assert.match(retryable, /adapter-a · missing tracking-mode evidence · Session Report/);
+  assert.match(retryable, /adapter-a · native_usage · Budget-authoritative after run · Session Report/);
   assert.doesNotMatch(retryable, /Current launch · CLI: Track native usage after run/);
 
   const advisoryData = boardData();

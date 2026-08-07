@@ -132,13 +132,23 @@ export function mergeBoardLiveEvents(current, sessionId, events) {
 }
 
 function provenanceFromReport(report) {
+  const adapterId = report?.summary?.adapter_id || null;
+  const trackingMode = report?.summary?.tracking_mode || null;
+  const missingLabels = report?.summary?.missing_labels || [];
+  const retryable = Boolean(
+    report?.freshness?.active
+    || String(adapterId || "").startsWith("missing ")
+    || String(trackingMode || "").startsWith("missing ")
+    || missingLabels.some((label) => label !== "no review blockers recorded"),
+  );
   return {
-    adapterId: report?.summary?.adapter_id || null,
-    trackingMode: report?.summary?.tracking_mode || null,
+    adapterId: String(adapterId || "").startsWith("missing ") ? null : adapterId,
+    trackingMode: String(trackingMode || "").startsWith("missing ") ? null : trackingMode,
+    retryable,
   };
 }
 
-export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSON, cached = {}) {
+export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSON, cached = {}, signal = null) {
   const tasksBySession = new Map();
   for (const status of COLUMNS) {
     for (const task of tasksByStatus?.[status] || []) {
@@ -151,13 +161,15 @@ export async function loadBoardRunProvenance(tasksByStatus, getJSONImpl = getJSO
   ));
   let cursor = 0;
   const worker = async () => {
-    while (cursor < pending.length) {
+    while (!signal?.aborted && cursor < pending.length) {
       const [sessionHref, task] = pending[cursor];
       cursor += 1;
       try {
         const report = await loadEvidenceDrawer(task, getJSONImpl);
+        if (signal?.aborted) return;
         provenance[sessionHref] = provenanceFromReport(report);
       } catch {
+        if (signal?.aborted) return;
         provenance[sessionHref] = { retryable: true, adapterId: null, trackingMode: null };
       }
     }
@@ -241,11 +253,12 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
   useEffect(() => { load(); }, [projectId, surface]);
   useEffect(() => {
     let current = true;
+    const controller = new AbortController();
     if (surface !== "pipeline" || state.loading || !state.data?.tasks_by_status) {
       setRunProvenance({});
-      return () => { current = false; };
+      return () => { current = false; controller.abort(); };
     }
-    loadBoardRunProvenance(state.data.tasks_by_status, getJSON, runProvenanceCache.current)
+    loadBoardRunProvenance(state.data.tasks_by_status, getJSON, runProvenanceCache.current, controller.signal)
       .then((provenance) => {
         if (!current) return;
         runProvenanceCache.current = Object.fromEntries(
@@ -253,7 +266,7 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
         );
         setRunProvenance(provenance);
       });
-    return () => { current = false; };
+    return () => { current = false; controller.abort(); };
   }, [projectId, surface, ledgerSessionKey, state.loading]);
   useEffect(() => {
     if (!state.data?.automation?.live_refresh_enabled) return undefined;
@@ -722,10 +735,18 @@ function trackingProvenanceLabel(task, status, adapters, runProvenance) {
   if (task.session_href) {
     const provenance = runProvenance[task.session_href];
     if (!provenance) return "Session Report provenance loading";
-    if (provenance.retryable) return "Session Report provenance temporarily unavailable";
+    if (provenance.retryable && !provenance.adapterId && !provenance.trackingMode) {
+      return "Session Report provenance temporarily unavailable";
+    }
+    const accounting = adapters.find((adapter) => (
+      adapter.id === provenance.adapterId && adapter.tracking?.mode === provenance.trackingMode
+    ))?.tracking?.accounting || adapters.find((adapter) => (
+      adapter.tracking?.mode === provenance.trackingMode
+    ))?.tracking?.accounting;
     return [
       provenance.adapterId,
       provenance.trackingMode || "tracking mode unavailable",
+      accounting || "Accounting authority unavailable from current Worker projection",
       "Session Report",
     ].filter(Boolean).join(" · ");
   }
