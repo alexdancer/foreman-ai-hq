@@ -2,9 +2,99 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import { ConfirmSheet, Panel, PanelBody, PanelHeader, Skeleton, StatusPill } from "../src/components/ui/index.js";
+import { BoardState, EvidenceDrawerState } from "../src/views/Board.jsx";
 import "../src/tokens.css";
 
 const confirmSheetRef = React.createRef();
+
+const pipelineTask = {
+  id: "browser-task-999",
+  status: "Estimated",
+  summary: { text: "Browser launch contract", truncated: false },
+  estimate_tokens: 120,
+  actual_tokens: null,
+  recommended_model: "gpt-browser-999",
+  launch_model: null,
+  session_href: null,
+  task_kind: "implementation",
+  blocked_condition: null,
+  launch_failure: null,
+  controls: {
+    can_launch: true,
+    can_refresh: false,
+    can_archive: false,
+    can_dismiss: false,
+    requires_manual_estimate: false,
+    budget_override_available: false,
+    native_usage_override_ack_required: false,
+    native_usage_override_ack_text: null,
+    setup_href: "/settings/workers",
+    can_save_review_prompt: false,
+    can_agent_review: false,
+    can_mark_done: false,
+    can_block: false,
+    can_approve_commit: false,
+    can_open_pr: false,
+    pr_unavailable_reason: null,
+  },
+};
+
+const pipelineData = {
+  project: { id: "browser-project-999", name: "Browser project 999" },
+  workspace: {
+    project: {
+      id: "browser-project-999",
+      name: "Browser project 999",
+      archived_at: null,
+      capability: { state: "launch_ready", label: "Launch ready", reasons: [] },
+      profile: {},
+    },
+    summary: { launch_ready: true, attention_actions: [] },
+    controls: { can_restore: false },
+    links: {},
+  },
+  needs_you: { project_id: "browser-project-999", count: 0, items: [] },
+  adapters: [{
+    id: "browser-adapter",
+    name: "Browser adapter",
+    is_default: true,
+    launchable: true,
+    allowed_models: ["gpt-browser-999"],
+    tracking: { mode: "native_usage", label: "CLI native usage" },
+  }],
+  tasks_by_status: { Estimated: [pipelineTask], Running: [], Review: [], Done: [] },
+  board_summary: {
+    launch_ready: true,
+    total_tasks: 1,
+    counts: { Estimated: 1, Running: 0, Review: 0, Done: 0 },
+  },
+  automation: { queue: { status: "idle", auto_agent_review: false }, live_refresh_enabled: false },
+};
+
+function PipelineContract() {
+  const [selectedTask, setSelectedTask] = React.useState(null);
+  return <>
+    <section id="pipeline-interaction-contract">
+      <BoardState
+        projectId="browser-project-999"
+        surface="pipeline"
+        data={pipelineData}
+        error={null}
+        loading={false}
+        action={() => {}}
+        openEvidence={setSelectedTask}
+      />
+    </section>
+    {selectedTask && <EvidenceDrawerState
+      task={selectedTask}
+      projectId="browser-project-999"
+      data={null}
+      error={null}
+      loading={false}
+      onClose={() => setSelectedTask(null)}
+    />}
+  </>;
+}
 
 function ContractSurface() {
   const [confirming, setConfirming] = React.useState(false);
@@ -76,6 +166,8 @@ function ContractSurface() {
         </PanelBody>
       </Panel>
       <Panel><PanelHeader title="Sibling panel" /></Panel>
+      <button id="pipeline-outside-target" type="button">Outside target</button>
+      <PipelineContract />
     </main>
   );
 }
@@ -115,6 +207,87 @@ async function inspect() {
     () => !document.querySelector(".confirm-sheet") && document.activeElement === opener,
     "Escape does not close confirmation and restore opener focus",
   );
+
+  const pipeline = document.querySelector("#pipeline-interaction-contract");
+  const pipelineButton = (label) => [...pipeline.querySelectorAll("button")]
+    .find((button) => button.textContent.trim() === label);
+  const launchTrigger = pipelineButton("Launch options");
+  requireContract(launchTrigger, "Pipeline launch trigger is missing");
+  launchTrigger.scrollIntoView({ block: "center" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  launchTrigger.focus();
+  launchTrigger.click();
+  await waitForContract(() => {
+    const panel = pipeline.querySelector(".launch-popover-panel");
+    return panel?.matches(":popover-open") && document.activeElement === panel.querySelector("select");
+  }, "Pipeline launch popover does not open with focus");
+  const launchDialog = pipeline.querySelector(".launch-popover-panel");
+  const launchRect = launchDialog.getBoundingClientRect();
+  requireContract(
+    launchRect.top >= 0 && launchRect.bottom <= innerHeight && launchRect.left >= 0 && launchRect.right <= innerWidth,
+    "Pipeline launch popover escapes the viewport",
+  );
+  const launchControls = [...launchDialog.querySelectorAll(
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]",
+  )];
+  const launchFirst = launchControls[0];
+  const launchLast = launchControls.at(-1);
+  launchLast.focus();
+  launchLast.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  requireContract(document.activeElement === launchFirst, "Pipeline launch popover does not wrap forward focus");
+  launchFirst.focus();
+  launchFirst.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Tab", shiftKey: true, bubbles: true, cancelable: true,
+  }));
+  requireContract(document.activeElement === launchLast, "Pipeline launch popover does not wrap backward focus");
+  launchDialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await waitForContract(
+    () => !launchDialog.matches(":popover-open") && document.activeElement === launchTrigger,
+    "Escape does not close Pipeline launch popover and restore trigger focus",
+  );
+
+  launchTrigger.click();
+  await waitForContract(
+    () => launchDialog.matches(":popover-open"),
+    "Pipeline launch popover does not reopen",
+  );
+  document.querySelector("#pipeline-outside-target").dispatchEvent(new PointerEvent("pointerdown", {
+    bubbles: true, cancelable: true, button: 0, pointerId: 1, isPrimary: true,
+  }));
+  await waitForContract(
+    () => !launchDialog.matches(":popover-open") && launchTrigger.getAttribute("aria-expanded") === "false",
+    "Pipeline launch popover does not light-dismiss",
+  );
+
+  const evidenceTrigger = pipelineButton("View evidence");
+  requireContract(evidenceTrigger, "Pipeline evidence trigger is missing");
+  evidenceTrigger.focus();
+  evidenceTrigger.click();
+  await waitForContract(() => {
+    const drawer = document.querySelector(".evidence-drawer");
+    return drawer && document.activeElement === drawer;
+  }, "Pipeline evidence drawer does not receive focus");
+  const evidenceDrawer = document.querySelector(".evidence-drawer");
+  const evidenceControls = [...evidenceDrawer.querySelectorAll(
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )];
+  const evidenceFirst = evidenceControls[0];
+  const evidenceLast = evidenceControls.at(-1);
+  evidenceLast.focus();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  requireContract(document.activeElement === evidenceFirst, "Pipeline evidence drawer does not wrap forward focus");
+  evidenceFirst.focus();
+  document.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Tab", shiftKey: true, bubbles: true, cancelable: true,
+  }));
+  requireContract(document.activeElement === evidenceLast, "Pipeline evidence drawer does not wrap backward focus");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await waitForContract(
+    () => !document.querySelector(".evidence-drawer") && document.activeElement === evidenceTrigger,
+    "Escape does not close Pipeline evidence drawer and restore trigger focus",
+  );
+  window.scrollTo(0, 0);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   const select = document.querySelector("#contract-select");
   const track = document.querySelector("#select-track");

@@ -109,32 +109,19 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 )
                 page.locator("h1.page-title").wait_for(timeout=30000)
 
-                # Drive intake through the sole public task-creation surface.
-                intake = page.get_by_placeholder("Describe the task or goal…")
-                expect(intake).to_be_visible()
-                input_layout = intake.evaluate(
-                    """element => {
-                        const control = element.getBoundingClientRect();
-                        const track = element.parentElement.getBoundingClientRect();
-                        const style = getComputedStyle(element);
-                        return {
-                            controlLeft: control.left,
-                            controlRight: control.right,
-                            trackLeft: track.left,
-                            trackRight: track.right,
-                            minWidth: style.minWidth,
-                            maxWidth: style.maxWidth,
-                        };
-                    }"""
-                )
-                assert input_layout["controlLeft"] >= input_layout["trackLeft"] - 0.5
-                assert input_layout["controlRight"] <= input_layout["trackRight"] + 0.5
-                assert input_layout["minWidth"] == "0px"
-                assert input_layout["maxWidth"] == "100%"
+                # The Recorded Demo fixture starts at its documented accepted,
+                # Estimated task boundary; intake and breakdown have separate coverage.
+                task_id = demo.task_id
+                ledger = page.get_by_role("table", name="Project task ledger")
+                expect(ledger).to_be_visible()
+                row = ledger.get_by_role("row").filter(has_text=task_id)
+                expect(row).to_be_visible()
+                assert page.locator(".panel .panel").count() == 0
 
-                intake.focus()
-                assert intake.evaluate("element => element.matches(':focus-visible')")
-                focus_style = intake.evaluate(
+                launch_options = row.get_by_role("button", name="Launch options")
+                launch_options.focus()
+                assert launch_options.evaluate("element => element.matches(':focus-visible')")
+                focus_style = launch_options.evaluate(
                     """element => {
                         const style = getComputedStyle(element);
                         return {
@@ -149,27 +136,10 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                     "style": "solid",
                     "width": "2px",
                 }
-                assert page.locator(".panel .panel").count() == 0
-
-                intake.fill(
-                    "DEMO 999 read-only md link check fixture"
-                )
-                with page.expect_response(
-                    lambda response: "/planning/intake" in response.url and response.status == 200
-                ) as response_info:
-                    page.get_by_role("button", name="Create governed work").click()
-                outcome = response_info.value.json()["outcome"]
-                task_id = outcome["task_id"]
-                assert task_id
-
-                # The chat creates an implementation task by default; flip it to the
-                # read-only demo kind without another full run through the UI.
-                demo.set_task_kind_acceptance_verification(task_id)
-
-                # Wait for the new card to appear after the board refreshes.
-                card = page.locator("article.task").filter(has_text=task_id)
-                card.wait_for(timeout=30000)
-                card.locator("button:has-text('Launch')").click()
+                launch_options.click()
+                launch_dialog = page.get_by_role("dialog", name="Launch controls", exact=False)
+                expect(launch_dialog).to_be_visible()
+                launch_dialog.get_by_role("button", name="Launch", exact=True).click()
 
                 assert demo.entered.wait(timeout=15), "runner did not reach gate"
 

@@ -3651,9 +3651,7 @@ def test_react_setup_source_contract():
 
 
 def test_chat_front_door_has_no_legacy_intake_form_and_pane_state_matches_surface():
-    """9.6: The board no longer exposes a short-task intake form. The Planning
-    Chat pane is expanded by default on the Pipeline and collapsed by default
-    on the Execution Floor."""
+    """9.6: The board has no short-task form and Planning stays secondary."""
     board_source = Path("frontend/src/views/Board.jsx").read_text(encoding="utf-8")
     assert "board-intake" not in board_source
     assert "estimate-form" not in board_source
@@ -3662,7 +3660,8 @@ def test_chat_front_door_has_no_legacy_intake_form_and_pane_state_matches_surfac
     assert "function PipelineSurface(" in board_source
     assert "function FloorSurface(" in board_source
     assert "function PlanningPane(" in board_source
-    assert "defaultExpanded" in board_source
+    assert "pipeline: false" in board_source
+    assert "floor: false" in board_source
     assert "aria-expanded={expanded}" in board_source
     assert "is-collapsed" in board_source
     app_source = Path("frontend/src/App.jsx").read_text(encoding="utf-8")

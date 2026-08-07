@@ -23,6 +23,8 @@ let DashboardState;
 let BoardState;
 let EvidenceDrawerState;
 let loadEvidenceDrawer;
+let loadBoardRunProvenance;
+let launchPopoverPlacement;
 let boardNoticeFromSearch;
 let mergeBoardStatus;
 let taskDisplayName;
@@ -120,6 +122,8 @@ before(async () => {
     boardNoticeFromSearch,
     EvidenceDrawerState,
     loadEvidenceDrawer,
+    loadBoardRunProvenance,
+    launchPopoverPlacement,
     mergeBoardStatus,
     pollBoardStatus,
     submitBoardAction,
@@ -459,7 +463,43 @@ function boardData() {
       is_default: true,
       launchable: true,
       allowed_models: ["gpt-5.4"],
-      tracking: { mode: "native_usage", label: "CLI: Track native usage after run" },
+      tracking: {
+        mode: "native_usage",
+        label: "CLI: Track native usage after run",
+        accounting: "Budget-authoritative after run",
+      },
+    }, {
+      id: "proxy-adapter",
+      name: "Proxy Adapter",
+      is_default: false,
+      launchable: true,
+      allowed_models: ["gpt-5.4"],
+      tracking: {
+        mode: "proxy_governed",
+        label: "API / Proxy: Governed through Harness Proxy",
+        accounting: "Budget-authoritative during run",
+      },
+    }, {
+      id: "observed-adapter",
+      name: "Observed Adapter",
+      is_default: false,
+      launchable: false,
+      allowed_models: ["gpt-5.4"],
+      tracking: {
+        mode: "observed_only",
+        label: "CLI: Observe command only",
+        accounting: "Not budget-authoritative",
+      },
+    }],
+    tracking_mode_options: [{
+      mode: "native_usage",
+      accounting: "Budget-authoritative after run",
+    }, {
+      mode: "proxy_governed",
+      accounting: "Budget-authoritative during run",
+    }, {
+      mode: "observed_only",
+      accounting: "Not budget-authoritative",
     }],
     tasks_by_status: {
       Estimated: [card("Estimated", {
@@ -515,6 +555,18 @@ function reportData() {
     freshness: { session_id: "sess-demo-999", status: "running", active: true, version: "a".repeat(64), last_evidence_at: "2099-01-01T00:00:04Z" },
     links: { sessions_href: "/sessions", self_href: "/sessions/sess-demo-999" },
   };
+}
+
+function completedReportData() {
+  const data = reportData();
+  data.session.status = "completed";
+  data.session.active = false;
+  data.summary.status = "completed";
+  data.summary.result = sessionBounded("Worker completed");
+  data.summary.missing_labels = [];
+  data.freshness.status = "completed";
+  data.freshness.active = false;
+  return data;
 }
 
 test("only exact React routes are parsed as owned views", () => {
@@ -1434,7 +1486,7 @@ test("archived Pipeline is restore-first and does not expose active workflow con
   assert.doesNotMatch(needsYouMarkup, /Needs You|Enter manual estimate/);
 });
 
-test("Pipeline renders project readiness, Planning Chat, and Estimated work only", () => {
+test("Pipeline makes the next action and one four-bucket ledger primary without duplicating Needs You", async () => {
   const loading = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: null, error: null, loading: true,
   }));
@@ -1444,68 +1496,311 @@ test("Pipeline renders project readiness, Planning Chat, and Estimated work only
     projectId: "demo-999", data: null, error: { message: "offline", status: 500 }, loading: false,
   }));
   assert.match(failed, /Could not load board/);
-  assert.doesNotMatch(failed, /offline/);
-  assert.doesNotMatch(failed, /server-rendered/);
+  assert.doesNotMatch(failed, /offline|server-rendered/);
   assert.doesNotMatch(failed, /href="\/projects\/demo-999\/board"/);
 
-  const pipeline = renderToStaticMarkup(React.createElement(BoardState, {
-    projectId: "demo-999",
-    surface: "pipeline",
-    data: boardData(),
-    error: null,
-    loading: false,
-    query: "",
-    notice: null,
-    action: () => {},
-  }));
+  const data = boardData();
+  data.tasks_by_status.Estimated[0].launch_failure = {
+    retryable: true,
+    diagnostic: { text: "Verify the Worker adapter, then retry." },
+    error: { text: "Worker returned a nonzero exit." },
+    summary: { text: "DEMO launch failure" },
+    next_action: { text: "Open Worker Setup." },
+  };
+  data.tasks_by_status.Running[0].session_href = "/sessions/proxy-demo-999";
+  data.tasks_by_status.Done[0].session_href = "/sessions/observed-demo-999";
+  let renderer;
+  const runProvenance = {
+    "/sessions/session-demo-999": {
+      adapterId: "opencode",
+      trackingMode: "native_usage",
+    },
+    "/sessions/proxy-demo-999": {
+      adapterId: "proxy-adapter",
+      trackingMode: "proxy_governed",
+    },
+    "/sessions/observed-demo-999": {
+      adapterId: "observed-adapter",
+      trackingMode: "observed_only",
+    },
+  };
+  await act(async () => {
+    renderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data, error: null, loading: false, action: () => {}, runProvenance,
+    }));
+  });
+  const pipeline = JSON.stringify(renderer.toJSON());
   for (const text of [
-    "Pipeline",
-    "Connected repo",
-    "/DEMO/2099/repo",
-    "Repo profile",
-    "Branch</dt><dd>implementation/demo-999",
-    "Stack</dt><dd>Python · JavaScript · FastAPI · React · uv · npm",
-    "Test</dt><dd>uv run pytest",
-    "Run</dt><dd>uv run foremanctl serve",
-    "Docs</dt><dd>README.md, CONTEXT.md",
-    "Sessions",
-    "Worker Setup",
-    "Project Settings",
-    "launch ready",
-    "Planning Chat",
-    "Filter loaded tasks",
-    "Codex",
-    "gpt-5.4",
+    "Next required action",
+    "Review proposed Task Breakdown",
+    "Proposed Task Breakdown awaits review.",
+    "Review breakdown",
+    "Pipeline stages",
+    "Project task ledger",
+    "Evidence and provenance",
+    "Estimated DEMO task",
+    "Running DEMO task",
+    "Review DEMO task",
+    "Done DEMO task",
+    "Current launch · CLI: Track native usage after run",
+    "opencode · native_usage · Budget-authoritative after run · Session Report",
+    "proxy-adapter · proxy_governed · Budget-authoritative during run · Session Report",
+    "observed-adapter · observed_only · Not budget-authoritative · Session Report",
+    "Needs operator disposition",
+    "Last launch failed · retryable",
+    "Launch options",
+    "Manual token estimate",
     "Approve budget override",
     "Acknowledge native usage overrun risk",
-    "Dismiss",
-    "Estimate 100",
-    "Manual token estimate",
-  ]) {
-    assert.match(pipeline, new RegExp(text));
+  ]) assert.match(pipeline, new RegExp(text));
+  assert.doesNotMatch(pipeline, /Running work|2 slices need refresh/);
+  assert.equal((pipeline.match(/View evidence/g) || []).length, 4);
+  for (const status of ["estimated", "running", "review", "done"]) {
+    assert.match(pipeline, new RegExp(`"id":"task-task-${status}-999"`));
   }
-  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">✓<\/span><span class="status-pill-label">launch ready<\/span>/);
-  assert.doesNotMatch(pipeline, /status-pill-label">proposed<\/span>/);
-  assert.match(pipeline, /type="file"/);
-  assert.match(pipeline, /type="number"/);
-  assert.match(pipeline, /type="checkbox"/);
-  assert.match(pipeline, /aria-expanded="true"/);
-  assert.match(pipeline, />Collapse</);
-  assert.doesNotMatch(pipeline, /Needs You|Review proposed Task Breakdown|DEMO_INTAKE_2099_999\.md|Planning Inbox|Active Worker Runs|Review queue|Recently finished|Server board/);
+  assert.match(pipeline, /"aria-expanded":false/);
+  assert.match(pipeline, /"hidden":true/);
+  assert.match(pipeline, /"data-pipeline-stage":"intake"/);
+  assert.match(pipeline, /"data-pipeline-stage":"review"/);
+  assert.match(pipeline, /"data-pipeline-stage":"acceptance"/);
+  assert.doesNotMatch(pipeline, /"data-pipeline-stage":"done"/);
+  assert.equal((pipeline.match(/Review proposed Task Breakdown/g) || []).length, 1);
+  assert.doesNotMatch(pipeline, /Planning Inbox|DEMO_INTAKE_2099_999\.md/);
+
+  const stage = (id) => renderer.root.findByProps({ "data-pipeline-stage": id });
+  const attentionStage = (id) => renderer.root.findAllByType("a").find((link) => link.props["data-pipeline-stage"] === id);
+  assert.equal(attentionStage("intake").props.href, "/projects/demo-999/needs-you");
+  assert.equal(attentionStage("review").props.href, "/projects/demo-999/needs-you");
+  await act(async () => { stage("estimated").props.onClick(); });
+  let filtered = JSON.stringify(renderer.toJSON());
+  assert.match(filtered, /"data-task-status":"Estimated"/);
+  assert.doesNotMatch(filtered, /"data-task-status":"Running"|"data-task-status":"Review"|"data-task-status":"Done"/);
+  await act(async () => { stage("running").props.onClick(); });
+  filtered = JSON.stringify(renderer.toJSON());
+  assert.match(filtered, /"data-task-status":"Running"/);
+  assert.doesNotMatch(filtered, /"data-task-status":"Estimated"|"data-task-status":"Review"|"data-task-status":"Done"/);
+  await act(async () => { stage("acceptance").props.onClick(); });
+  filtered = JSON.stringify(renderer.toJSON());
+  assert.match(filtered, /"data-task-status":"Review"/);
+  assert.doesNotMatch(filtered, /"data-task-status":"Estimated"|"data-task-status":"Running"|"data-task-status":"Done"/);
+  const showAll = renderer.root.findAllByType("button").find((button) => button.props.children === "Show all work");
+  await act(async () => { showAll.props.onClick(); });
+
+  const launchOptions = renderer.root.findAllByType("button").find((button) => button.props.children === "Launch options");
+  await act(async () => { launchOptions.props.onClick(); });
+  const launchDialog = renderer.root.findByProps({ role: "dialog" });
+  assert.equal(launchDialog.props.popover, "auto");
+  assert.equal(launchDialog.props["aria-hidden"], false);
+  await act(async () => { launchDialog.props.onKeyDown({ key: "Escape", preventDefault() {} }); });
+  assert.equal(launchOptions.props["aria-expanded"], false);
+  await act(async () => { renderer.unmount(); });
+
+  const reportUrls = [];
+  const loadedProvenance = await loadBoardRunProvenance(data.tasks_by_status, async (url) => {
+    reportUrls.push(url);
+    return completedReportData();
+  });
+  assert.deepEqual(reportUrls.sort(), [
+    "/api/sessions/observed-demo-999/report",
+    "/api/sessions/proxy-demo-999/report",
+    "/api/sessions/session-demo-999/report",
+  ]);
+  assert.deepEqual(loadedProvenance["/sessions/session-demo-999"], {
+    adapterId: "opencode",
+    trackingMode: "native_usage",
+    retryable: false,
+  });
+  const cachedProvenance = await loadBoardRunProvenance(
+    data.tasks_by_status,
+    async () => { throw new Error("cached Session Reports must not refetch"); },
+    loadedProvenance,
+  );
+  assert.deepEqual(cachedProvenance, loadedProvenance);
+
+  let retryAttempts = 0;
+  const failedProvenance = await loadBoardRunProvenance(data.tasks_by_status, async () => {
+    retryAttempts += 1;
+    throw new Error("temporary report failure");
+  });
+  assert.equal(failedProvenance["/sessions/session-demo-999"].retryable, true);
+  const recoveredProvenance = await loadBoardRunProvenance(data.tasks_by_status, async () => {
+    retryAttempts += 1;
+    return completedReportData();
+  }, failedProvenance);
+  assert.equal(retryAttempts, 6);
+  assert.deepEqual(recoveredProvenance["/sessions/session-demo-999"], {
+    adapterId: "opencode",
+    trackingMode: "native_usage",
+    retryable: false,
+  });
+
+  let activeReportLoads = 0;
+  let peakReportLoads = 0;
+  const boundedTasks = {
+    Estimated: [],
+    Running: [],
+    Review: Array.from({ length: 7 }, (_, index) => ({
+      ...data.tasks_by_status.Review[0],
+      id: `bounded-task-${index}`,
+      session_href: `/sessions/bounded-session-${index}`,
+    })),
+    Done: [],
+  };
+  await loadBoardRunProvenance(boundedTasks, async () => {
+    activeReportLoads += 1;
+    peakReportLoads = Math.max(peakReportLoads, activeReportLoads);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    activeReportLoads -= 1;
+    return completedReportData();
+  });
+  assert.equal(peakReportLoads, 3);
+
+  const activeTasks = {
+    Estimated: [],
+    Running: [],
+    Review: [data.tasks_by_status.Review[0]],
+    Done: [],
+  };
+  const activeProvenance = await loadBoardRunProvenance(activeTasks, async () => reportData());
+  assert.deepEqual(activeProvenance["/sessions/session-demo-999"], {
+    adapterId: "opencode",
+    trackingMode: "native_usage",
+    retryable: false,
+  });
+  let activeRetry = 0;
+  const cachedActiveProvenance = await loadBoardRunProvenance(activeTasks, async () => {
+    activeRetry += 1;
+    return completedReportData();
+  }, activeProvenance);
+  assert.equal(activeRetry, 0);
+  assert.deepEqual(cachedActiveProvenance, activeProvenance);
+
+  const retryableLaunchReport = completedReportData();
+  retryableLaunchReport.summary.missing_labels = ["missing authoritative token usage"];
+  const retryableLaunchProvenance = await loadBoardRunProvenance(
+    activeTasks,
+    async () => retryableLaunchReport,
+  );
+  assert.equal(retryableLaunchProvenance["/sessions/session-demo-999"].retryable, false);
+  const cachedRetryableLaunch = await loadBoardRunProvenance(
+    activeTasks,
+    async () => { throw new Error("final launch provenance must remain cached"); },
+    retryableLaunchProvenance,
+  );
+  assert.deepEqual(cachedRetryableLaunch, retryableLaunchProvenance);
+
+  const missingReport = completedReportData();
+  missingReport.summary.adapter_id = "missing Worker Adapter evidence";
+  missingReport.summary.tracking_mode = "missing tracking-mode evidence";
+  missingReport.summary.missing_labels = ["missing Worker Run evidence"];
+  const missingProvenance = await loadBoardRunProvenance(activeTasks, async () => missingReport);
+  assert.deepEqual(missingProvenance["/sessions/session-demo-999"], {
+    adapterId: null,
+    trackingMode: null,
+    retryable: true,
+  });
+
+  const cancellation = new AbortController();
+  let canceledReportLoads = 0;
+  const canceledLoad = loadBoardRunProvenance(boundedTasks, async (_url, options) => {
+    canceledReportLoads += 1;
+    assert.equal(options.signal, cancellation.signal);
+    await new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+  }, {}, cancellation.signal);
+  while (canceledReportLoads < 3) await new Promise((resolve) => setImmediate(resolve));
+  cancellation.abort();
+  await canceledLoad;
+  assert.equal(canceledReportLoads, 3);
+
+  const retryableData = boardData();
+  retryableData.adapters = retryableData.adapters.map((adapter) => (
+    adapter.id === "codex"
+      ? {
+          ...adapter,
+          tracking: {
+            mode: "proxy_governed",
+            label: "API / Proxy: Governed through Harness Proxy",
+            accounting: "Budget-authoritative during run",
+          },
+        }
+      : adapter
+  ));
+  retryableData.tasks_by_status.Estimated[0].session_href = "/sessions/failed-demo-999";
+  retryableData.tasks_by_status.Estimated[0].launch_failure = data.tasks_by_status.Estimated[0].launch_failure;
+  const retryable = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999",
+    surface: "pipeline",
+    data: retryableData,
+    error: null,
+    loading: false,
+    runProvenance: {
+      "/sessions/failed-demo-999": { adapterId: "adapter-a", trackingMode: "native_usage", retryable: false },
+    },
+  }));
+  assert.match(retryable, /adapter-a · native_usage · Budget-authoritative after run · Session Report/);
+  assert.doesNotMatch(retryable, /Current launch · CLI: Track native usage after run/);
+
+  const advisoryData = boardData();
+  advisoryData.needs_you = { project_id: "demo-999", count: 1, items: [lowConfidenceItem()] };
+  const advisory = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999", surface: "pipeline", data: advisoryData, error: null, loading: false,
+  }));
+  assert.match(advisory, /Running work/);
+  assert.doesNotMatch(advisory, /Low confidence estimate/);
+
+  const mixedAttentionData = boardData();
+  mixedAttentionData.needs_you.items = [lowConfidenceItem(), mixedAttentionData.needs_you.items[0]];
+  const mixedAttention = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999", surface: "pipeline", data: mixedAttentionData, error: null, loading: false,
+  }));
+  assert.match(mixedAttention, /Review proposed Task Breakdown/);
+  assert.doesNotMatch(mixedAttention, /Low confidence estimate/);
+
+  const fragmentData = boardData();
+  fragmentData.needs_you.items = [fragmentData.needs_you.items[1]];
+  let fragmentRenderer;
+  await act(async () => {
+    fragmentRenderer = create(React.createElement(BoardState, {
+      projectId: "demo-999", surface: "pipeline", data: fragmentData, error: null, loading: false,
+    }));
+  });
+  const fragmentLink = fragmentRenderer.root.findAllByType("a")
+    .find((link) => link.props.href === "/projects/demo-999#task-task-estimated-999");
+  assert.equal(fragmentLink.props.onClick, undefined);
+  await act(async () => { fragmentRenderer.unmount(); });
+
+  assert.deepEqual(launchPopoverPlacement({ top: 700, bottom: 730, left: 900 }, 1100, 900), {
+    placement: "above",
+    width: 320,
+    left: 764,
+    top: "auto",
+    bottom: "208px",
+    maxHeight: 676,
+  });
+  assert.deepEqual(launchPopoverPlacement({ top: 40, bottom: 70, left: 4 }, 300, 900), {
+    placement: "below",
+    width: 268,
+    left: 16,
+    top: "78px",
+    bottom: "auto",
+    maxHeight: 806,
+  });
 
   const emptyData = boardData();
-  emptyData.tasks_by_status.Estimated = [];
+  emptyData.tasks_by_status = Object.fromEntries(["Estimated", "Running", "Review", "Done"].map((status) => [status, []]));
   const empty = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: emptyData, error: null, loading: false, action: () => {},
   }));
-  assert.match(empty, /No Estimated tasks/);
+  assert.match(empty, /Add or attach Markdown work|No matching tasks/);
 
-  const filtered = renderToStaticMarkup(React.createElement(BoardState, {
+  const textFiltered = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: boardData(), error: null, loading: false,
     query: "no-such-task", action: () => {},
   }));
-  assert.match(filtered, /0 of 4 visible/);
-  assert.match(filtered, /No matching tasks/);
+  assert.match(textFiltered, /0 of 4 visible/);
+  assert.match(textFiltered, /No matching tasks/);
 });
 
 test("Needs You is a projection-backed route with inline manual estimates", async () => {
@@ -1606,8 +1901,9 @@ test("Planning pane disclosure survives a board refresh", async (t) => {
     }));
   });
   const disclosure = () => renderer.root.findByProps({ "aria-controls": "planning-pane-demo-999-pipeline" });
-  await act(async () => { disclosure().props.onClick(); });
   assert.equal(disclosure().props["aria-expanded"], false);
+  await act(async () => { disclosure().props.onClick(); });
+  assert.equal(disclosure().props["aria-expanded"], true);
 
   await act(async () => {
     renderer.update(React.createElement(BoardState, {
@@ -1620,7 +1916,7 @@ test("Planning pane disclosure survives a board refresh", async (t) => {
       projectId: "demo-999", surface: "pipeline", data, error: null, loading: false,
     }));
   });
-  assert.equal(disclosure().props["aria-expanded"], false);
+  assert.equal(disclosure().props["aria-expanded"], true);
   await act(async () => { renderer.unmount(); });
 });
 
@@ -1721,7 +2017,8 @@ test("Planning Chat investigation links prefill bounded Task context", () => {
     loading: false,
     investigateTaskId: "task-estimated-999",
   }));
-  assert.match(markup, />Investigate Task task-estimated-999 before re-estimation:\nEstimated DEMO task<\/textarea>/);
+  assert.match(markup, /aria-expanded="false"/);
+  assert.doesNotMatch(markup, /Investigate Task task-estimated-999 before re-estimation|<textarea/);
 });
 
 test("Evidence Drawer fetches its Session Report handoff and reuses bounded evidence components", async () => {
@@ -2365,7 +2662,10 @@ test("rendered Portal surfaces preserve focus, motion, select, and panel contrac
   }));
 
   assert.doesNotMatch(board, /<select[^>]*name="task_kind"/);
-  assert.match(board, /Describe the task or goal…/);
+  assert.match(board, /Next required action/);
+  assert.match(board, /class="data-table pipeline-ledger-table"/);
+  assert.match(board, /aria-expanded="false"/);
+  assert.doesNotMatch(board, /Describe the task or goal…/);
   assert.match(review, /<select[^>]*>.*?<option value="implementation"[^>]*>/s);
   assert.doesNotMatch(board, /class="board-intake-progress-bar"/);
   assert.match(floor, /class="live-pulse-dot"/);

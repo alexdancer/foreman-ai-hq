@@ -4,7 +4,7 @@
 
 ## Problem
 
-Task Breakdown Review is a wall of equally weighted forms: the candidate decision is buried beneath evidence, and the stretched accept checkbox conflates looking at a candidate with selecting it. Pipeline shows only one task bucket and duplicates breakdown decisions in Planning Inbox, so it does not show the next operator action, workflow position, or estimated-versus-actual evidence. Per-view CSS and typography rules have also drifted.
+Before this redesign, Task Breakdown Review was a wall of equally weighted forms: the candidate decision was buried beneath evidence, and the stretched accept checkbox conflated looking at a candidate with selecting it. Pipeline showed only one task bucket and duplicated breakdown decisions in Planning Inbox, so it did not show the next operator action, workflow position, or estimated-versus-actual evidence. Per-view CSS and typography rules had also drifted.
 
 ## Outcome
 
