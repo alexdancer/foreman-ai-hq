@@ -7,6 +7,7 @@ const PAGE_CONTEXT = {
   dashboard: { group: "Governance", label: "Dashboard" },
   projects: { group: "Configure", label: "Projects" },
   pipeline: { group: "Project", label: "Pipeline" },
+  needsYou: { group: "Project", label: "Needs You" },
   floor: { group: "Project", label: "Execution Floor" },
   planningChat: { group: "Project", label: "Planning" },
   taskHistory: { group: "Project", label: "Task History" },
@@ -168,13 +169,16 @@ export function Sidebar({ activeView, activeProjectId, data, error, loading, ala
         )}
         {activeProject ? (
           <>
-            <RailLink
-              active={activeView === "pipeline"}
-              badge={{ count: needsYouCount, kind: "needs-you", label: "Needs You" }}
-              glyph="P"
-              to={`/projects/${activeProject.id}`}
-            >
+            <RailLink active={activeView === "pipeline"} glyph="P" to={`/projects/${activeProject.id}`}>
               Pipeline
+            </RailLink>
+            <RailLink
+              active={activeView === "needsYou"}
+              badge={{ count: needsYouCount, kind: "needs-you", label: "Needs You" }}
+              glyph="N"
+              to={`/projects/${activeProject.id}/needs-you`}
+            >
+              Needs You
             </RailLink>
             <RailLink active={activeView === "floor"} glyph="F" to={`/projects/${activeProject.id}/floor`}>
               Execution Floor

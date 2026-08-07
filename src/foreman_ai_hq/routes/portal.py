@@ -477,6 +477,17 @@ def project_planning_chat(project_id: str, request: Request):
     return react_shell_or_missing_build()
 
 
+@router.get("/projects/{project_id}/needs-you", response_class=HTMLResponse, dependencies=[Depends(require_portal_auth)])
+def project_needs_you(project_id: str, request: Request):
+    """Serve the canonical project-scoped Needs You shell or recovery surface."""
+
+    database_path = request.app.state.settings.database_path
+    # Existence stays backend-authoritative before build recovery, matching the
+    # other project-scoped React routes.
+    _ensure_project(database_path, project_id)
+    return react_shell_or_missing_build()
+
+
 def _setup_overview_state(request: Request) -> dict[str, Any]:
     """Readiness steps and next action for the Setup Overview surface.
 

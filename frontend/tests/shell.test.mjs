@@ -539,6 +539,10 @@ test("only exact React routes are parsed as owned views", () => {
     view: "planningChat",
     projectId: "demo-999",
   });
+  assert.deepEqual(parseRoute("/projects/demo-999/needs-you"), {
+    view: "needsYou",
+    projectId: "demo-999",
+  });
   assert.equal(parseRoute("/projects/demo-999/task-history").view, "taskHistory");
   assert.equal(parseRoute("/app/projects/demo-999/task-history").view, "notFound");
   for (const path of [
@@ -548,6 +552,7 @@ test("only exact React routes are parsed as owned views", () => {
     "/app/projects/demo-999",
     "/app/projects/demo-999/board",
     "/app/projects/demo-999/floor",
+    "/app/projects/demo-999/needs-you",
     "/projects/demo-999/extra",
     "/projects/demo-999/board/extra",
     "/app/projects/demo-999/extra",
@@ -564,6 +569,8 @@ test("isReactOwnedPath derives ownership from parseRoute and ignores query or ha
   assert.equal(isReactOwnedPath("/settings/workers?adapter_id=opencode"), true);
   assert.equal(isReactOwnedPath("/sessions/sess-demo-999"), true);
   assert.equal(isReactOwnedPath("/task-breakdowns/demo-999/review"), true);
+  assert.equal(isReactOwnedPath("/projects/demo-999/needs-you"), true);
+  assert.equal(isReactOwnedPath("/app/projects/demo-999/needs-you"), false);
   assert.equal(isReactOwnedPath("/board"), false);
   assert.equal(isReactOwnedPath("/login"), false);
   assert.equal(isReactOwnedPath("/logout"), false);
@@ -610,12 +617,13 @@ test("grouped rail keeps project switching, active state, semantic badges, and k
     alarmCount: 2,
   });
 
-  for (const label of ["Project", "Governance", "Configure", "Pipeline", "Execution Floor", "Planning", "Dashboard", "Sessions", "Alarms"]) {
+  for (const label of ["Project", "Governance", "Configure", "Pipeline", "Needs You", "Execution Floor", "Planning", "Dashboard", "Sessions", "Alarms"]) {
     assert.match(markup, new RegExp(`>${label}<`));
   }
   assert.match(markup, /<select[^>]*aria-label="Switch project"[^>]*>/);
   assert.match(markup, /href="\/projects\/demo-999"[^>]*aria-current="page"/);
-  assert.match(markup, /href="\/projects\/demo-999"[^>]*aria-label="Pipeline, 3 Needs You"/);
+  assert.match(markup, /href="\/projects\/demo-999\/needs-you"[^>]*aria-label="Needs You, 3 Needs You"/);
+  assert.doesNotMatch(markup, /href="\/projects\/demo-999"[^>]*aria-label="Pipeline, 3 Needs You"/);
   assert.match(markup, /href="\/alarms"[^>]*aria-label="Alarms, 2 open alarms"/);
   assert.match(markup, /action="\/logout"/);
   assert.doesNotMatch(markup, /└/);
@@ -647,6 +655,63 @@ test("grouped rail keeps project switching, active state, semantic badges, and k
     assert.ok(link.props.href, "rail navigation retains a real browser URL");
     assert.ok(link.props["aria-label"], "collapsed rail navigation retains its keyboard label");
   }
+});
+
+test("Needs You direct loads use the existing project projection without board data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const originalActFlag = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = originalActFlag;
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window = {
+    location: {
+      origin: "http://portal.test",
+      pathname: "/projects/demo-999/needs-you",
+      search: "",
+    },
+    history: { pushState: () => {} },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    setInterval,
+    clearInterval,
+  };
+  const requested = [];
+  globalThis.fetch = async (url) => {
+    requested.push(url);
+    if (url === "/api/portal/nav") {
+      return { ok: true, json: async () => ({
+        portal_auth_required: false,
+        sidebar_projects: [{ id: "demo-999", name: "DEMO 999", task_count: 1, needs_you_count: 1 }],
+      }) };
+    }
+    if (url === "/api/alarms?filter=open") {
+      return { ok: true, json: async () => ({ filters: [], alarms: [] }) };
+    }
+    if (url === "/api/projects/demo-999/workspace") {
+      return { ok: true, json: async () => workspaceData() };
+    }
+    if (url === "/api/projects/demo-999/needs-you") {
+      return { ok: true, json: async () => ({
+        project_id: "demo-999",
+        count: 1,
+        items: [{ id: "breakdown:demo-999", kind: "breakdown_review", title: "Task breakdown awaits review", reason: "Review the proposed vertical slices.", action_label: "Review breakdown", href: "/task-breakdowns/demo-999/review" }],
+      }) };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  let renderer;
+  await act(async () => { renderer = create(React.createElement(App)); });
+  const markup = JSON.stringify(renderer.toJSON());
+  assert.match(markup, /Task breakdown awaits review/);
+  assert.ok(requested.includes("/api/projects/demo-999/needs-you"));
+  assert.ok(requested.includes("/api/projects/demo-999/workspace"));
+  assert.ok(!requested.includes("/api/projects/demo-999/board"));
+  await act(async () => { renderer.unmount(); });
 });
 
 test("project switching preserves App Back and Forward history", async (t) => {
@@ -1360,9 +1425,16 @@ test("archived Pipeline is restore-first and does not expose active workflow con
   assert.match(markup, /Restore project/);
   assert.match(markup, /Archived project/);
   assert.doesNotMatch(markup, /Planning Chat|Active Worker Runs|Execution Floor<\/a>/);
+
+  const needsYouMarkup = renderToStaticMarkup(React.createElement(BoardState, {
+    projectId: "demo-999", surface: "needsYou", data, error: null, loading: false, action: () => {},
+  }));
+  assert.match(needsYouMarkup, /Restore project/);
+  assert.match(needsYouMarkup, /Archived project/);
+  assert.doesNotMatch(needsYouMarkup, /Needs You|Enter manual estimate/);
 });
 
-test("Pipeline renders project readiness, Needs You, planning, intake, and Estimated work only", () => {
+test("Pipeline renders project readiness, Planning Chat, and Estimated work only", () => {
   const loading = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999", data: null, error: null, loading: true,
   }));
@@ -1400,10 +1472,6 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     "Worker Setup",
     "Project Settings",
     "launch ready",
-    "Needs You",
-    "Review proposed Task Breakdown",
-    "DEMO_INTAKE_2099_999.md · 1 candidate",
-    "Planning Inbox",
     "Planning Chat",
     "Filter loaded tasks",
     "Codex",
@@ -1412,19 +1480,18 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
     "Acknowledge native usage overrun risk",
     "Dismiss",
     "Estimate 100",
-    "Manual estimate required",
     "Manual token estimate",
   ]) {
     assert.match(pipeline, new RegExp(text));
   }
   assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">✓<\/span><span class="status-pill-label">launch ready<\/span>/);
-  assert.match(pipeline, /status-pill-glyph[^>]*aria-hidden="true">▲<\/span><span class="status-pill-label">proposed<\/span>/);
+  assert.doesNotMatch(pipeline, /status-pill-label">proposed<\/span>/);
   assert.match(pipeline, /type="file"/);
   assert.match(pipeline, /type="number"/);
   assert.match(pipeline, /type="checkbox"/);
   assert.match(pipeline, /aria-expanded="true"/);
   assert.match(pipeline, />Collapse</);
-  assert.doesNotMatch(pipeline, /Active Worker Runs|Review queue|Recently finished|Server board/);
+  assert.doesNotMatch(pipeline, /Needs You|Review proposed Task Breakdown|DEMO_INTAKE_2099_999\.md|Planning Inbox|Active Worker Runs|Review queue|Recently finished|Server board/);
 
   const emptyData = boardData();
   emptyData.tasks_by_status.Estimated = [];
@@ -1439,6 +1506,55 @@ test("Pipeline renders project readiness, Needs You, planning, intake, and Estim
   }));
   assert.match(filtered, /0 of 4 visible/);
   assert.match(filtered, /No matching tasks/);
+});
+
+test("Needs You is a projection-backed route with inline manual estimates", async () => {
+  const data = boardData();
+  data.needs_you = {
+    project_id: "demo-999",
+    count: 1,
+    items: [{
+      id: "task:task-estimated-999:low_confidence_estimate",
+      kind: "low_confidence_estimate",
+      title: "Low confidence estimate",
+      reason: "Enter a manual estimate to clear this advisory decision.",
+      actions: [{
+        kind: "manual_estimate",
+        label: "Enter manual estimate",
+        method: "POST",
+        href: "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/manual?estimate_revision=1",
+      }],
+    }],
+  };
+  const actions = [];
+  let tree;
+  await act(async () => {
+    tree = create(React.createElement(BoardState, {
+      projectId: "demo-999",
+      surface: "needsYou",
+      data,
+      error: null,
+      loading: false,
+      notice: { message: "Estimate revision changed.", setupHref: null },
+      action: (url, body) => actions.push([url, body]),
+    }));
+  });
+  const markup = JSON.stringify(tree.toJSON());
+  assert.match(markup, /Needs You/);
+  assert.match(markup, /Enter manual estimate/);
+  assert.match(markup, /Estimate revision changed/);
+  assert.match(markup, /"role":"alert"/);
+  assert.doesNotMatch(markup, /Planning Inbox|Filter loaded tasks|Estimated DEMO task/);
+
+  const input = tree.root.findByProps({ placeholder: "tokens" });
+  await act(async () => { input.props.onChange({ target: { value: "900" } }); });
+  const form = tree.root.findByType("form");
+  await act(async () => { form.props.onSubmit({ preventDefault: () => {} }); });
+  assert.deepEqual(actions, [[
+    "/api/projects/demo-999/tasks/task-estimated-999/estimate-decision/manual?estimate_revision=1",
+    JSON.stringify({ estimate_tokens: 900 }),
+  ]]);
+  await act(async () => { tree.unmount(); });
 });
 
 test("Pipeline profile renders typed unavailable and empty states", () => {
@@ -1850,7 +1966,7 @@ test("loaded empty navigation keeps the Project group and a project entry point"
   assert.doesNotMatch(markup, /href="\/board"/);
 });
 
-test("project Pipeline, Floor, and Planning active states follow canonical routes", () => {
+test("project Pipeline, Needs You, Floor, and Planning active states follow canonical routes", () => {
   const data = {
     portal_auth_required: false,
     sidebar_projects: [{ id: "demo-999", name: "DEMO 999", task_count: 1, needs_you_count: 3 }],
@@ -1861,9 +1977,16 @@ test("project Pipeline, Floor, and Planning active states follow canonical route
     data,
   });
   assert.match(pipeline, /href="\/projects\/demo-999"[^>]*aria-current="page"/);
-  assert.match(pipeline, /aria-label="Pipeline, 3 Needs You"/);
+  assert.match(pipeline, /href="\/projects\/demo-999\/needs-you"[^>]*aria-label="Needs You, 3 Needs You"/);
   assert.match(pipeline, /href="\/projects\/demo-999\/floor"/);
   assert.doesNotMatch(pipeline, /href="\/app\/projects\/demo-999"/);
+
+  const needsYou = renderSidebar({
+    activeProjectId: "demo-999",
+    activeView: "needsYou",
+    data,
+  });
+  assert.match(needsYou, /href="\/projects\/demo-999\/needs-you"[^>]*aria-current="page"/);
 
   const floor = renderSidebar({
     activeProjectId: "demo-999",
@@ -1890,6 +2013,7 @@ test("canonical project routes highlight the project while aliases remain server
     "/app/projects/demo-999/board",
     "/app/projects/demo-999/floor",
     "/app/projects/demo-999/plan",
+    "/app/projects/demo-999/needs-you",
   ]) {
     assert.equal(parseRoute(path).view, "notFound");
   }
@@ -2869,7 +2993,7 @@ test("Needs You renders the investigate-in-chat low-confidence choice", () => {
   data.needs_you = { project_id: "demo-999", count: 1, items: [lowConfidenceItem()] };
   const markup = renderToStaticMarkup(React.createElement(BoardState, {
     projectId: "demo-999",
-    surface: "pipeline",
+    surface: "needsYou",
     data,
     error: null,
     loading: false,

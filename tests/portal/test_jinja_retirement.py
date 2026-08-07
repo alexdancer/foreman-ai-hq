@@ -93,6 +93,7 @@ def test_missing_build_returns_recovery_response_for_project_routes(tmp_path, mo
         project_id = project["id"]
         routes = [
             f"/projects/{project_id}",
+            f"/projects/{project_id}/needs-you",
             f"/projects/{project_id}/floor",
             f"/projects/{project_id}/task-history",
         ]
@@ -147,10 +148,14 @@ def test_unknown_ids_still_404_before_the_build_check(tmp_path, monkeypatch):
     with _client(tmp_path) as client:
         responses = [
             client.get(route, headers=_portal_headers(), follow_redirects=False)
-            for route in ("/projects/does-not-exist", "/projects/does-not-exist/board")
+            for route in (
+                "/projects/does-not-exist",
+                "/projects/does-not-exist/board",
+                "/projects/does-not-exist/needs-you",
+            )
         ]
 
-    assert [response.status_code for response in responses] == [404, 404]
+    assert [response.status_code for response in responses] == [404, 404, 404]
 
 
 def test_login_still_renders_when_the_build_is_missing(tmp_path, monkeypatch):

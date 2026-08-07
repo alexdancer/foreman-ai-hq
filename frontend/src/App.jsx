@@ -55,7 +55,7 @@ export default function App() {
   const route = parseRoute(path);
   const activeProjectId = route.projectId || (route.view === "taskBreakdownReview" ? reviewProjectId : null);
   let content;
-  if (route.view === "pipeline" || route.view === "floor") {
+  if (route.view === "pipeline" || route.view === "floor" || route.view === "needsYou") {
     content = <Board
       key={`${route.view}:${route.projectId}`}
       projectId={route.projectId}

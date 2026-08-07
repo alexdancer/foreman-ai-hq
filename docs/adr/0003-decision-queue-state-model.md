@@ -11,7 +11,7 @@ Separately, Proposed Task Breakdowns are specified as durable, resumable audit r
 
 ## Decision
 
-We will replace the persisted Blocked column with a **Blocked Condition** flag that never relocates a task (the task keeps its lifecycle state and position and wears a reason badge), and aggregate human decisions into a project-scoped **Needs You** queue pinned atop the Pipeline Surface with a live count badge in project navigation. Needs You may also contain an explicitly advisory estimate decision that does not block forward progress.
+We will replace the persisted Blocked column with a **Blocked Condition** flag that never relocates a task (the task keeps its lifecycle state and position and wears a reason badge), and aggregate human decisions into a project-scoped **Needs You** queue at `/projects/{id}/needs-you` with a live count badge in project navigation. Needs You may also contain an explicitly advisory estimate decision that does not block forward progress; Pipeline does not render a second copy of the queue.
 
 ## Alternatives considered
 

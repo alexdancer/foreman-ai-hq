@@ -121,7 +121,7 @@ Task lifecycle states are:
 Estimated -> Running -> Review -> Done
 ```
 
-Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while Needs You explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, budget overrides, and advisory low-confidence estimates at the top of the Pipeline.
+Blocked is a condition badge, not a fifth column: the Task stays in its lifecycle state while the project-scoped Needs You route explains the reason and required operator action. Needs You also aggregates pending Task Breakdowns, manual estimates, review dispositions, launch guardrails, budget overrides, and advisory low-confidence estimates at `/projects/{project_id}/needs-you`.
 
 Task kind is explicit: `implementation` or `acceptance_verification`. An implementation Task delivers a change, while Acceptance Verification proves an integrated result against its source contract.
 

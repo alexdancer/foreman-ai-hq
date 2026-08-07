@@ -415,7 +415,7 @@ def seed_demo_sandbox(db_path: Path | str, project_root: Path | str) -> dict[str
 
 
 def _seed_demo_breakdown(db_path: Path | str, project: dict[str, Any]) -> dict[str, Any]:
-    """Seed one deterministic proposed breakdown for the Pipeline Planning Inbox."""
+    """Seed one deterministic proposed breakdown for the Needs You queue."""
     breakdown_id = DEMO_BREAKDOWN_ID
     try:
         existing = db.get_task_breakdown(db_path, breakdown_id)
@@ -441,7 +441,7 @@ def _seed_demo_breakdown(db_path: Path | str, project: dict[str, Any]) -> dict[s
             global_contract_summary="Preserve the synthetic DEMO 2099 contract.",
             verification=["Run the DEMO 2099 local test suite."],
             confidence=0.99,
-            rationale="Synthetic Planning Inbox fixture.",
+            rationale="Synthetic Needs You fixture.",
         )
     else:
         intake_metadata = {
@@ -679,7 +679,7 @@ def _validate_demo_evidence_ids(db_path: Path | str) -> None:
 
 
 def _validate_demo_breakdown_id(db_path: Path | str) -> None:
-    """Validate the deterministic Planning Inbox id before creating repo/project state."""
+    """Validate the deterministic Needs You id before creating repo/project state."""
     try:
         breakdown = db.get_task_breakdown(db_path, DEMO_BREAKDOWN_ID)
     except KeyError:

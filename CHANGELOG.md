@@ -6,8 +6,8 @@ All notable changes to Foreman AI HQ will be documented in this file.
 
 ### Added
 
-- A React/Vite Portal served by FastAPI, covering the Dashboard, Projects, project workspace, Pipeline, Execution Floor, Sessions and Session Reports, Task Breakdown Review, Project Task History, Alarms, Setup, and Settings surfaces.
-- A two-surface Orchestration Board: the Pipeline owns intake, pending breakdowns, Needs You, readiness, and Estimated work; the Execution Floor owns live Worker Runs, Review, recently completed work, and the shared Evidence Drawer.
+- A React/Vite Portal served by FastAPI, covering the Dashboard, Projects, project workspace, Pipeline, Needs You, Execution Floor, Sessions and Session Reports, Task Breakdown Review, Project Task History, Alarms, Setup, and Settings surfaces.
+- A two-surface Orchestration Board: the Pipeline owns intake, readiness, and Estimated work; the Execution Floor owns live Worker Runs, Review, recently completed work, and the shared Evidence Drawer; the project-scoped Needs You route owns pending operator decisions.
 - Bounded authenticated JSON projections and negotiated action responses for React workflows, with lazy loading for full session, task, and review evidence.
 - Project Task History with archive filters, preserved evidence, and inline restore actions.
 - Adapter-aware model discovery, allow-listing, deterministic routing, launch selection, and launch-readiness guidance.
@@ -27,6 +27,7 @@ All notable changes to Foreman AI HQ will be documented in this file.
 - Renamed the product and Python package from AGILE-AI-HTB to Foreman AI HQ / `foreman_ai_hq`, and updated repository, install, issue-template, and support references.
 - Retired duplicated authenticated Jinja operator surfaces. React now owns canonical Portal routes; server-rendered UI remains only for login and bounded missing-build recovery.
 - Canonical project navigation now uses `/projects/{project_id}` for the Pipeline and `/projects/{project_id}/floor` for execution; the former board URL redirects instead of maintaining a duplicate surface.
+- Promoted `/projects/{project_id}/needs-you` as the canonical project decision queue and removed the duplicate Planning Inbox from Pipeline.
 - Replaced the persisted Blocked board column with a Blocked Condition that preserves the Task's canonical lifecycle position and exposes recovery through Needs You.
 - Moved full logs, token components, Agent Review findings, and other deep evidence out of board-card payloads and into the Evidence Drawer or Session Report.
 - Review Disposition remains human-owned: Agent Review is advisory, Block records a Blocked Condition without relocating the Task, and Mark Done remains explicit.

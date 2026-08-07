@@ -155,13 +155,16 @@ export default function Board({ projectId, surface = "pipeline", onStateChanged 
         onStateChanged();
         return;
       }
-      const [board, needsYou] = await Promise.all([
-        getJSON(`/api/projects/${projectId}/board`),
-        surface === "pipeline"
-          ? getJSON(`/api/projects/${projectId}/needs-you`)
-          : Promise.resolve({ project_id: projectId, count: 0, items: [] }),
-      ]);
-      setState({ data: { ...board, workspace, needs_you: needsYou }, error: null, loading: false });
+      if (surface === "needsYou") {
+        // Needs You owns only its existing project projection; it must not pull
+        // board state merely to render a decision queue.
+        const needsYou = await getJSON(`/api/projects/${projectId}/needs-you`);
+        setState({ data: { project: workspace.project, workspace, needs_you: needsYou }, error: null, loading: false });
+        onStateChanged();
+        return;
+      }
+      const board = await getJSON(`/api/projects/${projectId}/board`);
+      setState({ data: { ...board, workspace }, error: null, loading: false });
       onStateChanged();
     } catch (error) {
       setState({ data: null, error, loading: false });
@@ -294,7 +297,12 @@ export function BoardState({
     setPlanningExpanded((current) => ({ ...current, [surface]: expanded }));
   };
 
-  if (loading) return <Loading>Loading {surface === "floor" ? "Execution Floor" : "Pipeline"}…</Loading>;
+  const surfaceLabel = surface === "floor"
+    ? "Execution Floor"
+    : surface === "needsYou"
+      ? "Needs You"
+      : "Pipeline";
+  if (loading) return <Loading>Loading {surfaceLabel}…</Loading>;
   if (isArchivedBoardError(error)) return <>
     <Notice variant="warning">
       <strong>Archived project</strong>
@@ -303,7 +311,7 @@ export function BoardState({
     <p><AppLink to={`/projects/${projectId}`}>Open workspace to Restore</AppLink></p>
   </>;
   if (error) return <Notice variant="danger" role="alert">
-    {safeError(error)}
+    {surface === "needsYou" ? (error?.status === 401 ? "Needs You requires sign-in." : "Could not load Needs You.") : safeError(error)}
     {error?.status !== 401 && <div className="notice-actions"><Button size="small" variant="secondary" type="button" onClick={onRetry}>Retry</Button></div>}
   </Notice>;
   if (!data) return <EmptyState>No project orchestration state available.</EmptyState>;
@@ -315,8 +323,11 @@ export function BoardState({
   };
   if (workspace.project?.archived_at) return <>
     <ProjectHeader projectId={projectId} workspace={workspace} action={action} />
-    <Notice variant="warning">Archived project. Restore it before resuming Pipeline work.</Notice>
+    <Notice variant="warning">Archived project. Restore it before resuming active project work.</Notice>
   </>;
+  if (surface === "needsYou") {
+    return <NeedsYouSurface data={data.needs_you} notice={notice} action={action} />;
+  }
 
   const tasksByStatus = data.tasks_by_status || Object.fromEntries(COLUMNS.map((column) => [column, []]));
   const cards = Object.values(tasksByStatus).flat();
@@ -422,19 +433,9 @@ function PipelineSurface({
   planningExpanded,
   onPlanningExpandedChange,
 }) {
-  const needsYou = data.needs_you || { count: 0, items: [] };
-  const planning = needsYou.items.filter((item) => item.kind === "breakdown_review");
   const estimated = tasksByStatus.Estimated.filter(visible);
   return <div className="board-layout">
     <div className="board-main">
-      <NeedsYou items={needsYou.items} count={needsYou.count} action={action} />
-      <Panel className="planning-inbox">
-        <PanelHeader title="Planning Inbox" count={planning.length} />
-        <PanelBody className="needs-you-list">
-          {planning.map((item) => <a className="needs-you-item" href={item.href} key={item.id}><strong>{item.title}</strong><span>{item.reason}</span><span className="planning-inbox-meta mono muted">{item.source} · {item.candidate_count} candidate{item.candidate_count === 1 ? "" : "s"} · <StatusPill tone={statusTone(item.status)} label={item.status || "unknown"} /> · {item.created_at || "time unavailable"}</span><em>{item.action_label} →</em></a>)}
-          {planning.length === 0 && <EmptyState>No proposed Task Breakdowns await review.</EmptyState>}
-        </PanelBody>
-      </Panel>
       <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter loaded tasks" /><span className="column-count">{cards.filter(visible).length} of {cards.length} visible</span></div>
       <section className="column pipeline-estimated">
         <PanelHeader title="Estimated" count={estimated.length} />
@@ -496,6 +497,16 @@ export function PlanningPane({
       </PanelBody>
     </div>
   </section>;
+}
+
+function NeedsYouSurface({ data, notice, action }) {
+  const needsYou = data || { count: 0, items: [] };
+  return <>
+    <h1 className="page-title">Needs You</h1>
+    <p className="page-sub">Project decisions that require an operator.</p>
+    {notice && <Notice variant="danger" role="alert">{notice.message}{notice.setupHref && <> · <a href={notice.setupHref}>Open setup</a></>}</Notice>}
+    <NeedsYou items={needsYou.items} count={needsYou.count} action={action} />
+  </>;
 }
 
 function NeedsYou({ items, count, action }) {
