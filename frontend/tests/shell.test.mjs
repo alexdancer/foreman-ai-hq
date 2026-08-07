@@ -1,19 +1,18 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
 
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create } from "react-test-renderer";
 import { createServer } from "vite";
 
+import { runRenderedBrowserContract } from "./browser-contract.mjs";
+
 const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
-const execFileAsync = promisify(execFile);
 let server;
 let browserBaseUrl;
 let Shell;
@@ -2063,6 +2062,8 @@ test("Evidence Drawer fetches its Session Report handoff and reuses bounded evid
     "Block",
   ]) assert.match(drawer, new RegExp(text));
   assert.match(drawer, /role="dialog"/);
+  assert.match(drawer, /class="token-comparison" aria-label="Estimate versus actual tokens"/);
+  assert.match(drawer, /Spend tracking · opencode · native_usage/);
   assert.match(drawer, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
   assert.match(drawer, /class="live-event live-event-launch event-row"/);
   assert.match(drawer, /Preview truncated/);
@@ -2676,25 +2677,11 @@ test("rendered Portal surfaces preserve focus, motion, select, and panel contrac
 test("Vite browser computes focus, motion, select, panel, and collapsed rail contracts", { timeout: 30000 }, async () => {
   const browser = browserExecutable();
   assert.ok(browser, "Chromium or Chrome is required for the rendered Ledger contract");
-  const profile = mkdtempSync(join(tmpdir(), "foreman-ledger-browser-"));
-  try {
-    const { stdout } = await execFileAsync(browser, [
-      "--headless",
-      "--no-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      `--user-data-dir=${profile}`,
-      "--force-prefers-reduced-motion=reduce",
-      "--window-size=1100,900",
-      "--virtual-time-budget=5000",
-      "--dump-dom",
-      `${browserBaseUrl}/static/react/tests/ledger-browser-contract.html`,
-    ], { encoding: "utf8", maxBuffer: 2 * 1024 * 1024, timeout: 20000, killSignal: "SIGKILL" });
-    assert.match(stdout, /data-ledger-contract="passed"/);
-    assert.doesNotMatch(stdout, /data-ledger-contract="failed"|data-contract-error=/);
-  } finally {
-    rmSync(profile, { recursive: true, force: true });
-  }
+  await runRenderedBrowserContract({
+    browser,
+    url: `${browserBaseUrl}/static/react/tests/ledger-browser-contract.html`,
+    args: ["--force-prefers-reduced-motion=reduce", "--window-size=1100,900", "--virtual-time-budget=5000"],
+  });
 });
 
 function reviewButton(root, label) {

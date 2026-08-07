@@ -39,6 +39,11 @@ const pipelineTask = {
   },
 };
 
+const drawerReport = {
+  summary: { adapter_id: "browser-adapter", tracking_mode: "native_usage" },
+  freshness: { active: false },
+};
+
 const pipelineData = {
   project: { id: "browser-project-999", name: "Browser project 999" },
   workspace: {
@@ -71,6 +76,24 @@ const pipelineData = {
   automation: { queue: { status: "idle", auto_agent_review: false }, live_refresh_enabled: false },
 };
 
+const floorTask = {
+  ...pipelineTask,
+  id: "floor-running-999",
+  status: "Running",
+  session_href: "/sessions/floor-running-999",
+  timeline: [{ id: 1, created_at: "2099-01-01T00:00:00Z", kind: "token", title: "Provisional usage", detail_summary: { text: "total_tokens=12", truncated: false } }],
+  controls: { ...pipelineTask.controls, can_launch: false, can_refresh: true },
+};
+const floorData = {
+  ...pipelineData,
+  tasks_by_status: {
+    Estimated: [],
+    Running: [floorTask],
+    Review: [{ ...floorTask, id: "floor-review-999", status: "Review", controls: { ...floorTask.controls, can_refresh: false } }],
+    Done: [{ ...floorTask, id: "floor-done-999", status: "Done", actual_tokens: 89, controls: { ...floorTask.controls, can_refresh: false, can_archive: true } }],
+  },
+};
+
 function PipelineContract() {
   const [selectedTask, setSelectedTask] = React.useState(null);
   return <>
@@ -88,12 +111,25 @@ function PipelineContract() {
     {selectedTask && <EvidenceDrawerState
       task={selectedTask}
       projectId="browser-project-999"
-      data={null}
+      data={drawerReport}
       error={null}
       loading={false}
       onClose={() => setSelectedTask(null)}
     />}
   </>;
+}
+
+function FloorContract() {
+  return <section id="floor-interaction-contract">
+    <BoardState
+      projectId="browser-project-999"
+      surface="floor"
+      data={floorData}
+      error={null}
+      loading={false}
+      action={() => {}}
+    />
+  </section>;
 }
 
 function ContractSurface() {
@@ -168,6 +204,7 @@ function ContractSurface() {
       <Panel><PanelHeader title="Sibling panel" /></Panel>
       <button id="pipeline-outside-target" type="button">Outside target</button>
       <PipelineContract />
+      <FloorContract />
     </main>
   );
 }
@@ -268,6 +305,11 @@ async function inspect() {
     return drawer && document.activeElement === drawer;
   }, "Pipeline evidence drawer does not receive focus");
   const evidenceDrawer = document.querySelector(".evidence-drawer");
+  requireContract(evidenceDrawer.querySelector(".token-comparison"), "Evidence Drawer does not lead with shared estimate-versus-actual evidence");
+  requireContract(
+    evidenceDrawer.querySelector(".token-comparison-provenance")?.textContent.includes("browser-adapter · native_usage"),
+    "Evidence Drawer omits adjacent spend-tracking provenance",
+  );
   const evidenceControls = [...evidenceDrawer.querySelectorAll(
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
   )];
@@ -288,6 +330,21 @@ async function inspect() {
   );
   window.scrollTo(0, 0);
   await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const floor = document.querySelector("#floor-interaction-contract");
+  for (const title of ["Active Worker Runs", "Review queue", "Recently finished"]) {
+    requireContract([...floor.querySelectorAll("h3")].some((heading) => heading.textContent === title), `Execution Floor omits ${title}`);
+  }
+  const activeGrid = floor.querySelector(".floor-active-grid");
+  const activePanel = activeGrid.querySelector(".floor-active-run");
+  requireContract(activePanel?.querySelector(".live-run-dock"), "live-run dock is not folded into the active Worker Run panel");
+  requireContract(!floor.querySelector(".floor-main > .live-run-dock"), "live-run dock remains detached from the active Worker Run panel");
+  requireContract(activePanel.querySelector(".event-row"), "active Worker Run does not preserve shared live-event treatment");
+  requireContract(getComputedStyle(activeGrid).gridTemplateColumns.split(" ").length === 1, "active Worker Runs are not full-width panels");
+  requireContract(
+    Math.abs(activePanel.getBoundingClientRect().width - activeGrid.getBoundingClientRect().width) < 1,
+    "active Worker Run panel does not fill its Execution Floor section",
+  );
 
   const select = document.querySelector("#contract-select");
   const track = document.querySelector("#select-track");
