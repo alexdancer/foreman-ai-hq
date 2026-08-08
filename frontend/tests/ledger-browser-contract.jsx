@@ -185,11 +185,14 @@ const alarmContractData = {
     session_href: "/sessions/session-alarm-999",
     context: { text: "Bounded browser alarm evidence", truncated: true },
     recommended_action: "Continue or raise the daily cap.",
-    available_actions: [{
-      action: "raise_budget",
-      cap_key: "daily_cap_tokens",
-      current_cap: 1000,
-    }],
+    available_actions: [
+      { action: "continue" },
+      {
+        action: "raise_budget",
+        cap_key: "daily_cap_tokens",
+        current_cap: 1000,
+      },
+    ],
     resolved_at: null,
   }],
 };
