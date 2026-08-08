@@ -310,10 +310,21 @@ test("TokenComparison and EventRow provide shared ledger evidence presentation",
     actual: 89,
     provenance: "native usage",
   }));
-  assert.match(comparison, /class="token-comparison" aria-label="Estimate versus actual tokens"/);
+  assert.match(comparison, /role="group" aria-label="Estimate versus actual tokens"/);
   assert.match(comparison, /<small>Estimate<\/small><strong>100<\/strong>/);
   assert.match(comparison, /<small>Actual · −11%<\/small><strong>89<\/strong>/);
   assert.match(comparison, /class="token-comparison-provenance">Spend tracking · native usage<\/p>/);
+
+  const totals = html(React.createElement(TokenComparison, {
+    estimate: 40,
+    actual: 50,
+    estimateLabel: "Normalized budget total",
+    actualLabel: "Provider \/ raw total",
+    "aria-label": "Normalized versus provider token totals",
+  }));
+  assert.match(totals, /aria-label="Normalized versus provider token totals"/);
+  assert.match(totals, /<small>Normalized budget total<\/small><strong>40<\/strong>/);
+  assert.match(totals, /<small>Provider \/ raw total<\/small><strong>50<\/strong>/);
 
   const event = html(React.createElement(EventRow, {
     time: "00:00:00",

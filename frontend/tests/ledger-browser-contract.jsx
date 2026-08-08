@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { ConfirmSheet, Panel, PanelBody, PanelHeader, Skeleton, StatusPill } from "../src/components/ui/index.js";
 import { BoardState, EvidenceDrawerState } from "../src/views/Board.jsx";
 import { DashboardContent } from "../src/views/Dashboard.jsx";
+import { SessionsState } from "../src/views/Sessions.jsx";
 import "../src/tokens.css";
 
 const confirmSheetRef = React.createRef();
@@ -168,6 +169,25 @@ const dashboardData = {
   projects: [{ id: "browser-project-999", name: "Browser project 999", task_count: 1, needs_you_count: 2, capability: { state: "launch_ready" } }],
 };
 
+const sessionsData = {
+  sessions: [{
+    id: "browser-session-999",
+    kind: "Worker",
+    task_preview: "Browser session evidence",
+    model: "gpt-browser-999",
+    status: "running",
+    active: true,
+    token_totals: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+    evidence_counts: { worker_runs: 1, worker_events: 2, failed_checkpoints: 0 },
+    current_zone: "green",
+    alarm_count: 0,
+    report_href: "/sessions/browser-session-999",
+  }],
+  pagination: { offset: 0, limit: 20, total: 1, has_more: false },
+  has_active: true,
+  poll_after_ms: 5000,
+};
+
 function PipelineContract() {
   const [selectedTask, setSelectedTask] = React.useState(null);
   return <>
@@ -281,6 +301,9 @@ function ContractSurface() {
       <FloorContract />
       <section id="dashboard-interaction-contract">
         <DashboardContent data={dashboardData} />
+      </section>
+      <section id="sessions-interaction-contract">
+        <SessionsState data={sessionsData} error={null} loading={false} />
       </section>
     </main>
   );
@@ -513,6 +536,24 @@ async function inspect() {
     "Dashboard action focus outline is not mint",
   );
   requireContract(!dashboard.querySelector(".panel .panel"), "Dashboard renders nested panels");
+
+  const sessions = document.querySelector("#sessions-interaction-contract");
+  const sessionsTable = sessions.querySelector('[role="table"][aria-label="Sessions ledger"]');
+  const sessionsScroll = sessionsTable.parentElement;
+  const sessionHeaders = [...sessionsTable.querySelectorAll('[role="columnheader"]')];
+  const sessionCells = [...sessionsTable.querySelectorAll('[role="row"]:not(:first-child) [role="cell"]')];
+  requireContract(sessionHeaders.length === 6 && sessionCells.length === 6, "Sessions table loses accessible columns");
+  requireContract(sessionHeaders.at(-1).textContent.trim() === "Zone / alarms", "Sessions table loses its final evidence heading");
+  requireContract(sessionsScroll.scrollWidth > sessionsScroll.clientWidth, "Sessions table does not scroll at narrow desktop width");
+  const initialViewport = sessionsScroll.getBoundingClientRect();
+  requireContract(sessionHeaders[0].getBoundingClientRect().left >= initialViewport.left - 1, "Sessions first column is not initially reachable");
+  sessionsScroll.scrollLeft = sessionsScroll.scrollWidth - sessionsScroll.clientWidth;
+  const scrolledViewport = sessionsScroll.getBoundingClientRect();
+  const finalCell = sessionCells.at(-1).getBoundingClientRect();
+  requireContract(
+    finalCell.left < scrolledViewport.right && finalCell.right <= scrolledViewport.right + 1,
+    "Sessions final column is not horizontally reachable",
+  );
   window.scrollTo(0, 0);
   await new Promise((resolve) => setTimeout(resolve, 0));
 

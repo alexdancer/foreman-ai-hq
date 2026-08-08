@@ -505,7 +505,7 @@ code,
   overflow-x: auto;
 }
 .data-table {
-  min-width: max(100%, 44rem);
+  min-width: max(100%, var(--data-table-min-width, 44rem));
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   overflow: hidden;

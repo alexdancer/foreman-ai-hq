@@ -1,7 +1,7 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
-import { budgetZoneStatusTone, Button, sessionStatusTone, StatusPill } from "../components/ui/index.js";
+import { budgetZoneStatusTone, Button, ColumnHead, DataCell, DataTable, Row, sessionStatusTone, StatusPill } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 
 const safeError = (error) => error?.status === 401
@@ -52,7 +52,7 @@ export function SessionsState({ data, error, loading, retry = () => {}, page = (
       <div className="live-notice" aria-live="polite">
         {error ? safeError(error) : data?.has_active ? "Active sessions refresh every 5 seconds." : ""}
       </div>
-      {error && <button className="btn secondary" type="button" onClick={retry}>Retry</button>}
+      {error && <Button variant="secondary" type="button" onClick={retry}>Retry</Button>}
       {loading && !data && <div className="notice">Loading Sessions…</div>}
       {!loading && !data && !error && <div className="notice">No Sessions state available.</div>}
       {data && data.sessions.length === 0 && (
@@ -61,21 +61,26 @@ export function SessionsState({ data, error, loading, retry = () => {}, page = (
       {data && data.sessions.length > 0 && (
         <section className="panel">
           <div className="panel-header"><h3>All sessions</h3><span className="mono">{pagination.total} total</span></div>
-          <div className="table-scroll">
-            <table className="evidence-table">
-              <thead><tr><th>Session</th><th>Kind / task</th><th>Model / status</th><th>Provider tokens</th><th>Evidence</th><th>Zone / alarms</th></tr></thead>
-              <tbody>{data.sessions.map((session) => (
-                <tr key={session.id}>
-                  <td className="mono"><AppLink to={session.report_href}>{session.id}</AppLink></td>
-                  <td><strong>{session.kind}</strong><div className="compact-text">{session.task_preview || "Missing task evidence"}</div></td>
-                  <td><span className="mono">{session.model || "Unknown model"}</span><div><StatusPill tone={sessionStatusTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div></td>
-                  <td className="mono">{session.token_totals.prompt_tokens} prompt · {session.token_totals.completion_tokens} completion · {session.token_totals.total_tokens} total</td>
-                  <td className="mono">{session.evidence_counts.worker_runs} runs · {session.evidence_counts.worker_events} events · {session.evidence_counts.failed_checkpoints} failed checks</td>
-                  <td><StatusPill tone={budgetZoneStatusTone(session.current_zone)} label={`${session.current_zone || "unknown"} zone`} /> · {session.alarm_count} alarms</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
+          <DataTable
+            className="sessions-data-table"
+            label="Sessions ledger"
+            columns="minmax(11rem, 1fr) minmax(16rem, 2fr) minmax(12rem, 1.3fr) minmax(14rem, 1.4fr) minmax(13rem, 1.3fr) minmax(12rem, 1.2fr)"
+            minWidth="78rem"
+          >
+            <Row header>
+              <ColumnHead>Session</ColumnHead><ColumnHead>Kind / task</ColumnHead><ColumnHead>Model / status</ColumnHead><ColumnHead>Provider tokens</ColumnHead><ColumnHead>Evidence</ColumnHead><ColumnHead>Zone / alarms</ColumnHead>
+            </Row>
+            {data.sessions.map((session) => (
+              <Row key={session.id}>
+                <DataCell className="mono"><AppLink to={session.report_href}>{session.id}</AppLink></DataCell>
+                <DataCell><strong>{session.kind}</strong><div className="compact-text">{session.task_preview || "Missing task evidence"}</div></DataCell>
+                <DataCell><span className="mono">{session.model || "Unknown model"}</span><div><StatusPill tone={sessionStatusTone(session.status, session.active)} label={`${session.status || "unknown"}${session.active ? " · active" : ""}`} /></div></DataCell>
+                <DataCell className="mono">{session.token_totals.prompt_tokens} prompt · {session.token_totals.completion_tokens} completion · {session.token_totals.total_tokens} total</DataCell>
+                <DataCell className="mono">{session.evidence_counts.worker_runs} runs · {session.evidence_counts.worker_events} events · {session.evidence_counts.failed_checkpoints} failed checks</DataCell>
+                <DataCell><StatusPill tone={budgetZoneStatusTone(session.current_zone)} label={`${session.current_zone || "unknown"} zone`} /> · {session.alarm_count} alarms</DataCell>
+              </Row>
+            ))}
+          </DataTable>
         </section>
       )}
       {pagination && (

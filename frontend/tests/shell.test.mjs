@@ -34,8 +34,10 @@ let pollBoardStatus;
 let submitBoardAction;
 let WorkspaceState;
 let submitProjectRestore;
+let Sessions;
 let SessionsState;
 let AlarmsState;
+let SessionReport;
 let SessionReportState;
 let SetupState;
 let TaskBreakdownReviewState;
@@ -130,9 +132,9 @@ before(async () => {
     investigationMessage,
   } = await server.ssrLoadModule("/src/views/Board.jsx"));
   ({ WorkspaceState, submitProjectRestore } = await server.ssrLoadModule("/src/views/Workspace.jsx"));
-  ({ SessionsState } = await server.ssrLoadModule("/src/views/Sessions.jsx"));
+  ({ default: Sessions, SessionsState } = await server.ssrLoadModule("/src/views/Sessions.jsx"));
   ({ AlarmsState } = await server.ssrLoadModule("/src/views/Alarms.jsx"));
-  ({ SessionReportState } = await server.ssrLoadModule("/src/views/SessionReport.jsx"));
+  ({ default: SessionReport, SessionReportState } = await server.ssrLoadModule("/src/views/SessionReport.jsx"));
   ({ SetupState } = await server.ssrLoadModule("/src/views/Setup.jsx"));
   ({
     default: TaskBreakdownReview,
@@ -166,6 +168,11 @@ function renderSidebar(overrides = {}) {
     ...overrides,
   };
   return renderToStaticMarkup(React.createElement(Sidebar, props));
+}
+
+function renderedText(node) {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  return node.children.map(renderedText).join("");
 }
 
 function assertStatusPillsHaveGlyphs(markup) {
@@ -1004,8 +1011,73 @@ test("Sessions sidebar and list preserve compact scan, states, and pagination", 
   const populated = renderToStaticMarkup(React.createElement(SessionsState, { data, error: null, loading: false }));
   for (const text of ["Agent Review", "DEMO review task", "claude-demo-999", "10 prompt", "5 completion", "15 total", "1 runs", "2 events", "1 failed checks", "yellow zone", "1 alarms", "Active sessions refresh every 5 seconds", "Next sessions"]) assert.match(populated, new RegExp(text));
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  const populatedTree = create(React.createElement(SessionsState, { data, error: null, loading: false }));
+  const table = populatedTree.root.findByProps({ role: "table", "aria-label": "Sessions ledger" });
+  assert.deepEqual(
+    table.findAllByProps({ role: "columnheader" }).map(renderedText),
+    ["Session", "Kind / task", "Model / status", "Provider tokens", "Evidence", "Zone / alarms"],
+  );
+  assert.equal(table.findAllByProps({ role: "row" }).length, 2);
+  assert.equal(table.findAllByProps({ role: "cell" }).length, 6);
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /status-pill-warning[^>]*>.*status-pill-label">yellow zone<\/span>/s);
+});
+
+test("active Sessions quietly refreshes the current page and pagination loads the requested page", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const intervals = [];
+  const requests = [];
+  const firstPage = {
+    sessions: [{ id: "sess-demo-999", kind: "Worker Session", task_preview: "DEMO active task", model: "demo-model", status: "running", active: true, token_totals: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }, evidence_counts: { worker_runs: 1, worker_events: 2, failed_checkpoints: 0 }, current_zone: "green", alarm_count: 0, report_href: "/sessions/sess-demo-999" }],
+    pagination: { offset: 0, limit: 1, total: 2, has_more: true },
+    has_active: true,
+    poll_after_ms: 5000,
+  };
+  const secondPage = {
+    ...firstPage,
+    sessions: [{ ...firstPage.sessions[0], id: "sess-demo-998", report_href: "/sessions/sess-demo-998", active: false, status: "completed" }],
+    pagination: { offset: 1, limit: 1, total: 2, has_more: false },
+    has_active: false,
+  };
+  globalThis.window = {
+    setInterval(callback, ms) {
+      intervals.push({ callback, ms });
+      return intervals.length;
+    },
+    clearInterval() {},
+  };
+  globalThis.fetch = async (url) => {
+    requests.push(url);
+    const payload = url.includes("offset=1") ? secondPage : firstPage;
+    return { ok: true, json: async () => payload, text: async () => "" };
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  });
+
+  let tree;
+  await act(async () => {
+    tree = create(React.createElement(Sessions));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.deepEqual(requests, ["/api/sessions"]);
+  assert.equal(intervals[0].ms, 5000);
+  await act(async () => {
+    intervals[0].callback();
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.deepEqual(requests, ["/api/sessions", "/api/sessions"]);
+
+  const next = tree.root.findAllByType("button").find((button) => renderedText(button) === "Next sessions");
+  await act(async () => {
+    next.props.onClick();
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.equal(requests.at(-1), "/api/sessions?offset=1&limit=1");
+  assert.match(JSON.stringify(tree.toJSON()), /sess-demo-998/);
+  await act(async () => { tree.unmount(); });
 });
 
 test("Setup sidebar highlighting is exclusive and cards render backend readiness", () => {
@@ -1168,11 +1240,13 @@ test("resolving an alarm refreshes both the list and shell badge", async (t) => 
 });
 
 test("Session Report renders compact governance plus every bounded evidence path", () => {
-  const markup = renderToStaticMarkup(React.createElement(SessionReportState, {
+  const report = React.createElement(SessionReportState, {
     data: reportData(), error: null, loading: false,
     freshnessNotice: { version: "b".repeat(64) },
     refreshError: "Could not check for new session evidence. Retry Refresh.",
-  }));
+  });
+  const markup = renderToStaticMarkup(report);
+  const reportTree = create(report);
   for (const text of [
     "Governance summary", "DEMO task 2099", "DEMO project 999", "opencode", "native_usage", "review needed", "missing authoritative usage",
     "Provider / raw totals", "Normalized budget total", "control_plane: 1", "worker_execution: 30", "reporting_summary: 4", "cache read/reused context",
@@ -1180,6 +1254,18 @@ test("Session Report renders compact governance plus every bounded evidence path
     "Alarms", "BUDGET_YELLOW", "Checkpoint results", "FAIL", "Related Agent Review", "review/control-plane evidence", "19 review/control-plane tokens", "Agent Review finding",
     "Preview truncated", "Load full text", "New session evidence available", "Could not check for new session evidence",
   ]) assert.match(markup, new RegExp(text));
+  const tokenComparison = reportTree.root.findByProps({ role: "group", "aria-label": "Normalized versus provider token totals" });
+  assert.deepEqual(tokenComparison.findAllByType("small").map(renderedText), ["Normalized budget total", "Provider / raw total"]);
+  assert.deepEqual(tokenComparison.findAllByType("strong").map(renderedText), ["40", "50"]);
+  assert.match(markup, /Spend tracking · opencode · native_usage/);
+  const disclosures = reportTree.root.findAllByType("details");
+  const disclosureLabels = disclosures.map((disclosure) => renderedText(disclosure.findAllByType("summary")[0]));
+  for (const label of ["Live Worker Run feed", "Worker Run timeline", "Token log", "Budget-zone timeline", "Repo Context Brief", "Alarms", "Checkpoint results"]) {
+    assert.ok(disclosureLabels.some((name) => name.startsWith(label)), `${label} is not exposed as a disclosure`);
+  }
+  const liveFeed = disclosures.find((disclosure) => renderedText(disclosure.findAllByType("summary")[0]).startsWith("Live Worker Run feed"));
+  assert.equal(liveFeed.props.open, true);
+  assert.ok(liveFeed.findByProps({ "aria-live": "polite" }));
   assert.match(markup, /href="\/sessions\/review-demo-999"/);
   assert.match(markup, /aria-live="polite"/);
   assertStatusPillsHaveGlyphs(markup);
@@ -1187,15 +1273,97 @@ test("Session Report renders compact governance plus every bounded evidence path
   assert.ok(markup.indexOf("Governance summary") < markup.indexOf("Token log"));
 });
 
-test("Session Report refresh remounts paged evidence and labels review-session outcomes", () => {
+test("Session Report refresh remounts paged evidence and labels review-session outcomes", async () => {
   const data = reportData();
   data.session.kind = "Agent Review";
-  const markup = renderToStaticMarkup(React.createElement(SessionReportState, { data, error: null, loading: false }));
-  assert.match(markup, /Agent Review outcome/);
-  const source = readFileSync(new URL("../src/views/SessionReport.jsx", import.meta.url), "utf8");
-  for (const key of ["tokens-${version}", "zones-${version}", "worker-${version}", "repo-${version}", "alarms-${version}", "checkpoints-${version}"]) {
-    assert.ok(source.includes(key));
-  }
+  let tree;
+  await act(async () => {
+    tree = create(React.createElement(SessionReportState, { data, error: null, loading: false }));
+  });
+  assert.match(JSON.stringify(tree.toJSON()), /Agent Review outcome/);
+
+  const refreshed = reportData();
+  refreshed.session.kind = "Agent Review";
+  refreshed.freshness.version = "b".repeat(64);
+  refreshed.tokens.log = evidencePage([{
+    ...refreshed.tokens.log.items[0],
+    raw_usage: sessionBounded("refreshed provider raw usage", true),
+  }]);
+  await act(async () => {
+    tree.update(React.createElement(SessionReportState, { data: refreshed, error: null, loading: false }));
+  });
+  assert.match(JSON.stringify(tree.toJSON()), /refreshed provider raw usage/);
+  await act(async () => { tree.unmount(); });
+});
+
+test("active Session Report polls freshness and live events but waits for explicit Refresh before replacing report evidence", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const timers = [];
+  const requests = [];
+  let reportRequests = 0;
+  const initial = reportData();
+  const refreshed = reportData();
+  refreshed.freshness.version = "b".repeat(64);
+  refreshed.tokens.provider_totals.total_tokens = 60;
+
+  globalThis.window = {
+    setTimeout(callback, ms) {
+      timers.push({ callback, ms });
+      return timers.length;
+    },
+    clearTimeout() {},
+  };
+  globalThis.fetch = async (url) => {
+    requests.push(url);
+    let payload;
+    if (url.endsWith("/report")) {
+      reportRequests += 1;
+      payload = reportRequests === 1 ? initial : refreshed;
+    } else if (url.endsWith("/freshness")) {
+      payload = refreshed.freshness;
+    } else if (url.includes("/events")) {
+      payload = { events: [], next_since_id: null, has_more: false };
+    } else {
+      assert.fail(`unexpected Session Report request: ${url}`);
+    }
+    return { ok: true, json: async () => payload, text: async () => "" };
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  });
+
+  let tree;
+  await act(async () => {
+    tree = create(React.createElement(SessionReport, { sessionId: "sess-demo-999" }));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.deepEqual(requests, ["/api/sessions/sess-demo-999/report"]);
+  assert.equal(timers[0].ms, 5000);
+
+  await act(async () => {
+    timers.shift().callback();
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.deepEqual(requests, [
+    "/api/sessions/sess-demo-999/report",
+    "/api/sessions/sess-demo-999/freshness",
+    "/api/sessions/sess-demo-999/events",
+  ]);
+  assert.equal(reportRequests, 1);
+  assert.match(JSON.stringify(tree.toJSON()), /New session evidence available/);
+  assert.match(JSON.stringify(tree.toJSON()), /Provider \/ raw total.*50/);
+
+  const refresh = tree.root.findAllByType("button").find((button) => renderedText(button) === "Refresh");
+  await act(async () => {
+    refresh.props.onClick();
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  assert.equal(reportRequests, 2);
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /New session evidence available/);
+  assert.match(JSON.stringify(tree.toJSON()), /Provider \/ raw total.*60/);
+  await act(async () => { tree.unmount(); });
 });
 
 test("dashboard renders loading, error, populated, and empty states", () => {
@@ -2247,7 +2415,7 @@ test("Evidence Drawer fetches its Session Report handoff and reuses bounded evid
     "Block",
   ]) assert.match(drawer, new RegExp(text));
   assert.match(drawer, /role="dialog"/);
-  assert.match(drawer, /class="token-comparison" aria-label="Estimate versus actual tokens"/);
+  assert.match(drawer, /class="token-comparison" role="group" aria-label="Estimate versus actual tokens"/);
   assert.match(drawer, /Spend tracking · opencode · native_usage/);
   assert.match(drawer, /class="status-pill status-pill-warning"[\s\S]*?class="status-pill-label">Blocked<\/span>/);
   assert.match(drawer, /class="live-event live-event-launch event-row"/);
