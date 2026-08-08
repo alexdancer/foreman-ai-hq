@@ -528,7 +528,7 @@ def test_invalid_native_cost_serializes_through_verify_and_artifact_routes(tmp_p
             "session_id": "session_invalid_cost_route",
             "result": SENTINEL_RESPONSE,
             "usage": {"input_tokens": 3, "output_tokens": 4},
-            "modelUsage": {"claude-sonnet-4-6": {"costUSD": float("inf")}},
+            "modelUsage": {"claude-sonnet-4-6": {"costUSD": "$Infinity"}},
         }
     )
 
@@ -560,6 +560,39 @@ def test_invalid_native_cost_serializes_through_verify_and_artifact_routes(tmp_p
     assert turn["cost"] is None
     assert turn["raw_usage"]["cost_unavailable"] is True
     assert turn["raw_usage"]["source"]["modelUsage"]["claude-sonnet-4-6"]["costUSD"] is None
+
+
+def test_native_usage_sanitizes_formatted_cost_values():
+    cases = [
+        ("$-0.01", None, 0.0, True),
+        ("$NaN", None, 0.0, True),
+        ("-$1,000", None, 0.0, True),
+        ("$0.00", "$0.00", 0.0, False),
+        ("$1,234.50", "$1,234.50", 1234.5, False),
+        ("provider estimate unavailable", "provider estimate unavailable", 0.0, True),
+    ]
+
+    for raw_cost, expected_raw, expected_cost, unavailable in cases:
+        payload = {
+            "type": "usage",
+            "model": "opencode/gpt-5.1",
+            "run_id": "run_formatted_cost",
+            "usage": {
+                "input_tokens": 7,
+                "output_tokens": 2,
+                "total_tokens": 9,
+                "cost_usd": raw_cost,
+            },
+        }
+
+        evidence = parse_native_usage_evidence(json.dumps(payload), model="opencode/gpt-5.1")
+
+        assert evidence is not None
+        assert evidence.cost == expected_cost
+        assert evidence.raw_usage["usage"]["cost_usd"] == expected_raw
+        assert evidence.raw_usage["source"]["usage"]["cost_usd"] == expected_raw
+        assert evidence.raw_usage.get("cost_unavailable", False) is unavailable
+        json.dumps(evidence.raw_usage, allow_nan=False)
 
 
 def test_parse_codex_turn_completed_usage_accepts_costless_run_bound_tokens():

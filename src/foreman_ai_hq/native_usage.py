@@ -288,6 +288,7 @@ def _native_usage_cost(
     return None, False
 
 
+# Native evidence crosses strict JSON boundaries, so invalid costs are nulled while opaque provider text remains intact.
 def _json_safe_native_evidence(value: Any, *, cost_context: bool = False) -> Any:
     if isinstance(value, dict):
         return {
@@ -298,16 +299,10 @@ def _json_safe_native_evidence(value: Any, *, cost_context: bool = False) -> Any
         return [_json_safe_native_evidence(item, cost_context=cost_context) for item in value]
     if isinstance(value, float) and not math.isfinite(value):
         return None
-    if cost_context and isinstance(value, bool):
-        return None
-    if cost_context and isinstance(value, (int, float)):
-        return value if normalized_cost(value) is not None else None
-    if cost_context and isinstance(value, str):
-        try:
-            float(value)
-        except ValueError:
-            return value
-        return value if normalized_cost(value) is not None else None
+    if cost_context:
+        normalized, recognized = _classified_cost(value)
+        if recognized and normalized is None:
+            return None
     return value
 
 
@@ -639,12 +634,21 @@ def _int_from_any(value: Any) -> int:
 
 
 def normalized_cost(value: Any) -> float | None:
+    return _classified_cost(value)[0]
+
+
+def _classified_cost(value: Any) -> tuple[float | None, bool]:
     if isinstance(value, bool) or value is None:
-        return None
+        return None, isinstance(value, bool)
     if isinstance(value, str):
-        value = value.replace("$", "").replace(",", "").strip()
+        value = _clean_cost_string(value)
     try:
         resolved = float(value)
     except (TypeError, ValueError):
-        return None
-    return resolved if math.isfinite(resolved) and resolved >= 0 else None
+        return None, False
+    normalized = resolved if math.isfinite(resolved) and resolved >= 0 else None
+    return normalized, True
+
+
+def _clean_cost_string(value: str) -> str:
+    return value.replace("$", "").replace(",", "").strip()
