@@ -1188,6 +1188,17 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.doesNotMatch(failed, /server-rendered dashboard/);
   assert.match(failed, /href="\/dashboard"/);
 
+  let errorRenderer;
+  act(() => {
+    errorRenderer = create(React.createElement(DashboardState, {
+      data: null,
+      error: new Error("offline"),
+      loading: false,
+    }));
+  });
+  const retryLink = errorRenderer.root.findByProps({ href: "/dashboard" });
+  assert.equal(retryLink.props.onClick, undefined);
+
   const populated = renderDashboard({ data: dashboardData(), error: null, loading: false });
   assert.match(populated, /Daily governed budget/);
   assert.match(populated, /Worker token component breakdown/);
@@ -1357,8 +1368,9 @@ test("dashboard spend breakdown shows priced USD per category, unpriced labels, 
     error: null,
     loading: false,
   });
-  assert.match(mixedCoverage, /\$0\.0100 priced · global pricing coverage incomplete/);
-  assert.match(mixedCoverage, /\$0\.0200 priced · global pricing coverage incomplete/);
+  assert.match(mixedCoverage, /<span class="mono">\$0\.0100<\/span><span class="dashboard-provenance-qualifier"> ▲ global pricing coverage incomplete<\/span>/);
+  assert.match(mixedCoverage, /<span class="mono">\$0\.0200<\/span><span class="dashboard-provenance-qualifier"> ▲ global pricing coverage incomplete<\/span>/);
+  assert.match(mixedCoverage, /Reported cost[^]*\$0\.0123[^]*global pricing coverage incomplete/);
   assert.match(mixedCoverage, /43% of tokens priced/);
 });
 

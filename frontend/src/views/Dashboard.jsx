@@ -46,7 +46,7 @@ export function DashboardState({ data, error, loading }) {
       <>
         <h1 className="page-title">Dashboard</h1>
         <Notice variant="danger" role="alert">{safeError(error)}</Notice>
-        <p><OwnedLink to="/dashboard">Retry</OwnedLink></p>
+        <p><a href="/dashboard">Retry</a></p>
       </>
     );
   }
@@ -231,7 +231,7 @@ export function DashboardContent({ data }) {
                 {components.cost != null && (
                   <>
                     <div>Reported cost</div>
-                    <div>${Number(components.cost).toFixed(4)}</div>
+                    <div><PriceEvidence value={components.cost} coverageIncomplete={pricingCoverageIncomplete} /></div>
                   </>
                 )}
               </div>
