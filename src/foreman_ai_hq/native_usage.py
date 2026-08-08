@@ -18,6 +18,11 @@ CODEX_NATIVE_MODELS = {
     "gpt-5.6-luna",
 }
 
+MODEL_USAGE_COST_KEY = "costUSD"
+ITEM_COST_KEYS = ("total_cost_usd", "cost")
+USAGE_COST_KEYS = ("cost", "cost_usd", "usd")
+NATIVE_COST_KEYS = {MODEL_USAGE_COST_KEY, *ITEM_COST_KEYS, *USAGE_COST_KEYS}
+
 
 @dataclass(frozen=True)
 class NativeUsageEvidence:
@@ -232,9 +237,9 @@ def parse_native_usage_evidence(
             cost=cost or 0.0,
             raw_usage={
                 "model": explicit_model or model,
-                "usage": usage,
+                "usage": _json_safe_native_evidence(usage),
                 "run_binding": run_binding,
-                "source": item,
+                "source": _json_safe_native_evidence(item),
                 **({"cost_unavailable": True} if cost is None else {}),
             },
         )
@@ -270,13 +275,40 @@ def _native_usage_cost(
     model_usage = item.get("modelUsage") or item.get("model_usage")
     if isinstance(model_usage, dict):
         matching_details = _matching_model_usage(model_usage, model=model)
-        if matching_details is not None and matching_details.get("costUSD") is not None:
-            return normalized_cost(matching_details.get("costUSD")), True
+        if matching_details is not None and matching_details.get(MODEL_USAGE_COST_KEY) is not None:
+            return normalized_cost(matching_details.get(MODEL_USAGE_COST_KEY)), True
         return None, False
-    for value in (item.get("total_cost_usd"), usage.get("cost"), usage.get("cost_usd"), usage.get("usd"), item.get("cost")):
+    for value in (
+        item.get(ITEM_COST_KEYS[0]),
+        *(usage.get(key) for key in USAGE_COST_KEYS),
+        item.get(ITEM_COST_KEYS[1]),
+    ):
         if value is not None:
             return normalized_cost(value), True
     return None, False
+
+
+def _json_safe_native_evidence(value: Any, *, cost_context: bool = False) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _json_safe_native_evidence(nested, cost_context=cost_context or key in NATIVE_COST_KEYS)
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        return [_json_safe_native_evidence(item, cost_context=cost_context) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if cost_context and isinstance(value, bool):
+        return None
+    if cost_context and isinstance(value, (int, float)):
+        return value if normalized_cost(value) is not None else None
+    if cost_context and isinstance(value, str):
+        try:
+            float(value)
+        except ValueError:
+            return value
+        return value if normalized_cost(value) is not None else None
+    return value
 
 
 def _matching_model_usage(model_usage: dict[str, Any], *, model: str) -> dict[str, Any] | None:
