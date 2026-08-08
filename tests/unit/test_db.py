@@ -851,8 +851,7 @@ def test_planning_token_turn_spend_category_and_usage_source(tmp_path):
     assert turn["raw_usage"]["usage_source"] == "harness_proxy"
 
     breakdown = token_usage_breakdown(db_path)
-    assert breakdown["by_category"]["control_plane"] == 150
-    assert breakdown["by_category"]["other"] == 0
+    assert breakdown["by_category"]["other"] == 150
     assert breakdown["by_category"]["worker_execution"] == 0
     assert breakdown["by_source"]["harness_proxy"] == 150
     assert db.budgeted_token_usage(db_path) == 150
@@ -889,6 +888,5 @@ def test_token_usage_breakdown_keeps_six_fixed_keys_and_rolls_up_planning(tmp_pa
         "reporting_summary",
         "other",
     }
-    assert breakdown["by_category"]["control_plane"] == 1
-    assert breakdown["by_category"]["other"] == 0
+    assert breakdown["by_category"]["other"] == 1
     assert db.budgeted_token_usage(db_path) == 1

@@ -123,9 +123,9 @@ const dashboardData = {
   spend: {
     worker_execution: 150,
     agent_review_reporting: 30,
-    planning_estimation: 40,
+    planning_estimation: 0,
     setup_verification: 20,
-    other: 0,
+    other: 40,
     cost_by_category: {
       control_plane: null,
       task_breakdown: null,
@@ -456,9 +456,17 @@ async function inspect() {
     "Dashboard panel titles do not use the accepted sentence-case sans tier",
   );
   requireContract(
-    dashboard.querySelector(".dashboard-kpi-orchestration .value")?.textContent.trim() === "90",
-    "Dashboard orchestration KPI is not distinct from Worker spend",
+    dashboard.querySelector(".dashboard-kpi-orchestration .value")?.textContent.trim() === "See breakdown",
+    "Dashboard presents incomplete orchestration attribution as an authoritative total",
   );
+  requireContract(
+    dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("partial attribution")
+      && dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("Other tracked spend"),
+    "Dashboard does not direct incomplete orchestration attribution to the tracked-spend breakdown",
+  );
+  const otherSpendRow = [...dashboard.querySelectorAll('[role="table"][aria-label="Governed spend by category"] [role="row"]')]
+    .find((row) => row.textContent.includes("Other tracked spend"));
+  requireContract(otherSpendRow?.textContent.includes("40"), "Dashboard loses unattributed Planning spend from the governed-spend breakdown");
   requireContract(
     dashboardOverview.querySelectorAll(".kpi")[1]?.querySelector(".value")?.textContent.trim() === "150",
     "Dashboard Worker execution KPI changed its authoritative total",

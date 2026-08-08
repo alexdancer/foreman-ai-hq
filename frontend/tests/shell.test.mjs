@@ -1233,7 +1233,7 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(empty, /href="\/settings\/project"/);
 });
 
-test("dashboard leads with four Ledger KPIs without inventing Needs You authority", () => {
+test("dashboard leads with four Ledger KPIs without inventing Needs You or complete orchestration authority", () => {
   const populated = renderDashboard({
     data: dashboardData({
       next_actions: [
@@ -1253,9 +1253,9 @@ test("dashboard leads with four Ledger KPIs without inventing Needs You authorit
       spend: {
         worker_execution: 150,
         agent_review_reporting: 30,
-        planning_estimation: 20,
+        planning_estimation: 0,
         setup_verification: 10,
-        other: 5,
+        other: 25,
         cost_by_category: {
           control_plane: null,
           task_breakdown: null,
@@ -1284,7 +1284,10 @@ test("dashboard leads with four Ledger KPIs without inventing Needs You authorit
   assert.match(populated, /<a class="dashboard-action-link" href="\/board">Review 1 task<\/a>/);
   assert.match(populated, /Awaiting operator review/);
   assert.match(populated, /<div class="label">Worker execution<\/div><div class="value mono">150<\/div>/);
-  assert.match(populated, /<div class="label">Orchestration<\/div><div class="value mono">60<\/div><div class="sub">[^<]* · unpriced<\/div>/);
+  assert.match(populated, /<div class="label">Orchestration<\/div><div class="value mono">See breakdown<\/div>/);
+  assert.match(populated, /partial attribution/);
+  assert.match(populated, /cannot prove complete Planning attribution/);
+  assert.match(populated, /Other tracked spend/);
   assert.match(populated, /<div class="label">Needs You<\/div><div class="value mono">Project-scoped<\/div>/);
   assert.match(populated, /Authoritative Needs You decisions live within each project/);
   assert.match(populated, /unpriced/);

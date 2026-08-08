@@ -2334,10 +2334,8 @@ def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
         raw_usage = turn.get("raw_usage") or {}
         category = str(raw_usage.get("spend_category") or _spend_category_for_usage_kind(str(turn.get("usage_kind") or "")))
         source = str(raw_usage.get("usage_source") or _usage_source_for_usage_kind(str(turn.get("usage_kind") or ""), category))
-        # Preserve the fixed ledger schema while keeping orchestration out of Other.
-        if category == "planning":
-            category = "control_plane"
-        elif category == "agent_review":
+        # Agent Review used to be its own category; report it with other control-plane summaries.
+        if category == "agent_review":
             category = "reporting_summary"
             if source == "unspecified":
                 source = "control_plane"

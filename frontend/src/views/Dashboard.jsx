@@ -67,18 +67,12 @@ export function DashboardContent({ data }) {
   const costByCategory = spend.cost_by_category || {};
   const workerCost = costByCategory.worker_execution;
   const reportingCost = costByCategory.reporting_summary;
-  const planningCost = sumFullyPricedCosts(
+  const planningCost = sumCostsWhenAllPresent(
     costByCategory.control_plane,
     costByCategory.task_breakdown,
   );
   const setupCost = costByCategory.adapter_verification;
   const otherCost = costByCategory.other;
-  const orchestrationTokens = sumTokens(
-    spend.agent_review_reporting,
-    spend.planning_estimation,
-    spend.setup_verification,
-  );
-  const orchestrationCost = sumFullyPricedCosts(reportingCost, planningCost, setupCost);
   const totalCost = spend.total_cost;
   const pricedTokens = Number(spend.priced_tokens || 0);
   const unpricedTokens = Number(spend.unpriced_tokens || 0);
@@ -159,8 +153,8 @@ export function DashboardContent({ data }) {
         <Metric
           className="dashboard-kpi-orchestration"
           label="Orchestration"
-          value={formatTokens(orchestrationTokens)}
-          detail={`Planning, estimation, review, reporting, and verification · ${formatAggregateCost(orchestrationCost, pricingCoverageIncomplete)}`}
+          value="See breakdown"
+          detail={<><StatusPill tone="warning" label="partial attribution" /> <span>Current projection cannot prove complete Planning attribution · review the governed-spend breakdown, including Other tracked spend</span></>}
         />
         <Metric
           className="dashboard-kpi-needs-you"
@@ -407,11 +401,7 @@ function formatAggregateCost(value, coverageIncomplete) {
   return coverageIncomplete ? `${formatted} priced · global pricing coverage incomplete` : formatted;
 }
 
-function sumTokens(...values) {
-  return values.reduce((total, value) => total + Number(value || 0), 0);
-}
-
-function sumFullyPricedCosts(...values) {
+function sumCostsWhenAllPresent(...values) {
   return values.every((value) => value != null)
     ? values.reduce((total, value) => total + Number(value), 0)
     : null;
