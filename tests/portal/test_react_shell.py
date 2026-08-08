@@ -952,6 +952,8 @@ def test_react_dashboard_projection_is_safe_and_bounded(tmp_path, monkeypatch):
         "alarms",
         "active_sessions",
         "estimation_accuracy",
+        "estimation_coefficients",
+        "needs_you",
         "projects",
     }
     assert set(payload["next_actions"][0]) == {"label", "detail", "href", "tone"}
@@ -968,14 +970,32 @@ def test_react_dashboard_projection_is_safe_and_bounded(tmp_path, monkeypatch):
     assert all(set(item) == {"label", "value"} for item in component_items)
     assert set(payload["spend"]) == {
         "worker_execution",
+        "orchestration",
         "agent_review_reporting",
         "planning_estimation",
         "setup_verification",
         "other",
+        "pricing_coverage",
         "cost_by_category",
         "total_cost",
         "priced_tokens",
         "unpriced_tokens",
+    }
+    assert set(payload["spend"]["pricing_coverage"]) == {
+        "worker_execution",
+        "agent_review_reporting",
+        "planning_estimation",
+        "setup_verification",
+        "other",
+        "orchestration",
+        "total",
+    }
+    assert set(payload["spend"]["pricing_coverage"]["worker_execution"]) == {
+        "state",
+        "cost",
+        "priced_tokens",
+        "unpriced_tokens",
+        "coverage_percent",
     }
     assert set(payload["spend"]["cost_by_category"]) == {
         "control_plane",
@@ -1017,8 +1037,16 @@ def test_react_dashboard_projection_is_safe_and_bounded(tmp_path, monkeypatch):
     assert payload["projects"][0]["id"] == project["id"]
     assert payload["projects"][0]["name"] == project["name"]
     assert payload["projects"][0]["task_count"] == 0
-    assert set(payload["projects"][0]) == {"id", "name", "task_count", "capability"}
+    assert payload["projects"][0]["needs_you_count"] == 0
+    assert set(payload["projects"][0]) == {"id", "name", "task_count", "needs_you_count", "capability"}
     assert set(payload["projects"][0]["capability"]) == {"state"}
+    assert payload["needs_you"] == {"count": 0, "project_count": 1, "projects_with_needs_you": 0}
+    assert set(payload["estimation_coefficients"]) == {"available", "scope", "factors"}
+    assert payload["estimation_coefficients"]["available"] is True
+    assert all(
+        set(factor) == {"key", "label", "value", "provenance"}
+        for factor in payload["estimation_coefficients"]["factors"]
+    )
     serialized = json.dumps(payload)
     assert "dashboard-secret-hash" not in serialized
     assert "do-not-return" not in serialized

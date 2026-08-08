@@ -2322,6 +2322,8 @@ def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
     }
     cost_by_category = {cat: 0.0 for cat in by_category}
     cost_seen = {cat: False for cat in by_category}
+    priced_by_category = dict.fromkeys(by_category, 0)
+    unpriced_by_category = dict.fromkeys(by_category, 0)
     by_source: dict[str, int] = {}
     total = 0
     total_cost = 0.0
@@ -2334,11 +2336,13 @@ def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
         raw_usage = turn.get("raw_usage") or {}
         category = str(raw_usage.get("spend_category") or _spend_category_for_usage_kind(str(turn.get("usage_kind") or "")))
         source = str(raw_usage.get("usage_source") or _usage_source_for_usage_kind(str(turn.get("usage_kind") or ""), category))
-        # Agent Review used to be its own category; report it with other control-plane summaries.
+        # Legacy aliases stay readable while the fixed public category set remains compatible.
         if category == "agent_review":
             category = "reporting_summary"
             if source == "unspecified":
                 source = "control_plane"
+        elif category == "planning":
+            category = "control_plane"
         if category not in by_category:
             category = "other"
         by_category[category] += tokens
@@ -2349,23 +2353,48 @@ def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
             cost_by_category[category] += cost_value
             total_cost += cost_value
             priced_tokens += tokens
+            priced_by_category[category] += tokens
             cost_seen[category] = True
             any_cost = True
         else:
             unpriced_tokens += tokens
+            unpriced_by_category[category] += tokens
     for cat in by_category:
         if not cost_seen[cat]:
             cost_by_category[cat] = None if by_category[cat] > 0 else 0.0
     if not any_cost:
         total_cost = 0.0 if total == 0 else None
+    pricing_coverage_by_category = {
+        category: _pricing_coverage(priced_by_category[category], unpriced_by_category[category])
+        for category in by_category
+    }
     return {
         "total_tokens": total,
         "by_category": by_category,
         "by_source": by_source,
         "cost_by_category": cost_by_category,
+        "pricing_coverage_by_category": pricing_coverage_by_category,
         "total_cost": total_cost,
         "priced_tokens": priced_tokens,
         "unpriced_tokens": unpriced_tokens,
+    }
+
+
+def _pricing_coverage(priced_tokens: int, unpriced_tokens: int) -> dict[str, int | str]:
+    total_tokens = priced_tokens + unpriced_tokens
+    if total_tokens == 0:
+        state = "no_usage"
+    elif priced_tokens == 0:
+        state = "unpriced"
+    elif unpriced_tokens == 0:
+        state = "fully_priced"
+    else:
+        state = "partially_priced"
+    return {
+        "state": state,
+        "priced_tokens": priced_tokens,
+        "unpriced_tokens": unpriced_tokens,
+        "coverage_percent": round((priced_tokens / total_tokens) * 100) if total_tokens else 0,
     }
 
 

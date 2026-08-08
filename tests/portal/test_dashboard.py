@@ -2,8 +2,10 @@ from fastapi.testclient import TestClient
 
 from foreman_ai_hq import db
 from foreman_ai_hq.app import create_app
+from foreman_ai_hq.estimation_coefficients import CoefficientLoadError
+from foreman_ai_hq.project_context import project_task_metadata
 from foreman_ai_hq.settings import Settings
-from tests.portal.helpers import ROOT, PORTAL_TOKEN, _client, _portal_headers
+from tests.portal.helpers import ROOT, PORTAL_TOKEN, _client, _connect_project, _portal_headers
 
 # These tests used to read the Jinja dashboard.html markup as the oracle for
 # dashboard business rules (budget accounting, next-action prioritization,
@@ -70,6 +72,193 @@ def test_dashboard_renders_budget_alarm_and_navigation_sections(tmp_path, monkey
     # provider_api_key_env or threads a raw session key into it — and the
     # real redaction guarantee is proven with actual injected secrets by
     # test_react_shell.py's test_react_dashboard_projection_is_safe_and_bounded.
+
+
+def test_dashboard_authoritative_projection_empty_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+
+    with _client(tmp_path) as client:
+        response = client.get("/api/dashboard", headers=_portal_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["needs_you"] == {
+        "count": 0,
+        "project_count": 0,
+        "projects_with_needs_you": 0,
+    }
+    assert payload["spend"]["orchestration"] == 0
+    assert payload["spend"]["pricing_coverage"]["worker_execution"] == {
+        "state": "no_usage",
+        "cost": 0.0,
+        "priced_tokens": 0,
+        "unpriced_tokens": 0,
+        "coverage_percent": 0,
+    }
+    assert payload["spend"]["pricing_coverage"]["orchestration"]["state"] == "no_usage"
+    assert payload["estimation_coefficients"]["available"] is True
+    provenance = {
+        factor["key"]: factor["provenance"]
+        for factor in payload["estimation_coefficients"]["factors"]
+    }
+    assert provenance["g"] == "seed"
+    assert provenance["p"] == "fitted(3)"
+
+
+def test_dashboard_uses_project_needs_you_projection_and_canonical_pricing(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    database_path = tmp_path / "harness.db"
+
+    with _client(tmp_path) as client:
+        first = _connect_project(database_path, tmp_path / "dashboard-needs-you-one")
+        second = _connect_project(database_path, tmp_path / "dashboard-needs-you-two")
+        db.create_task(
+            database_path,
+            description="DEMO dashboard review decision 2099",
+            status="Review",
+            estimate_tokens=999,
+            recommended_model="demo-model",
+            metadata=project_task_metadata(first),
+        )
+        session = db.create_session(
+            database_path,
+            task_description="Mixed Dashboard pricing",
+            model="mixed",
+            session_key_hash="mixed-dashboard-pricing",
+            guardrail_overrides={},
+            status="completed",
+        )
+        turns = [
+            ("worker", "worker_execution", 100, 0.01),
+            ("worker", "worker_execution", 50, None),
+            ("planning", "planning", 40, 0.02),
+            ("task_breakdown", "task_breakdown", 10, None),
+            ("reporting", "reporting_summary", 5, 0.005),
+            ("adapter_verification", "adapter_verification", 2, None),
+        ]
+        for usage_kind, category, tokens, cost in turns:
+            db.record_token_turn(
+                database_path,
+                session_id=session["id"],
+                usage_kind=usage_kind,
+                model="mixed",
+                prompt_tokens=tokens,
+                completion_tokens=0,
+                cost=cost,
+                raw_usage={"total_tokens": tokens, "spend_category": category},
+            )
+
+        needs_you = client.get(
+            f"/api/projects/{first['id']}/needs-you", headers=_portal_headers()
+        ).json()
+        response = client.get("/api/dashboard", headers=_portal_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert needs_you["count"] == 1
+    assert payload["needs_you"] == {
+        "count": 1,
+        "project_count": 2,
+        "projects_with_needs_you": 1,
+    }
+    projects = {project["id"]: project for project in payload["projects"]}
+    assert projects[first["id"]]["needs_you_count"] == needs_you["count"]
+    assert projects[second["id"]]["needs_you_count"] == 0
+
+    assert payload["spend"]["worker_execution"] == 150
+    assert payload["spend"]["orchestration"] == 57
+    assert payload["spend"]["planning_estimation"] == 50
+    assert payload["spend"]["other"] == 0
+    assert payload["spend"]["pricing_coverage"]["worker_execution"] == {
+        "state": "partially_priced",
+        "cost": 0.01,
+        "priced_tokens": 100,
+        "unpriced_tokens": 50,
+        "coverage_percent": 67,
+    }
+    assert payload["spend"]["pricing_coverage"]["planning_estimation"] == {
+        "state": "partially_priced",
+        "cost": 0.02,
+        "priced_tokens": 40,
+        "unpriced_tokens": 10,
+        "coverage_percent": 80,
+    }
+    assert payload["spend"]["pricing_coverage"]["setup_verification"] == {
+        "state": "unpriced",
+        "cost": None,
+        "priced_tokens": 0,
+        "unpriced_tokens": 2,
+        "coverage_percent": 0,
+    }
+    assert payload["spend"]["pricing_coverage"]["orchestration"] == {
+        "state": "partially_priced",
+        "cost": 0.025,
+        "priced_tokens": 45,
+        "unpriced_tokens": 12,
+        "coverage_percent": 79,
+    }
+
+
+def test_dashboard_attributes_planning_only_spend_to_orchestration(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    database_path = tmp_path / "harness.db"
+
+    with _client(tmp_path) as client:
+        session = db.create_session(
+            database_path,
+            task_description="Planning-only Dashboard spend",
+            model="orchestrator",
+            session_key_hash="planning-only-dashboard",
+            guardrail_overrides={"session_kind": "planning"},
+            status="completed",
+        )
+        db.record_token_turn(
+            database_path,
+            session_id=session["id"],
+            usage_kind="planning",
+            model="orchestrator",
+            prompt_tokens=100,
+            completion_tokens=50,
+            cost=0.003,
+            raw_usage={"total_tokens": 150},
+        )
+        response = client.get("/api/dashboard", headers=_portal_headers())
+
+    assert response.status_code == 200
+    spend = response.json()["spend"]
+    assert spend["worker_execution"] == 0
+    assert spend["planning_estimation"] == 150
+    assert spend["orchestration"] == 150
+    assert spend["other"] == 0
+    assert spend["pricing_coverage"]["orchestration"] == {
+        "state": "fully_priced",
+        "cost": 0.003,
+        "priced_tokens": 150,
+        "unpriced_tokens": 0,
+        "coverage_percent": 100,
+    }
+
+
+def test_dashboard_keeps_missing_coefficient_provenance_bounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+
+    def unavailable_coefficients(*_args, **_kwargs):
+        raise CoefficientLoadError("private coefficient path must not escape")
+
+    monkeypatch.setattr(
+        "foreman_ai_hq.routes.react_shell.resolve_coefficients",
+        unavailable_coefficients,
+    )
+    with _client(tmp_path) as client:
+        response = client.get("/api/dashboard", headers=_portal_headers())
+
+    assert response.status_code == 200
+    assert response.json()["estimation_coefficients"] == {
+        "available": False,
+        "scope": "default",
+        "factors": [],
+    }
+    assert "private coefficient path" not in response.text
 
 
 def test_dashboard_next_actions_count_launch_and_review_tasks(tmp_path, monkeypatch):

@@ -38,6 +38,7 @@ from foreman_ai_hq.board_workspace import (
     project_workspace_summary,
 )
 from foreman_ai_hq.evidence_reporting import safe_evidence
+from foreman_ai_hq.estimation_coefficients import CoefficientLoadError, resolve_coefficients
 from foreman_ai_hq.needs_you import low_confidence_item
 from foreman_ai_hq.pi_adapter import (
     DISCOVERY_NEEDS_AUTHENTICATION,
@@ -245,6 +246,67 @@ def _dashboard_cost(value: Any) -> float | None:
     return float(value) if math.isfinite(value) and value >= 0 else None
 
 
+_DASHBOARD_COEFFICIENT_LABELS = {
+    "a": "Input per file read",
+    "b": "Input per file modified",
+    "g": "Context growth per turn",
+    "p": "Output per turn",
+    "k": "Test-run overhead",
+}
+
+
+def _dashboard_coefficient_provenance() -> dict[str, Any]:
+    try:
+        coefficients = resolve_coefficients(None, None)
+    except CoefficientLoadError:
+        # Dashboard evidence must degrade safely without exposing package paths or parser detail.
+        return {"available": False, "scope": "default", "factors": []}
+    return {
+        "available": True,
+        "scope": "default",
+        "factors": [
+            {
+                "key": key,
+                "label": label,
+                "value": coefficients.values[key],
+                "provenance": coefficients.provenance[key],
+            }
+            for key, label in _DASHBOARD_COEFFICIENT_LABELS.items()
+        ],
+    }
+
+
+def _dashboard_pricing_coverage(
+    token_breakdown: dict[str, Any], *category_names: str
+) -> dict[str, Any]:
+    category_coverage = token_breakdown["pricing_coverage_by_category"]
+    priced_tokens = sum(category_coverage[name]["priced_tokens"] for name in category_names)
+    unpriced_tokens = sum(category_coverage[name]["unpriced_tokens"] for name in category_names)
+    total_tokens = priced_tokens + unpriced_tokens
+    if total_tokens == 0:
+        state = "no_usage"
+        cost: float | None = 0.0
+    elif priced_tokens == 0:
+        state = "unpriced"
+        cost = None
+    else:
+        state = "fully_priced" if unpriced_tokens == 0 else "partially_priced"
+        cost = _dashboard_cost(
+            sum(
+                float(value)
+                for name in category_names
+                if (value := token_breakdown["cost_by_category"][name]) is not None
+            )
+        )
+    return {
+        "state": state,
+        "cost": cost,
+        "priced_tokens": priced_tokens,
+        "unpriced_tokens": unpriced_tokens,
+        "coverage_percent": round((priced_tokens / total_tokens) * 100) if total_tokens else 0,
+    }
+
+
 @router.get("/api/dashboard", dependencies=[Depends(require_portal_auth)])
 def react_dashboard_state(request: Request):
     """Bounded read-only dashboard state reusing the existing backend calculation."""
@@ -259,6 +321,25 @@ def react_dashboard_state(request: Request):
     worker_summary = context["worker_token_summary"]
     components = worker_summary.get("components") or {}
     sidebar_projects = portal_template_context(request).get("sidebar_projects", [])
+    projects = [_dashboard_project_entry(request, project) for project in sidebar_projects]
+    needs_you_count = sum(project["needs_you_count"] for project in projects)
+    pricing_coverage = {
+        "worker_execution": _dashboard_pricing_coverage(token_breakdown, "worker_execution"),
+        "agent_review_reporting": _dashboard_pricing_coverage(token_breakdown, "reporting_summary"),
+        "planning_estimation": _dashboard_pricing_coverage(
+            token_breakdown, "control_plane", "task_breakdown"
+        ),
+        "setup_verification": _dashboard_pricing_coverage(token_breakdown, "adapter_verification"),
+        "other": _dashboard_pricing_coverage(token_breakdown, "other"),
+        "orchestration": _dashboard_pricing_coverage(
+            token_breakdown,
+            "control_plane",
+            "task_breakdown",
+            "reporting_summary",
+            "adapter_verification",
+        ),
+        "total": _dashboard_pricing_coverage(token_breakdown, *categories),
+    }
 
     return {
         "next_actions": [
@@ -293,10 +374,20 @@ def react_dashboard_state(request: Request):
         },
         "spend": {
             "worker_execution": context["worker_token_total"],
+            "orchestration": sum(
+                categories[name]
+                for name in (
+                    "control_plane",
+                    "task_breakdown",
+                    "reporting_summary",
+                    "adapter_verification",
+                )
+            ),
             "agent_review_reporting": categories["reporting_summary"],
-            "planning_estimation": categories["task_breakdown"] + categories.get("orchestration", categories.get("control_plane", 0)),
+            "planning_estimation": categories["control_plane"] + categories["task_breakdown"],
             "setup_verification": categories["adapter_verification"],
             "other": categories["other"],
+            "pricing_coverage": pricing_coverage,
             "cost_by_category": {
                 key: _dashboard_cost(token_breakdown["cost_by_category"][key])
                 for key in categories
@@ -334,10 +425,15 @@ def react_dashboard_state(request: Request):
             "median_error_ratio": context["estimation_accuracy"]["median_error_ratio"],
             "within_2x_pct": context["estimation_accuracy"]["within_2x_pct"],
         },
-        "projects": [
-            _dashboard_project_entry(request, project)
-            for project in sidebar_projects
-        ],
+        "estimation_coefficients": _dashboard_coefficient_provenance(),
+        "needs_you": {
+            "count": needs_you_count,
+            "project_count": len(projects),
+            "projects_with_needs_you": sum(
+                1 for project in projects if project["needs_you_count"] > 0
+            ),
+        },
+        "projects": projects,
     }
 
 
@@ -634,10 +730,14 @@ def _dashboard_project_entry(request: Request, project: dict) -> dict:
     """Project-card fields only; never return workspace path or configuration."""
 
     capability = _project_view_model(request, project).get("capability") or {}
+    project_id = str(project["id"])
     return {
-        "id": str(project["id"]),
+        "id": project_id,
         "name": project.get("name", ""),
         "task_count": project.get("task_count", 0),
+        "needs_you_count": _needs_you_state(
+            request.app.state.settings.database_path, project_id
+        )["count"],
         "capability": {"state": capability.get("state", "unknown")},
     }
 

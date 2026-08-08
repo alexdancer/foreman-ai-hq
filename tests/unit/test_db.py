@@ -637,6 +637,58 @@ def test_token_usage_breakdown_aggregates_resolved_cost_and_coverage(tmp_path):
     assert breakdown["cost_by_category"]["task_breakdown"] is None
     assert breakdown["cost_by_category"]["adapter_verification"] is None
     assert breakdown["cost_by_category"]["other"] is None
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "fully_priced",
+        "priced_tokens": 20,
+        "unpriced_tokens": 0,
+        "coverage_percent": 100,
+    }
+    assert breakdown["pricing_coverage_by_category"]["task_breakdown"] == {
+        "state": "unpriced",
+        "priced_tokens": 0,
+        "unpriced_tokens": 5,
+        "coverage_percent": 0,
+    }
+
+
+def test_token_usage_breakdown_reports_partial_pricing_per_category(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="partial category pricing",
+        model="mixed",
+        session_key_hash="p" * 64,
+        guardrail_overrides={},
+        status="completed",
+    )
+    for tokens, cost in [(7, 0.03), (3, None)]:
+        record_token_turn(
+            db_path,
+            session_id=session["id"],
+            usage_kind="worker",
+            model="mixed",
+            prompt_tokens=tokens,
+            completion_tokens=0,
+            cost=cost,
+            raw_usage={"total_tokens": tokens, "spend_category": "worker_execution"},
+        )
+
+    breakdown = token_usage_breakdown(db_path)
+
+    assert breakdown["cost_by_category"]["worker_execution"] == pytest.approx(0.03)
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "partially_priced",
+        "priced_tokens": 7,
+        "unpriced_tokens": 3,
+        "coverage_percent": 70,
+    }
+    assert breakdown["pricing_coverage_by_category"]["control_plane"] == {
+        "state": "no_usage",
+        "priced_tokens": 0,
+        "unpriced_tokens": 0,
+        "coverage_percent": 0,
+    }
 
 
 def test_token_usage_breakdown_distinguishes_zero_priced_from_null_unpriced(tmp_path):
@@ -851,8 +903,11 @@ def test_planning_token_turn_spend_category_and_usage_source(tmp_path):
     assert turn["raw_usage"]["usage_source"] == "harness_proxy"
 
     breakdown = token_usage_breakdown(db_path)
-    assert breakdown["by_category"]["other"] == 150
+    assert breakdown["by_category"]["control_plane"] == 150
+    assert breakdown["by_category"]["other"] == 0
     assert breakdown["by_category"]["worker_execution"] == 0
+    assert breakdown["cost_by_category"]["control_plane"] == pytest.approx(0.001)
+    assert breakdown["pricing_coverage_by_category"]["control_plane"]["state"] == "fully_priced"
     assert breakdown["by_source"]["harness_proxy"] == 150
     assert db.budgeted_token_usage(db_path) == 150
 
@@ -888,5 +943,6 @@ def test_token_usage_breakdown_keeps_six_fixed_keys_and_rolls_up_planning(tmp_pa
         "reporting_summary",
         "other",
     }
-    assert breakdown["by_category"]["other"] == 1
+    assert breakdown["by_category"]["control_plane"] == 1
+    assert breakdown["by_category"]["other"] == 0
     assert db.budgeted_token_usage(db_path) == 1
