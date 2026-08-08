@@ -1,15 +1,20 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
+import {
+  Button,
+  ColumnHead,
+  ConfirmSheet,
+  DataCell,
+  DataTable,
+  EmptyState,
+  Loading,
+  Notice,
+  Row,
+  severityStatusTone,
+  StatusPill,
+} from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
-import { Button } from "../components/ui/Button.jsx";
-import { ConfirmSheet } from "../components/ui/ConfirmSheet.jsx";
-import { DataCell, DataTable, ColumnHead, Row } from "../components/ui/DataTable.jsx";
-import { EmptyState } from "../components/ui/EmptyState.jsx";
-import { Loading } from "../components/ui/Loading.jsx";
-import { Notice } from "../components/ui/Notice.jsx";
-import { StatusPill } from "../components/ui/StatusPill.jsx";
-import { severityStatusTone } from "../components/ui/statusTone.js";
 
 const FILTER_OPTIONS = {
   open: "Open",

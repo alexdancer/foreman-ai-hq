@@ -1,13 +1,18 @@
 import React, { useState } from "react";
 
 import { BlockedCondition, TaskCondition } from "../components/BlockedCondition.jsx";
-import { Button } from "../components/ui/Button.jsx";
-import { DataCell, DataTable, ColumnHead, Row } from "../components/ui/DataTable.jsx";
-import { EmptyState } from "../components/ui/EmptyState.jsx";
-import { Loading } from "../components/ui/Loading.jsx";
-import { Notice } from "../components/ui/Notice.jsx";
-import { StatusPill } from "../components/ui/StatusPill.jsx";
-import { statusTone } from "../components/ui/statusTone.js";
+import {
+  Button,
+  ColumnHead,
+  DataCell,
+  DataTable,
+  EmptyState,
+  Loading,
+  Notice,
+  Row,
+  statusTone,
+  StatusPill,
+} from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
