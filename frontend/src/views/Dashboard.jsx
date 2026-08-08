@@ -58,10 +58,6 @@ export function DashboardState({ data, error, loading }) {
 
 export function DashboardContent({ data }) {
   const actions = data.next_actions || [];
-  // The Dashboard has no global Needs You projection; alarms stay outside this display-only summary.
-  const attentionActions = actions.filter(
-    (action) => action.href !== "/alarms" && action.label !== "Open task board",
-  );
   const budget = data.budget || {};
   const worker = data.worker_execution || {};
   const statusSplit = worker.status_split || {};
@@ -86,6 +82,7 @@ export function DashboardContent({ data }) {
   const totalCost = spend.total_cost;
   const pricedTokens = Number(spend.priced_tokens || 0);
   const unpricedTokens = Number(spend.unpriced_tokens || 0);
+  const pricingCoverageIncomplete = unpricedTokens > 0;
   const totalSpendTokens = pricedTokens + unpricedTokens;
   const coveragePct = totalSpendTokens > 0
     ? Math.round((pricedTokens / totalSpendTokens) * 100)
@@ -157,19 +154,19 @@ export function DashboardContent({ data }) {
         <Metric
           label="Worker execution"
           value={formatTokens(spend.worker_execution ?? worker.token_total)}
-          detail={`Worker-only normalized task actuals · ${formatCost(workerCost)}`}
+          detail={`Worker-only normalized task actuals · ${formatAggregateCost(workerCost, pricingCoverageIncomplete)}`}
         />
         <Metric
           className="dashboard-kpi-orchestration"
           label="Orchestration"
           value={formatTokens(orchestrationTokens)}
-          detail={`Planning, estimation, review, reporting, and verification · ${formatCost(orchestrationCost)}`}
+          detail={`Planning, estimation, review, reporting, and verification · ${formatAggregateCost(orchestrationCost, pricingCoverageIncomplete)}`}
         />
         <Metric
-          className={`dashboard-kpi-needs-you${attentionActions.length ? " has-attention" : ""}`}
+          className="dashboard-kpi-needs-you"
           label="Needs You"
-          value={formatTokens(attentionActions.length)}
-          detail={<><StatusPill tone={attentionActions.length ? "warning" : "success"} label={attentionActions.length ? "attention" : "clear"} /> <span>Dashboard next-action summary · runtime alarms remain separate</span></>}
+          value="Project-scoped"
+          detail="Authoritative Needs You decisions live within each project · Dashboard next-action summary follows"
         />
       </section>
 
@@ -212,7 +209,7 @@ export function DashboardContent({ data }) {
                   : <strong>{row.label}</strong>}
               </DataCell>
               <DataCell className="mono dashboard-number">{formatTokens(row.tokens)}</DataCell>
-              <DataCell><PriceEvidence value={row.cost} /></DataCell>
+              <DataCell><PriceEvidence value={row.cost} coverageIncomplete={pricingCoverageIncomplete} /></DataCell>
               <DataCell>{row.scope}</DataCell>
             </Row>
           ))}
@@ -388,18 +385,26 @@ function AccuracyStat({ label, value, detail }) {
   );
 }
 
-function PriceEvidence({ value, emptyLabel = "unpriced" }) {
-  return value == null
-    ? <span className="dashboard-provenance-qualifier">▲ {emptyLabel}</span>
-    : <span className="mono">${Number(value).toFixed(4)}</span>;
+function PriceEvidence({ value, emptyLabel = "unpriced", coverageIncomplete = false }) {
+  if (value == null) {
+    return <span className="dashboard-provenance-qualifier">▲ {emptyLabel}</span>;
+  }
+  return (
+    <>
+      <span className="mono">${Number(value).toFixed(4)}</span>
+      {coverageIncomplete && <span className="dashboard-provenance-qualifier"> ▲ global pricing coverage incomplete</span>}
+    </>
+  );
 }
 
 function formatTokens(value) {
   return Number(value || 0).toLocaleString();
 }
 
-function formatCost(value) {
-  return value == null ? "unpriced" : `$${Number(value).toFixed(4)}`;
+function formatAggregateCost(value, coverageIncomplete) {
+  if (value == null) return "unpriced";
+  const formatted = `$${Number(value).toFixed(4)}`;
+  return coverageIncomplete ? `${formatted} priced · global pricing coverage incomplete` : formatted;
 }
 
 function sumTokens(...values) {

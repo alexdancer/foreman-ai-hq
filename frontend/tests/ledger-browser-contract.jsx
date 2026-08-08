@@ -111,7 +111,7 @@ const floorData = {
 
 const dashboardData = {
   next_actions: [
-    { label: "Review browser task", detail: "Context seed · output fitted(3) · actual unpriced", href: "/board", tone: "purple" },
+    { label: "Review 1 task", detail: "Awaiting operator review", href: "/board", tone: "purple" },
     { label: "Open task board", detail: "Inspect project work", href: "/board", tone: "green" },
   ],
   budget: { total_tokens: 240, daily_cap: 1000, current_zone: "green", since: "2099-01-01T00:00:00Z" },
@@ -463,9 +463,11 @@ async function inspect() {
     dashboardOverview.querySelectorAll(".kpi")[1]?.querySelector(".value")?.textContent.trim() === "150",
     "Dashboard Worker execution KPI changed its authoritative total",
   );
-  for (const qualifier of ["seed", "fitted(3)", "unpriced"]) {
-    requireContract(dashboard.textContent.includes(qualifier), `Dashboard loses the ${qualifier} provenance qualifier`);
-  }
+  requireContract(
+    dashboard.querySelector(".dashboard-kpi-needs-you .value")?.textContent.trim() === "Project-scoped",
+    "Dashboard invents a global Needs You count",
+  );
+  requireContract(dashboard.textContent.includes("unpriced"), "Dashboard loses the unpriced provenance qualifier");
   requireContract(dashboard.querySelector('[role="table"][aria-label="Active sessions"]'), "Dashboard sessions do not use the shared data table");
   requireContract(dashboard.querySelector('[role="table"][aria-label="Recent open alarms"]'), "Dashboard alarms do not use shared Ledger rows");
   const dashboardSessionLink = dashboard.querySelector('a[href="/sessions/browser-session-999"]');

@@ -1233,13 +1233,13 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(empty, /href="\/settings\/project"/);
 });
 
-test("dashboard leads with the four Ledger KPIs and preserves provenance qualifiers", () => {
+test("dashboard leads with four Ledger KPIs without inventing Needs You authority", () => {
   const populated = renderDashboard({
     data: dashboardData({
       next_actions: [
         {
-          label: "Review calibrated estimate",
-          detail: "Context coefficient seed · output coefficient fitted(3) · Worker actual unpriced",
+          label: "Review 1 task",
+          detail: "Awaiting operator review",
           href: "/board",
           tone: "purple",
         },
@@ -1281,11 +1281,13 @@ test("dashboard leads with the four Ledger KPIs and preserves provenance qualifi
   }
   assert.ok(populated.indexOf(">Needs You<") < populated.indexOf(">Operator next actions<"));
   assert.match(populated, /<h3>Operator next actions<\/h3><span class="column-count">2<\/span>/);
-  assert.match(populated, /<a class="dashboard-action-link" href="\/board">Review calibrated estimate<\/a>/);
+  assert.match(populated, /<a class="dashboard-action-link" href="\/board">Review 1 task<\/a>/);
+  assert.match(populated, /Awaiting operator review/);
   assert.match(populated, /<div class="label">Worker execution<\/div><div class="value mono">150<\/div>/);
   assert.match(populated, /<div class="label">Orchestration<\/div><div class="value mono">60<\/div><div class="sub">[^<]* · unpriced<\/div>/);
-  assert.match(populated, /<div class="label">Needs You<\/div><div class="value mono">1<\/div>/);
-  for (const qualifier of ["seed", "fitted(3)", "unpriced"]) assert.match(populated, new RegExp(qualifier.replace(/[()]/g, "\\$&")));
+  assert.match(populated, /<div class="label">Needs You<\/div><div class="value mono">Project-scoped<\/div>/);
+  assert.match(populated, /Authoritative Needs You decisions live within each project/);
+  assert.match(populated, /unpriced/);
   assert.doesNotMatch(populated, /<section class="dashboard-overview"[^]*<section class="dashboard-overview"/);
   assertNoNestedPanels(populated);
 });
@@ -1327,6 +1329,34 @@ test("dashboard spend breakdown shows priced USD per category, unpriced labels, 
   assert.match(unpriced, /unpriced/);
   assert.match(unpriced, /no priced spend recorded/);
   assert.match(unpriced, /0% of tokens priced/);
+
+  const mixedCoverage = renderDashboard({
+    data: dashboardData({
+      spend: {
+        worker_execution: 50,
+        agent_review_reporting: 20,
+        planning_estimation: 0,
+        setup_verification: 0,
+        other: 0,
+        cost_by_category: {
+          control_plane: 0,
+          task_breakdown: 0,
+          worker_execution: 0.01,
+          adapter_verification: 0,
+          reporting_summary: 0.02,
+          other: 0,
+        },
+        total_cost: 0.03,
+        priced_tokens: 30,
+        unpriced_tokens: 40,
+      },
+    }),
+    error: null,
+    loading: false,
+  });
+  assert.match(mixedCoverage, /\$0\.0100 priced · global pricing coverage incomplete/);
+  assert.match(mixedCoverage, /\$0\.0200 priced · global pricing coverage incomplete/);
+  assert.match(mixedCoverage, /43% of tokens priced/);
 });
 
 test("dashboard estimation accuracy panel shows absent, progress, and figures states", () => {
