@@ -691,7 +691,9 @@ def test_token_usage_breakdown_reports_partial_pricing_per_category(tmp_path):
     }
 
 
-def test_token_usage_breakdown_distinguishes_zero_priced_from_null_unpriced(tmp_path):
+def test_token_usage_breakdown_normalizes_unavailable_cost_and_preserves_priced_zero(
+    tmp_path,
+):
     db_path = tmp_path / "harness.db"
     init_db(db_path)
     session = create_session(
@@ -717,6 +719,20 @@ def test_token_usage_breakdown_distinguishes_zero_priced_from_null_unpriced(tmp_
         session_id=session["id"],
         usage_kind="worker",
         model="mixed",
+        prompt_tokens=5,
+        completion_tokens=0,
+        cost=0.0,
+        raw_usage={
+            "total_tokens": 5,
+            "spend_category": "worker_execution",
+            "cost_unavailable": True,
+        },
+    )
+    record_token_turn(
+        db_path,
+        session_id=session["id"],
+        usage_kind="worker",
+        model="mixed",
         prompt_tokens=6,
         completion_tokens=0,
         cost=None,
@@ -726,10 +742,17 @@ def test_token_usage_breakdown_distinguishes_zero_priced_from_null_unpriced(tmp_
     breakdown = token_usage_breakdown(db_path)
 
     assert breakdown["cost_by_category"]["task_breakdown"] == 0.0
+    assert breakdown["cost_by_category"]["worker_execution"] is None
     assert breakdown["cost_by_category"]["control_plane"] is None
     assert breakdown["total_cost"] == 0.0
     assert breakdown["priced_tokens"] == 4
-    assert breakdown["unpriced_tokens"] == 6
+    assert breakdown["unpriced_tokens"] == 11
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "unpriced",
+        "priced_tokens": 0,
+        "unpriced_tokens": 5,
+        "coverage_percent": 0,
+    }
 
 
 def test_token_usage_breakdown_reports_null_total_cost_when_all_unpriced(tmp_path):

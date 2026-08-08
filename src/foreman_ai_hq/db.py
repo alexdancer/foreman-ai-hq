@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -15,6 +16,21 @@ from zoneinfo import ZoneInfo
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
 from foreman_ai_hq.native_usage import token_usage_components
 from foreman_ai_hq.worker_model_allowlist import SEEDED_WORKER_ADAPTER_MODELS
+
+TOKEN_USAGE_CATEGORIES = (
+    "control_plane",
+    "task_breakdown",
+    "worker_execution",
+    "adapter_verification",
+    "reporting_summary",
+    "other",
+)
+ORCHESTRATION_SPEND_CATEGORIES = (
+    "control_plane",
+    "task_breakdown",
+    "reporting_summary",
+    "adapter_verification",
+)
 
 SCHEMA = """
 create table if not exists sessions (
@@ -583,6 +599,8 @@ def record_token_turn(
     raw_usage: dict[str, Any],
 ) -> None:
     raw_usage = _classified_raw_usage(usage_kind, raw_usage)
+    if raw_usage.get("cost_unavailable") is True:
+        cost = None
     total_tokens = int(raw_usage.get("total_tokens", prompt_tokens + completion_tokens))
     with connect(path) as conn:
         conn.execute(
@@ -2312,14 +2330,7 @@ def _token_turns_with_session_ids(path: Path | str, *, since: str | None = None)
 
 
 def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
-    by_category = {
-        "control_plane": 0,
-        "task_breakdown": 0,
-        "worker_execution": 0,
-        "adapter_verification": 0,
-        "reporting_summary": 0,
-        "other": 0,
-    }
+    by_category = dict.fromkeys(TOKEN_USAGE_CATEGORIES, 0)
     cost_by_category = {cat: 0.0 for cat in by_category}
     cost_seen = {cat: False for cat in by_category}
     priced_by_category = dict.fromkeys(by_category, 0)
@@ -2396,6 +2407,28 @@ def _pricing_coverage(priced_tokens: int, unpriced_tokens: int) -> dict[str, int
         "unpriced_tokens": unpriced_tokens,
         "coverage_percent": round((priced_tokens / total_tokens) * 100) if total_tokens else 0,
     }
+
+
+def aggregate_pricing_coverage(
+    token_breakdown: dict[str, Any], category_names: tuple[str, ...]
+) -> dict[str, Any]:
+    category_coverage = token_breakdown["pricing_coverage_by_category"]
+    priced_tokens = sum(category_coverage[name]["priced_tokens"] for name in category_names)
+    unpriced_tokens = sum(category_coverage[name]["unpriced_tokens"] for name in category_names)
+    coverage = _pricing_coverage(priced_tokens, unpriced_tokens)
+    if coverage["state"] == "no_usage":
+        cost: float | None = 0.0
+    elif coverage["state"] == "unpriced":
+        cost = None
+    else:
+        cost = sum(
+            float(value)
+            for name in category_names
+            if (value := token_breakdown["cost_by_category"][name]) is not None
+        )
+        if not math.isfinite(cost) or cost < 0:
+            cost = None
+    return {**coverage, "cost": cost}
 
 
 def _worker_execution_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:

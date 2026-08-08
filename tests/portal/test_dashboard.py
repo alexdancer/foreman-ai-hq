@@ -130,7 +130,7 @@ def test_dashboard_uses_project_needs_you_projection_and_canonical_pricing(tmp_p
         )
         turns = [
             ("worker", "worker_execution", 100, 0.01),
-            ("worker", "worker_execution", 50, None),
+            ("worker", "worker_execution", 50, 0.0),
             ("planning", "planning", 40, 0.02),
             ("task_breakdown", "task_breakdown", 10, None),
             ("reporting", "reporting_summary", 5, 0.005),
@@ -145,7 +145,15 @@ def test_dashboard_uses_project_needs_you_projection_and_canonical_pricing(tmp_p
                 prompt_tokens=tokens,
                 completion_tokens=0,
                 cost=cost,
-                raw_usage={"total_tokens": tokens, "spend_category": category},
+                raw_usage={
+                    "total_tokens": tokens,
+                    "spend_category": category,
+                    **(
+                        {"cost_unavailable": True}
+                        if category == "worker_execution" and tokens == 50
+                        else {}
+                    ),
+                },
             )
 
         needs_you = client.get(

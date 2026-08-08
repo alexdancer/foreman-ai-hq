@@ -276,37 +276,6 @@ def _dashboard_coefficient_provenance() -> dict[str, Any]:
     }
 
 
-def _dashboard_pricing_coverage(
-    token_breakdown: dict[str, Any], *category_names: str
-) -> dict[str, Any]:
-    category_coverage = token_breakdown["pricing_coverage_by_category"]
-    priced_tokens = sum(category_coverage[name]["priced_tokens"] for name in category_names)
-    unpriced_tokens = sum(category_coverage[name]["unpriced_tokens"] for name in category_names)
-    total_tokens = priced_tokens + unpriced_tokens
-    if total_tokens == 0:
-        state = "no_usage"
-        cost: float | None = 0.0
-    elif priced_tokens == 0:
-        state = "unpriced"
-        cost = None
-    else:
-        state = "fully_priced" if unpriced_tokens == 0 else "partially_priced"
-        cost = _dashboard_cost(
-            sum(
-                float(value)
-                for name in category_names
-                if (value := token_breakdown["cost_by_category"][name]) is not None
-            )
-        )
-    return {
-        "state": state,
-        "cost": cost,
-        "priced_tokens": priced_tokens,
-        "unpriced_tokens": unpriced_tokens,
-        "coverage_percent": round((priced_tokens / total_tokens) * 100) if total_tokens else 0,
-    }
-
-
 @router.get("/api/dashboard", dependencies=[Depends(require_portal_auth)])
 def react_dashboard_state(request: Request):
     """Bounded read-only dashboard state reusing the existing backend calculation."""
@@ -324,21 +293,25 @@ def react_dashboard_state(request: Request):
     projects = [_dashboard_project_entry(request, project) for project in sidebar_projects]
     needs_you_count = sum(project["needs_you_count"] for project in projects)
     pricing_coverage = {
-        "worker_execution": _dashboard_pricing_coverage(token_breakdown, "worker_execution"),
-        "agent_review_reporting": _dashboard_pricing_coverage(token_breakdown, "reporting_summary"),
-        "planning_estimation": _dashboard_pricing_coverage(
-            token_breakdown, "control_plane", "task_breakdown"
+        "worker_execution": db.aggregate_pricing_coverage(
+            token_breakdown, ("worker_execution",)
         ),
-        "setup_verification": _dashboard_pricing_coverage(token_breakdown, "adapter_verification"),
-        "other": _dashboard_pricing_coverage(token_breakdown, "other"),
-        "orchestration": _dashboard_pricing_coverage(
-            token_breakdown,
-            "control_plane",
-            "task_breakdown",
-            "reporting_summary",
-            "adapter_verification",
+        "agent_review_reporting": db.aggregate_pricing_coverage(
+            token_breakdown, ("reporting_summary",)
         ),
-        "total": _dashboard_pricing_coverage(token_breakdown, *categories),
+        "planning_estimation": db.aggregate_pricing_coverage(
+            token_breakdown, ("control_plane", "task_breakdown")
+        ),
+        "setup_verification": db.aggregate_pricing_coverage(
+            token_breakdown, ("adapter_verification",)
+        ),
+        "other": db.aggregate_pricing_coverage(token_breakdown, ("other",)),
+        "orchestration": db.aggregate_pricing_coverage(
+            token_breakdown, db.ORCHESTRATION_SPEND_CATEGORIES
+        ),
+        "total": db.aggregate_pricing_coverage(
+            token_breakdown, db.TOKEN_USAGE_CATEGORIES
+        ),
     }
 
     return {
@@ -375,13 +348,7 @@ def react_dashboard_state(request: Request):
         "spend": {
             "worker_execution": context["worker_token_total"],
             "orchestration": sum(
-                categories[name]
-                for name in (
-                    "control_plane",
-                    "task_breakdown",
-                    "reporting_summary",
-                    "adapter_verification",
-                )
+                categories[name] for name in db.ORCHESTRATION_SPEND_CATEGORIES
             ),
             "agent_review_reporting": categories["reporting_summary"],
             "planning_estimation": categories["control_plane"] + categories["task_breakdown"],
