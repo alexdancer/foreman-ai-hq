@@ -404,6 +404,8 @@ def parse_pi_usage_stream(
     total_tokens = 0
     cost = 0.0
     cost_unavailable = False
+    cost_available = False
+    pricing_segments: list[dict[str, Any]] = []
     provider: str | None = None
     event_model: str | None = None
     for item in _walk_json_dicts(parsed):
@@ -437,10 +439,25 @@ def parse_pi_usage_stream(
             cost_unavailable = True
         else:
             cost += turn_cost
+            cost_available = True
+        turn_provider = msg.get("provider")
+        turn_model = msg.get("model") or model
+        pricing_segments.append(
+            {
+                "response_id": rid,
+                "provider": turn_provider,
+                "model": turn_model,
+                "prompt_tokens": p,
+                "completion_tokens": c,
+                "total_tokens": t,
+                "cost": turn_cost or 0.0,
+                **({"cost_unavailable": True} if turn_cost is None else {}),
+            }
+        )
         if provider is None:
-            provider = msg.get("provider")
+            provider = turn_provider
         if event_model is None:
-            event_model = msg.get("model")
+            event_model = turn_model
     if total_tokens <= 0:
         return None
     return NativeUsageEvidence(
@@ -453,9 +470,14 @@ def parse_pi_usage_stream(
             "model": event_model or model,
             "response_ids": response_ids,
             "total_tokens": total_tokens,
+            "pricing_segments": pricing_segments,
             "usage_source": "native_usage",
             "tracking_mode": "native_usage",
-            **({"cost_unavailable": True} if cost_unavailable else {}),
+            **(
+                {"cost_unavailable": True}
+                if cost_unavailable and not cost_available
+                else {}
+            ),
         },
     )
 

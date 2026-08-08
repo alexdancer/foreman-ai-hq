@@ -2265,8 +2265,46 @@ def _classified_raw_usage(usage_kind: str, raw_usage: dict[str, Any]) -> dict[st
 def _normalized_token_cost(
     cost: float | None, raw_usage: dict[str, Any]
 ) -> float | None:
-    # Only explicit unavailability overrides zero, which can be valid priced evidence.
-    return None if raw_usage.get("cost_unavailable") is True else cost
+    # Only finite nonnegative evidence is priced; explicit zero remains valid.
+    if (
+        raw_usage.get("cost_unavailable") is True
+        or isinstance(cost, bool)
+        or cost is None
+    ):
+        return None
+    try:
+        normalized = float(cost)
+    except (TypeError, ValueError):
+        return None
+    return normalized if math.isfinite(normalized) and normalized >= 0 else None
+
+
+def _turn_pricing_tokens(
+    raw_usage: dict[str, Any], tokens: int, cost: float | None
+) -> tuple[int, int]:
+    fallback = (tokens, 0) if cost is not None else (0, tokens)
+    segments = raw_usage.get("pricing_segments")
+    if not isinstance(segments, list) or not segments:
+        return fallback
+    priced_tokens = 0
+    unpriced_tokens = 0
+    for segment in segments:
+        if not isinstance(segment, dict):
+            return fallback
+        segment_tokens = segment.get("total_tokens")
+        if (
+            isinstance(segment_tokens, bool)
+            or not isinstance(segment_tokens, int)
+            or segment_tokens < 0
+        ):
+            return fallback
+        if _normalized_token_cost(segment.get("cost"), segment) is None:
+            unpriced_tokens += segment_tokens
+        else:
+            priced_tokens += segment_tokens
+    if priced_tokens + unpriced_tokens != tokens:
+        return fallback
+    return priced_tokens, unpriced_tokens
 
 
 def _spend_category_for_usage_kind(usage_kind: str) -> str:
@@ -2365,17 +2403,19 @@ def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
         by_category[category] += tokens
         by_source[source] = by_source.get(source, 0) + tokens
         total += tokens
+        turn_priced_tokens, turn_unpriced_tokens = _turn_pricing_tokens(
+            raw_usage, tokens, cost
+        )
+        priced_tokens += turn_priced_tokens
+        priced_by_category[category] += turn_priced_tokens
+        unpriced_tokens += turn_unpriced_tokens
+        unpriced_by_category[category] += turn_unpriced_tokens
         if cost is not None:
             cost_value = float(cost)
             cost_by_category[category] += cost_value
             total_cost += cost_value
-            priced_tokens += tokens
-            priced_by_category[category] += tokens
             cost_seen[category] = True
             any_cost = True
-        else:
-            unpriced_tokens += tokens
-            unpriced_by_category[category] += tokens
     for cat in by_category:
         if not cost_seen[cat]:
             cost_by_category[cat] = None if by_category[cat] > 0 else 0.0
