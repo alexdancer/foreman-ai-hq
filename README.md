@@ -97,8 +97,6 @@ foremanctl check
 
 Representative local Portal screens using synthetic/public-safe data:
 
-![Foreman AI HQ dashboard UI](docs/assets/screenshots/dashboard-overview.png)
-
 ![Foreman AI HQ project board UI](docs/assets/screenshots/project-board-review-workflow.png)
 
 ![Foreman AI HQ worker adapter setup UI](docs/assets/screenshots/worker-adapter-setup.png)

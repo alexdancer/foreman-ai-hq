@@ -85,8 +85,6 @@ Docker does not automatically receive host-installed OpenCode, Claude Code, Code
 
 Use synthetic/public-safe data only. Do not capture real secrets, real customer data, or private repo content.
 
-![Foreman AI HQ dashboard UI](assets/screenshots/dashboard-overview.png)
-
 ![Foreman AI HQ project board UI](assets/screenshots/project-board-review-workflow.png)
 
 ![Foreman AI HQ orchestrator model UI](assets/screenshots/control-plane-model-settings.png)
