@@ -445,6 +445,74 @@ def test_parse_claude_code_native_usage_requires_cost_evidence():
     assert evidence is None
 
 
+def test_native_usage_preserves_opencode_and_claude_tokens_with_invalid_costs(
+    tmp_path,
+):
+    cases = [
+        (
+            "opencode/gpt-5.1",
+            {
+                "type": "usage",
+                "model": "opencode/gpt-5.1",
+                "run_id": "run_invalid_cost",
+                "usage": {
+                    "input_tokens": 7,
+                    "output_tokens": 2,
+                    "total_tokens": 9,
+                    "cost_usd": -0.01,
+                },
+            },
+            9,
+        ),
+        (
+            "sonnet",
+            {
+                "type": "result",
+                "subtype": "success",
+                "session_id": "session_invalid_cost",
+                "usage": {"input_tokens": 3, "output_tokens": 4},
+                "modelUsage": {
+                    "claude-sonnet-4-6": {"costUSD": float("nan")}
+                },
+            },
+            7,
+        ),
+    ]
+    db_path = tmp_path / "harness.db"
+    db.init_db(db_path)
+
+    for index, (model, payload, expected_tokens) in enumerate(cases):
+        evidence = parse_native_usage_evidence(json.dumps(payload), model=model)
+
+        assert evidence is not None
+        assert evidence.total_tokens == expected_tokens
+        assert evidence.cost == 0.0
+        assert evidence.raw_usage["cost_unavailable"] is True
+
+        session = db.create_session(
+            db_path,
+            task_description=f"invalid native cost {index}",
+            model=model,
+            session_key_hash=f"invalid-native-cost-{index}",
+            guardrail_overrides={},
+            status="completed",
+        )
+        db.record_token_turn(
+            db_path,
+            session_id=session["id"],
+            usage_kind="adapter_verification",
+            model=model,
+            prompt_tokens=evidence.prompt_tokens,
+            completion_tokens=evidence.completion_tokens,
+            cost=evidence.cost,
+            raw_usage=evidence.raw_usage,
+        )
+        turn = db.build_session_artifact(db_path, session["id"])["token_log"][0]
+        assert turn["total_tokens"] == expected_tokens
+        assert turn["cost"] is None
+        assert turn["raw_usage"]["cost_unavailable"] is True
+
+
 def test_parse_codex_turn_completed_usage_accepts_costless_run_bound_tokens():
     evidence = parse_native_usage_evidence(_codex_native_stdout(), model="5.4", returncode=0)
 

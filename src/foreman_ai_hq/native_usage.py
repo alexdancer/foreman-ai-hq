@@ -222,8 +222,8 @@ def parse_native_usage_evidence(
         total_tokens = _int_from_any(usage.get("total_tokens") or usage.get("total"))
         if total_tokens <= 0:
             total_tokens = prompt_tokens + completion_tokens + _reasoning_token_count(usage)
-        cost = _native_usage_cost(item, usage, model=model)
-        if total_tokens <= 0 or (cost is None and not codex_turn_usage):
+        cost, cost_reported = _native_usage_cost(item, usage, model=model)
+        if total_tokens <= 0 or (not cost_reported and not codex_turn_usage):
             continue
         return NativeUsageEvidence(
             prompt_tokens=prompt_tokens,
@@ -264,17 +264,19 @@ def _reasoning_token_count(usage: dict[str, Any]) -> int:
     return _int_from_any(usage.get("reasoning_tokens") or usage.get("reasoning_output_tokens") or usage.get("reasoning"))
 
 
-def _native_usage_cost(item: dict[str, Any], usage: dict[str, Any], *, model: str) -> float | None:
+def _native_usage_cost(
+    item: dict[str, Any], usage: dict[str, Any], *, model: str
+) -> tuple[float | None, bool]:
     model_usage = item.get("modelUsage") or item.get("model_usage")
     if isinstance(model_usage, dict):
         matching_details = _matching_model_usage(model_usage, model=model)
         if matching_details is not None and matching_details.get("costUSD") is not None:
-            return normalized_cost(matching_details.get("costUSD"))
-        return None
+            return normalized_cost(matching_details.get("costUSD")), True
+        return None, False
     for value in (item.get("total_cost_usd"), usage.get("cost"), usage.get("cost_usd"), usage.get("usd"), item.get("cost")):
         if value is not None:
-            return normalized_cost(value)
-    return None
+            return normalized_cost(value), True
+    return None, False
 
 
 def _matching_model_usage(model_usage: dict[str, Any], *, model: str) -> dict[str, Any] | None:
