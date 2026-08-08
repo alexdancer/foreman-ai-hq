@@ -69,7 +69,7 @@ test("Evidence Drawer renders the dialog and estimate-versus-actual lead", () =>
   // The dialog must be programmatically focusable so focus can move into it on open.
   assert.match(markup, /<aside[^>]*\btabindex="-1"/);
   assert.match(markup, /aria-label="Evidence for DEMO evidence task"/);
-  assert.match(markup, /class="token-comparison" aria-label="Estimate versus actual tokens"/);
+  assert.match(markup, /class="token-comparison" role="group" aria-label="Estimate versus actual tokens"/);
   assert.match(markup, /<small>Estimate<\/small><strong>144<\/strong>/);
   assert.match(markup, /<small>Actual · −38%<\/small><strong>89<\/strong>/);
   assert.match(markup, /Spend tracking · demo-adapter · native_usage/);
