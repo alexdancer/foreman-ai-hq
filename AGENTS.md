@@ -28,6 +28,10 @@ Matt Pocock's engineering workflow may be available in an operator's environment
 Use `uv run pytest` for the Python test suite when using the repo-managed uv environment; `pytest` is acceptable when dependencies are already active.
 Run `npm run check` in `frontend/` to run the React shell tests and production build.
 
+## Agent Isolation
+
+Any agent making changes to code, tests, documentation, configuration, or generated artifacts must work in a dedicated Git worktree, including a platform-provided isolated worktree, and must never edit the primary working copy. Verify the assigned repository root before editing; stop if it is the primary copy or isolation cannot be proved. Purely read-only investigation is exempt.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
