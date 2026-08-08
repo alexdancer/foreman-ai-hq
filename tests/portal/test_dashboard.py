@@ -358,6 +358,37 @@ def test_dashboard_daily_budget_counts_agent_review_reporting_tokens(tmp_path, m
     # to assert once the category totals above are proven correct.
 
 
+def test_dashboard_counts_planning_turns_as_orchestration_spend(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    database_path = tmp_path / "harness.db"
+    with _client(tmp_path) as client:
+        planning_session = db.create_session(
+            database_path,
+            task_description="Planning Chat turn",
+            model="openai/gpt-5.4",
+            session_key_hash="p" * 64,
+            guardrail_overrides={},
+            status="completed",
+        )
+        db.record_token_turn(
+            database_path,
+            session_id=planning_session["id"],
+            usage_kind="planning",
+            model="openai/gpt-5.4",
+            prompt_tokens=400,
+            completion_tokens=100,
+            cost=0,
+            raw_usage={"total_tokens": 500},
+        )
+
+        response = client.get("/api/dashboard", headers=_portal_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["spend"]["planning_estimation"] == 500
+    assert payload["spend"]["other"] == 0
+
+
 def test_dashboard_shows_accuracy_with_enough_completed_tasks(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     settings = Settings(database_path=tmp_path / "harness.db", guardrails_path=ROOT / "guardrails.yaml")
