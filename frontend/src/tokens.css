@@ -2738,3 +2738,113 @@ textarea.board-input {
   }
   .review-field-row { grid-template-columns: 1fr; }
 }
+
+/* Alarms and Task History are ledger views: rows retain evidence and controls
+   without turning each record into a competing card. */
+.alarm-ledger,
+.task-history-table {
+  min-width: 72rem;
+}
+.alarm-subject,
+.alarm-evidence,
+.alarm-resolution,
+.alarm-actions,
+.task-history-subject,
+.task-history-statuses,
+.task-history-tokens,
+.task-history-evidence,
+.task-history-actions {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.alarm-subject > strong,
+.task-history-subject > strong {
+  color: var(--text-primary);
+  font: 650 14px/1.35 var(--sans);
+  overflow-wrap: anywhere;
+}
+.alarm-statuses,
+.task-history-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ledger-field-label {
+  color: var(--text-tertiary);
+  font: 600 10px/1.3 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.alarm-evidence,
+.alarm-resolution,
+.task-history-evidence {
+  color: var(--text-secondary);
+  font: 13px/1.5 var(--sans);
+  overflow-wrap: anywhere;
+}
+.alarm-evidence .bounded-text,
+.alarm-resolution .bounded-text {
+  color: var(--text-secondary);
+}
+.alarm-actions {
+  justify-items: start;
+}
+.alarm-actions .disabled-control {
+  display: grid;
+}
+.raise-budget-form {
+  display: grid;
+  gap: 12px;
+}
+.raise-budget-current,
+.raise-budget-hint {
+  max-width: 70ch;
+  margin: 0;
+  color: var(--text-secondary);
+  font: 13px/1.5 var(--sans);
+}
+.raise-budget-hint {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.raise-budget-field {
+  display: grid;
+  gap: 6px;
+  max-width: 22rem;
+  color: var(--text-secondary);
+  font: 600 11px/1.35 var(--mono);
+}
+.raise-budget-field input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font: 13px/1.35 var(--mono);
+}
+.task-history-read-only {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  border-color: var(--info);
+  background: color-mix(in srgb, var(--info) 8%, var(--surface-panel));
+  color: var(--text-secondary);
+}
+.task-history-read-only > span {
+  max-width: 88ch;
+  font: 13px/1.5 var(--sans);
+}
+.task-history-tokens {
+  color: var(--text-tertiary);
+  font: 11px/1.45 var(--mono);
+}
+.task-history-actions {
+  justify-items: start;
+}
+.task-history-empty .data-table-cell {
+  color: var(--text-tertiary);
+}

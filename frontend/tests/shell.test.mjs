@@ -1113,8 +1113,11 @@ test("Alarms sidebar and list render from available_actions and bookmarkable fil
     assert.match(populated, new RegExp(text));
   }
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assert.match(populated, /role="table" aria-label="Alarms"/);
+  assert.match(populated, /class="data-table-row/);
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /class="status-pill-label">HIGH<\/span>/);
+  assert.match(populated, /class="status-pill-label">Open<\/span>/);
   assert.doesNotMatch(populated, /Abort/);
   assert.doesNotMatch(populated, /adjust_guardrail/);
 });
@@ -2286,16 +2289,36 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
 
   const populated = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
-    data: { filters: [], tasks: [] },
+    data: {
+      filters: [{ label: "Archived", value: "archived", count: 1, active: true }],
+      tasks: [{
+        id: "task-history-999",
+        description: "Preserve history evidence",
+        status: "Done",
+        task_kind: "acceptance_verification",
+        archived: true,
+        archived_at: "2099-01-01T00:00:00+00:00",
+        estimate_tokens: 1000,
+        actual_tokens: 1200,
+        session_href: "/sessions/sess-history-999",
+        worker_run_id: "run-history-999",
+      }],
+    },
     error: null,
     loading: false,
-    filter: "all",
+    filter: "archived",
     onSelectFilter: () => {},
     onUnarchive: () => {},
     notice: null,
   }));
   assert.match(populated, /href="\/projects\/demo-999"/);
   assert.match(populated, /Back to Pipeline/);
+  assert.match(populated, /role="table" aria-label="Task history"/);
+  assert.match(populated, /Read-only/);
+  assert.match(populated, /Unarchive/);
+  assert.match(populated, /href="\/sessions\/sess-history-999"/);
+  assert.match(populated, /acceptance_verification/);
+  assertStatusPillsHaveGlyphs(populated);
   assert.doesNotMatch(populated, /href="\/app\/projects\/demo-999\/board"/);
 });
 

@@ -1,7 +1,19 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import { getJSON, postJSON } from "../api.js";
-import { Button, severityStatusTone, StatusPill } from "../components/ui/index.js";
+import {
+  Button,
+  ColumnHead,
+  ConfirmSheet,
+  DataCell,
+  DataTable,
+  EmptyState,
+  Loading,
+  Notice,
+  Row,
+  severityStatusTone,
+  StatusPill,
+} from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 
 const FILTER_OPTIONS = {
@@ -116,6 +128,9 @@ export function AlarmsState({
     }
   };
 
+  const message = safeError(error) || inlineError || status;
+  const messageVariant = error || inlineError ? "danger" : "info";
+
   return (
     <>
       <h1 className="page-title">Alarms</h1>
@@ -133,7 +148,7 @@ export function AlarmsState({
             {label}
             {data?.filters && (
               <span className="pill" style={{ marginLeft: 6 }}>
-                {(data.filters.find((f) => f.value === value)?.count ?? 0)}
+                {(data.filters.find((item) => item.value === value)?.count ?? 0)}
               </span>
             )}
           </button>
@@ -143,19 +158,16 @@ export function AlarmsState({
         </a>
       </nav>
 
-      <div className="live-notice" aria-live="polite">
-        {safeError(error) || inlineError || status || ""}
-      </div>
-
-      {loading && !data && <div className="notice">Loading Alarms…</div>}
-      {!loading && !data && !error && <div className="notice">No Alarms state available.</div>}
-      {error && <button className="btn secondary" type="button" onClick={retry}>Retry</button>}
+      {message && <Notice variant={messageVariant} role={error || inlineError ? "alert" : "status"} aria-live="polite">{message}</Notice>}
+      {loading && !data && <Loading aria-label="Alarms loading">Loading Alarms…</Loading>}
+      {!loading && !data && !error && <EmptyState>No Alarms state available.</EmptyState>}
+      {error && <Button variant="secondary" type="button" onClick={retry}>Retry</Button>}
 
       {data && data.alarms.length === 0 && (
-        <div className="empty-state">
+        <EmptyState>
           No {filter === "all" ? "" : filter} alarms. Open the{" "}
           <a href="/settings/budget">Guardrail configuration</a> to adjust thresholds.
-        </div>
+        </EmptyState>
       )}
 
       {data && data.alarms.length > 0 && (
@@ -164,18 +176,27 @@ export function AlarmsState({
             <h3>{FILTER_OPTIONS[filter]} alarms</h3>
           </div>
           <div className="panel-body">
-            {data.alarms.map((alarm) => {
-              const raiseAction = alarm.available_actions.find((a) => a.action === "raise_budget");
-              return (
-                <AlarmCard
+            <DataTable
+              label="Alarms"
+              columns="minmax(14rem, 1.1fr) minmax(18rem, 1.35fr) minmax(15rem, 1fr) minmax(14rem, 0.9fr)"
+              className="alarm-ledger"
+            >
+              <Row header>
+                <ColumnHead>Alarm</ColumnHead>
+                <ColumnHead>Evidence</ColumnHead>
+                <ColumnHead>Resolution</ColumnHead>
+                <ColumnHead>Actions</ColumnHead>
+              </Row>
+              {data.alarms.map((alarm) => (
+                <AlarmRow
                   key={alarm.id}
                   alarm={alarm}
-                  busy={!!acting[alarm.id]}
+                  busy={Boolean(acting[alarm.id])}
                   onContinue={() => submit(alarm, "continue")}
-                  onRaise={(newCap) => submit(alarm, "raise_budget", { [raiseAction?.cap_key]: newCap })}
+                  onRaise={(newCap, capKey) => submit(alarm, "raise_budget", { [capKey]: newCap })}
                 />
-              );
-            })}
+              ))}
+            </DataTable>
           </div>
         </section>
       )}
@@ -183,12 +204,63 @@ export function AlarmsState({
   );
 }
 
-function AlarmCard({ alarm, busy, onContinue, onRaise }) {
+function AlarmRow({ alarm, busy, onContinue, onRaise }) {
+  const raiseAction = (alarm.available_actions || []).find((action) => action.action === "raise_budget");
+  const resolutionLabel = alarm.resolved_at ? "Resolved" : "Open";
+
+  return (
+    <Row className="alarm-ledger-row" id={alarm.id}>
+      <DataCell>
+        <div className="alarm-subject">
+          <div className="alarm-statuses">
+            <StatusPill tone={severityStatusTone(alarm.severity)} label={alarm.severity || "unknown"} />
+            <StatusPill tone={alarm.resolved_at ? "success" : "danger"} label={resolutionLabel} />
+          </div>
+          <strong>{alarm.type}</strong>
+          <span className="mono muted">{alarm.id}</span>
+        </div>
+      </DataCell>
+      <DataCell>
+        <div className="alarm-evidence">
+          <span className="ledger-field-label">Session evidence</span>
+          {alarm.session_id ? <AppLink to={alarm.session_href}>{alarm.session_id}</AppLink> : <span className="muted">No linked session</span>}
+          <span className="ledger-field-label">Bounded context</span>
+          <BoundedText value={alarm.context} />
+        </div>
+      </DataCell>
+      <DataCell>
+        <div className="alarm-resolution">
+          <span className="ledger-field-label">Recommended</span>
+          <span>{alarm.recommended_action || "—"}</span>
+          {alarm.resolved_at && <>
+            <span className="ledger-field-label">Resolved</span>
+            <span className="mono">{alarm.resolved_at}</span>
+            <span className="ledger-field-label">Action</span>
+            <span>{alarm.resolved_action || "—"}</span>
+            <span className="ledger-field-label">Payload</span>
+            <BoundedText value={alarm.resolved_payload_summary} />
+          </>}
+        </div>
+      </DataCell>
+      <DataCell>
+        {!alarm.resolved_at && (
+          <AlarmActions
+            busy={busy}
+            raiseAction={raiseAction}
+            onContinue={onContinue}
+            onRaise={onRaise}
+          />
+        )}
+        {alarm.resolved_at && <span className="muted">No actions available</span>}
+      </DataCell>
+    </Row>
+  );
+}
+
+function AlarmActions({ busy, raiseAction, onContinue, onRaise }) {
   const [confirming, setConfirming] = useState(false);
   const [customCap, setCustomCap] = useState("");
-  const raiseAction = alarm.available_actions.find((a) => a.action === "raise_budget");
   const currentCap = typeof raiseAction?.current_cap === "number" ? raiseAction.current_cap : null;
-
   const presets = React.useMemo(() => {
     if (currentCap === null || currentCap <= 0) return [];
     return [
@@ -197,152 +269,100 @@ function AlarmCard({ alarm, busy, onContinue, onRaise }) {
       { label: "+100%", value: Math.round(currentCap * 2) },
     ].filter((preset) => preset.value > currentCap);
   }, [currentCap]);
-
-  const raise = (value) => {
-    onRaise(value);
+  const capValue = Number(customCap);
+  const canConfirm = Number.isFinite(capValue) && capValue > 0;
+  const formId = `raise-budget-${React.useId()}`;
+  const closeConfirmation = () => {
     setConfirming(false);
     setCustomCap("");
   };
-
-  return (
-    <article
-      className={`dashboard-alarm ${(alarm.severity || "").toLowerCase()}`}
-      style={{ marginBottom: 12 }}
-    >
-      <div className="dashboard-alarm-head">
-        <StatusPill tone={severityStatusTone(alarm.severity)} label={alarm.severity || "unknown"} />
-        <span className="mono">{alarm.type}</span>
-        <span className="mono" style={{ marginLeft: "auto", color: "var(--fg-3)" }}>{alarm.id}</span>
-      </div>
-
-      <div className="detail-grid" style={{ marginTop: 8 }}>
-        <dt>Session</dt>
-        <dd>{alarm.session_id ? <AppLink to={alarm.session_href}>{alarm.session_id}</AppLink> : "—"}</dd>
-        <dt>Context</dt>
-        <dd><BoundedText value={alarm.context} /></dd>
-        <dt>Recommended</dt>
-        <dd>{alarm.recommended_action}</dd>
-      </div>
-
-      {alarm.resolved_at && (
-        <div className="detail-grid" style={{ marginTop: 8 }}>
-          <dt>Resolved</dt>
-          <dd>{alarm.resolved_at}</dd>
-          <dt>Action</dt>
-          <dd>{alarm.resolved_action || "—"}</dd>
-          <dt>Payload</dt>
-          <dd><BoundedText value={alarm.resolved_payload_summary} /></dd>
-        </div>
-      )}
-
-      {!alarm.resolved_at && (
-        <div className="toolbar" style={{ marginTop: 12 }}>
-          <Button
-            size="small"
-            type="button"
-            disabled={busy}
-            disabledReason="An alarm resolution is already in progress."
-            onClick={onContinue}
-          >
-            Continue
-          </Button>
-          {raiseAction && (
-            <Button
-              size="small"
-              variant="secondary"
-              type="button"
-              disabled={busy}
-              disabledReason="An alarm resolution is already in progress."
-              onClick={() => setConfirming(true)}
-            >
-              Raise Budget
-            </Button>
-          )}
-          {!raiseAction && (
-            <a href="/settings/budget" className="btn small secondary">
-              Guardrail configuration
-            </a>
-          )}
-        </div>
-      )}
-
-      {confirming && raiseAction && (
-        <RaiseBudgetDialog
-          capKey={raiseAction.cap_key}
-          currentCap={currentCap}
-          presets={presets}
-          customCap={customCap}
-          setCustomCap={setCustomCap}
-          onConfirm={raise}
-          onCancel={() => { setConfirming(false); setCustomCap(""); }}
-        />
-      )}
-    </article>
-  );
-}
-
-function RaiseBudgetDialog({
-  capKey,
-  currentCap,
-  presets,
-  customCap,
-  setCustomCap,
-  onConfirm,
-  onCancel,
-}) {
-  const dialogRef = useRef(null);
-  useEffect(() => {
-    const first = dialogRef.current?.querySelector("button, input");
-    first?.focus();
-  }, []);
-
-  const submit = (event) => {
+  const raise = (event) => {
     event.preventDefault();
-    const value = Number(customCap);
-    if (!Number.isFinite(value) || value <= 0) return;
-    onConfirm(value);
+    if (!canConfirm || !raiseAction) return;
+    onRaise(capValue, raiseAction.cap_key);
+    closeConfirmation();
   };
 
   return (
-    <form
-      ref={dialogRef}
-      onSubmit={submit}
-      className="alarm-action-group"
-      style={{ marginTop: 12, padding: 12, background: "var(--bg-1)" }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <h4 style={{ margin: "0 0 10px", fontSize: 13 }}>
-        Raise {capKey} ({currentCap ?? "unknown"} current)
-      </h4>
-      <div className="toolbar" style={{ marginBottom: 8 }}>
-        {presets.map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            className="btn small secondary"
-            onClick={() => { setCustomCap(String(preset.value)); }}
+    <div className="alarm-actions">
+      <Button
+        size="small"
+        type="button"
+        disabled={busy}
+        disabledReason="An alarm resolution is already in progress."
+        onClick={onContinue}
+      >
+        Continue
+      </Button>
+      {raiseAction && (
+        <Button
+          size="small"
+          variant="secondary"
+          type="button"
+          disabled={busy}
+          disabledReason="An alarm resolution is already in progress."
+          onClick={() => setConfirming(true)}
+        >
+          Raise Budget
+        </Button>
+      )}
+      {!raiseAction && (
+        <a href="/settings/budget" className="btn small secondary">
+          Guardrail configuration
+        </a>
+      )}
+      <ConfirmSheet
+        open={confirming}
+        onClose={closeConfirmation}
+        title={`Raise ${raiseAction?.cap_key || "budget cap"}`}
+        description="Confirm the new cap before resolving this alarm. The existing budget guardrail validates the value."
+        actions={<>
+          <Button size="small" variant="secondary" type="button" onClick={closeConfirmation}>Cancel</Button>
+          <Button
+            size="small"
+            type="submit"
+            form={formId}
+            disabled={!canConfirm}
+            disabledReason="Enter a positive new budget cap before confirming."
           >
-            {preset.label} → {preset.value.toLocaleString()}
-          </button>
-        ))}
-      </div>
-      <label style={{ display: "block", marginBottom: 8 }}>
-        Custom new cap
-        <input
-          type="number"
-          className="board-input"
-          min={1}
-          value={customCap}
-          onChange={(e) => setCustomCap(e.target.value)}
-          placeholder="Enter new cap"
-          aria-label={`Custom new ${capKey} value`}
-        />
-      </label>
-      <div className="toolbar" style={{ marginBottom: 0 }}>
-        <button type="submit" className="btn small">Confirm</button>
-        <button type="button" className="btn small secondary" onClick={onCancel}>Cancel</button>
-      </div>
-    </form>
+            Confirm raise
+          </Button>
+        </>}
+      >
+        <form id={formId} className="raise-budget-form" onSubmit={raise}>
+          <p className="raise-budget-current">Current cap: <span className="mono">{currentCap ?? "unknown"}</span></p>
+          {presets.length > 0 && (
+            <div className="toolbar" aria-label="Budget raise presets">
+              {presets.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className="btn small secondary"
+                  onClick={() => setCustomCap(String(preset.value))}
+                >
+                  {preset.label} → {preset.value.toLocaleString()}
+                </button>
+              ))}
+            </div>
+          )}
+          <label className="raise-budget-field">
+            <span>Custom new cap</span>
+            <input
+              type="number"
+              className="board-input"
+              min={1}
+              required
+              value={customCap}
+              onChange={(event) => setCustomCap(event.target.value)}
+              placeholder="Enter new cap"
+              aria-label={`Custom new ${raiseAction?.cap_key || "budget"} value`}
+              aria-describedby={`${formId}-hint`}
+            />
+          </label>
+          <p className="raise-budget-hint" id={`${formId}-hint`}>Enter a positive cap. The current guardrail remains the authority for whether it can resolve this alarm.</p>
+        </form>
+      </ConfirmSheet>
+    </div>
   );
 }
 

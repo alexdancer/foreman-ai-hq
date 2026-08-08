@@ -2,8 +2,11 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import { ConfirmSheet, Panel, PanelBody, PanelHeader, Skeleton, StatusPill } from "../src/components/ui/index.js";
+import { NavContext } from "../src/nav.jsx";
 import { BoardState, EvidenceDrawerState } from "../src/views/Board.jsx";
 import { DashboardContent } from "../src/views/Dashboard.jsx";
+import Alarms from "../src/views/Alarms.jsx";
+import TaskHistory from "../src/views/TaskHistory.jsx";
 import "../src/tokens.css";
 
 const confirmSheetRef = React.createRef();
@@ -168,6 +171,75 @@ const dashboardData = {
   projects: [{ id: "browser-project-999", name: "Browser project 999", task_count: 1, needs_you_count: 2, capability: { state: "launch_ready" } }],
 };
 
+const alarmContractData = {
+  filters: [
+    { label: "Open", value: "open", count: 1 },
+    { label: "Resolved", value: "resolved", count: 1 },
+    { label: "All", value: "all", count: 2 },
+  ],
+  alarms: [{
+    id: "alarm-browser-999",
+    type: "DAILY_CAP_EXCEEDED",
+    severity: "HIGH",
+    session_id: "session-alarm-999",
+    session_href: "/sessions/session-alarm-999",
+    context: { text: "Bounded browser alarm evidence", truncated: true },
+    recommended_action: "Continue or raise the daily cap.",
+    available_actions: [
+      { action: "continue" },
+      {
+        action: "raise_budget",
+        cap_key: "daily_cap_tokens",
+        current_cap: 1000,
+      },
+    ],
+    resolved_at: null,
+  }],
+};
+
+function taskHistoryContractData(filter = "all", tasks = null) {
+  return {
+    filters: [
+      { label: "All", value: "all", count: 1, active: filter === "all" },
+      { label: "Archived", value: "archived", count: 1, active: filter === "archived" },
+    ],
+    tasks: tasks ?? [{
+      id: "task-history-browser-999",
+      description: "Preserve browser history evidence",
+      status: "Done",
+      task_kind: "acceptance_verification",
+      archived: true,
+      archived_at: "2099-01-01T00:00:00Z",
+      estimate_tokens: 1000,
+      actual_tokens: 1200,
+      session_href: "/sessions/session-history-999",
+      worker_run_id: "run-history-browser-999",
+    }],
+  };
+}
+
+function deferredResponse() {
+  let resolve;
+  const promise = new Promise((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function requireStatusLabels(surface, message) {
+  const pills = [...surface.querySelectorAll(".status-pill")];
+  requireContract(pills.length > 0, `${message} has no statuses`);
+  requireContract(pills.every((pill) => (
+    pill.querySelector(".status-pill-glyph")?.textContent.trim()
+      && pill.querySelector(".status-pill-label")?.textContent.trim()
+  )), `${message} loses a glyph or visible label`);
+}
+
 function PipelineContract() {
   const [selectedTask, setSelectedTask] = React.useState(null);
   return <>
@@ -276,6 +348,7 @@ function ContractSurface() {
         </PanelBody>
       </Panel>
       <Panel><PanelHeader title="Sibling panel" /></Panel>
+      <section id="view-behavior-contract-root" />
       <button id="pipeline-outside-target" type="button">Outside target</button>
       <PipelineContract />
       <FloorContract />
@@ -300,6 +373,240 @@ async function waitForContract(condition, message) {
 
 async function inspect() {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  const behaviorRoot = createRoot(document.querySelector("#view-behavior-contract-root"));
+  const originalFetch = window.fetch;
+  const requests = [];
+  const navigations = [];
+  let alarmsMode = "populated";
+  let alarmsPending = null;
+  let alarmActionPending = null;
+  let taskHistoryMode = "populated";
+  let taskHistoryPending = null;
+  window.fetch = async (input, options = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    const method = options.method || "GET";
+    requests.push({ url, method, options, body: options.body ? JSON.parse(options.body) : null });
+    if (url.startsWith("/api/alarms?")) {
+      if (alarmsPending) return alarmsPending.promise;
+      if (alarmsMode === "error") return jsonResponse({ detail: "synthetic alarm failure" }, 500);
+      if (alarmsMode === "empty") return jsonResponse({ ...alarmContractData, alarms: [] });
+      return jsonResponse(alarmContractData);
+    }
+    if (url === "/alarms/alarm-browser-999/resolve") {
+      if (alarmActionPending) return alarmActionPending.promise;
+      return jsonResponse({ ok: true });
+    }
+    if (url.startsWith("/api/projects/browser-project-999/task-history?")) {
+      if (taskHistoryPending) return taskHistoryPending.promise;
+      if (taskHistoryMode === "error") return jsonResponse({ detail: "synthetic history failure" }, 500);
+      const filter = new URL(url, window.location.origin).searchParams.get("filter") || "all";
+      return jsonResponse(taskHistoryContractData(filter, taskHistoryMode === "empty" ? [] : null));
+    }
+    if (url === "/projects/browser-project-999/tasks/task-history-browser-999/unarchive") {
+      return jsonResponse({ ok: true, task_id: "task-history-browser-999" });
+    }
+    throw new Error(`Unexpected browser-contract request: ${method} ${url}`);
+  };
+
+  const renderBehavior = (element) => behaviorRoot.render(
+    <NavContext.Provider value={(to) => navigations.push(to)}>{element}</NavContext.Provider>,
+  );
+  const behaviorSurface = () => document.querySelector("#view-behavior-contract-root");
+
+  window.history.replaceState(null, "", "/alarms");
+  alarmsPending = deferredResponse();
+  renderBehavior(<Alarms key="alarms-loading" />);
+  await waitForContract(
+    () => behaviorSurface().textContent.includes("Loading Alarms"),
+    "Alarms does not expose its loading state in the browser",
+  );
+  alarmsPending.resolve(jsonResponse(alarmContractData));
+  alarmsPending = null;
+  await waitForContract(
+    () => behaviorSurface().querySelector('[role="table"][aria-label="Alarms"]'),
+    "Alarms does not render its shared Ledger table",
+  );
+  let alarmsSurface = behaviorSurface();
+  requireStatusLabels(alarmsSurface, "Alarms");
+  requireContract(alarmsSurface.textContent.includes("Bounded browser alarm evidence"), "Alarms loses bounded context");
+  requireContract(alarmsSurface.textContent.includes("(truncated)"), "Alarms loses bounded-context truncation evidence");
+  requireContract(alarmsSurface.querySelector('a[href="/sessions/session-alarm-999"]'), "Alarms loses session evidence navigation");
+  requireContract(!alarmsSurface.textContent.includes("Abort"), "Alarms exposes an unavailable Abort action");
+
+  const alarmFilter = [...alarmsSurface.querySelectorAll('nav[aria-label="Alarm filters"] button')]
+    .find((button) => button.textContent.includes("Resolved"));
+  alarmFilter.focus();
+  requireContract(alarmFilter.matches(":focus-visible"), "Alarm filter is not keyboard focus-visible");
+  alarmFilter.click();
+  await waitForContract(
+    () => window.location.search === "?filter=resolved"
+      && requests.some((request) => request.url === "/api/alarms?filter=resolved"),
+    "Alarm filtering does not update the bookmarkable URL and request",
+  );
+
+  const raiseButton = [...alarmsSurface.querySelectorAll("button")]
+    .find((button) => button.textContent.trim() === "Raise Budget");
+  raiseButton.focus();
+  raiseButton.click();
+  await waitForContract(
+    () => alarmsSurface.querySelector(".confirm-sheet")?.contains(document.activeElement),
+    "Budget confirmation does not receive initial focus",
+  );
+  let confirmRaise = [...alarmsSurface.querySelectorAll("button")]
+    .find((button) => button.textContent.trim() === "Confirm raise");
+  requireContract(confirmRaise.disabled, "Budget confirmation is enabled without a positive cap");
+  requireContract(
+    alarmsSurface.textContent.includes("Enter a positive new budget cap before confirming."),
+    "Budget confirmation omits its disabled reason",
+  );
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await waitForContract(
+    () => !alarmsSurface.querySelector(".confirm-sheet") && document.activeElement === raiseButton,
+    "Escape does not dismiss budget confirmation and restore its opener",
+  );
+
+  raiseButton.click();
+  await waitForContract(() => alarmsSurface.querySelector(".confirm-sheet input"), "Budget confirmation does not reopen");
+  const capInput = alarmsSurface.querySelector(".confirm-sheet input");
+  capInput.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(capInput, "1500");
+  capInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitForContract(() => {
+    confirmRaise = [...alarmsSurface.querySelectorAll("button")]
+      .find((button) => button.textContent.trim() === "Confirm raise");
+    return confirmRaise && !confirmRaise.disabled;
+  }, "Budget confirmation does not accept keyboard-entered input");
+  confirmRaise.focus();
+  confirmRaise.click();
+  await waitForContract(
+    () => requests.some((request) => (
+      request.url === "/alarms/alarm-browser-999/resolve"
+        && request.method === "POST"
+        && request.body?.action === "raise_budget"
+        && request.body?.payload?.daily_cap_tokens === 1500
+    )) && !alarmsSurface.querySelector(".confirm-sheet")
+      && alarmsSurface.textContent.includes("raise_budget resolved for alarm alarm-browser-999"),
+    "Budget confirmation does not submit the alarm resolve request",
+  );
+
+  alarmActionPending = deferredResponse();
+  const continueButton = [...alarmsSurface.querySelectorAll("button")]
+    .find((button) => button.textContent.trim() === "Continue");
+  continueButton.focus();
+  continueButton.click();
+  await waitForContract(
+    () => {
+      const actionButtons = [...alarmsSurface.querySelectorAll("button")]
+        .filter((button) => ["Continue", "Raise Budget"].includes(button.textContent.trim()));
+      return actionButtons.length === 2
+        && actionButtons.every((button) => button.disabled && button.getAttribute("aria-describedby"));
+    },
+    "Pending alarm actions do not expose disabled reasons",
+  );
+  alarmActionPending.resolve(jsonResponse({ ok: true }));
+  alarmActionPending = null;
+  await waitForContract(
+    () => requests.some((request) => (
+      request.url === "/alarms/alarm-browser-999/resolve"
+        && request.body?.action === "continue"
+    )) && alarmsSurface.textContent.includes("continue resolved for alarm alarm-browser-999"),
+    "Continue does not submit the alarm resolve request",
+  );
+
+  alarmsMode = "error";
+  window.history.replaceState(null, "", "/alarms");
+  renderBehavior(<Alarms key="alarms-error" />);
+  await waitForContract(
+    () => behaviorSurface().querySelector('[role="alert"]')?.textContent.includes("Could not load Alarms"),
+    "Alarms does not expose its error state in the browser",
+  );
+  alarmsMode = "empty";
+  renderBehavior(<Alarms key="alarms-empty" />);
+  await waitForContract(
+    () => behaviorSurface().textContent.includes("No open alarms"),
+    "Alarms does not expose its empty state in the browser",
+  );
+
+  taskHistoryMode = "populated";
+  taskHistoryPending = deferredResponse();
+  window.history.replaceState(null, "", "/projects/browser-project-999/task-history");
+  renderBehavior(<TaskHistory key="history-loading" projectId="browser-project-999" />);
+  await waitForContract(
+    () => behaviorSurface().textContent.includes("Loading task history"),
+    "Task History does not expose its loading state in the browser",
+  );
+  taskHistoryPending.resolve(jsonResponse(taskHistoryContractData()));
+  taskHistoryPending = null;
+  await waitForContract(
+    () => behaviorSurface().querySelector('[role="table"][aria-label="Task history"]'),
+    "Task History does not render its shared data table",
+  );
+  let historySurface = behaviorSurface();
+  requireContract(
+    historySurface.querySelector('[role="note"][aria-label="Task history is read-only"]'),
+    "Task History does not expose its read-only state",
+  );
+  requireStatusLabels(historySurface, "Task History");
+  requireContract(historySurface.textContent.includes("Archived"), "Task History loses archive evidence");
+  requireContract(historySurface.textContent.includes("acceptance_verification"), "Task History loses task-kind evidence");
+  requireContract(historySurface.textContent.includes("run-history-browser-999"), "Task History loses Worker Run evidence");
+  const historySession = historySurface.querySelector('a[href="/sessions/session-history-999"]');
+  historySession.focus();
+  requireContract(historySession.matches(":focus-visible"), "Task History evidence link is not keyboard focus-visible");
+
+  const archivedFilter = [...historySurface.querySelectorAll('section[aria-label="Archive filters"] button')]
+    .find((button) => button.textContent.includes("Archived"));
+  archivedFilter.focus();
+  archivedFilter.click();
+  await waitForContract(
+    () => window.location.search === "?filter=archived"
+      && requests.some((request) => request.url === "/api/projects/browser-project-999/task-history?filter=archived"),
+    "Task History filtering does not update the URL and request",
+  );
+
+  const pipelineLink = historySurface.querySelector('a[href="/projects/browser-project-999"]');
+  pipelineLink.focus();
+  pipelineLink.click();
+  requireContract(
+    navigations.at(-1) === "/projects/browser-project-999",
+    "Task History does not navigate back to Pipeline through the public link",
+  );
+
+  const unarchiveButton = [...historySurface.querySelectorAll("button")]
+    .find((button) => button.textContent.trim() === "Unarchive");
+  unarchiveButton.focus();
+  unarchiveButton.click();
+  await waitForContract(
+    () => requests.some((request) => (
+      request.url === "/projects/browser-project-999/tasks/task-history-browser-999/unarchive"
+        && request.method === "POST"
+        && request.options.headers?.Accept === "application/json"
+        && request.options.credentials === "same-origin"
+    ))
+      && historySurface.textContent.includes("Task task-history-browser-999 unarchived.")
+      && requests.filter((request) => (
+        request.url === "/api/projects/browser-project-999/task-history?filter=archived"
+      )).length >= 2,
+    "Task History does not cross the unarchive HTTP boundary and report success",
+  );
+
+  taskHistoryMode = "error";
+  window.history.replaceState(null, "", "/projects/browser-project-999/task-history");
+  renderBehavior(<TaskHistory key="history-error" projectId="browser-project-999" />);
+  await waitForContract(
+    () => behaviorSurface().querySelector('[role="alert"]')?.textContent.includes("Could not load task history"),
+    "Task History does not expose its error state in the browser",
+  );
+  taskHistoryMode = "empty";
+  renderBehavior(<TaskHistory key="history-empty" projectId="browser-project-999" />);
+  await waitForContract(
+    () => behaviorSurface().textContent.includes("No tasks match this history filter"),
+    "Task History does not expose its empty state in the browser",
+  );
+
+  behaviorRoot.unmount();
+  window.fetch = originalFetch;
   const opener = document.querySelector("#confirm-opener");
   opener.focus();
   opener.click();
@@ -579,5 +886,6 @@ async function inspect() {
 createRoot(document.querySelector("#root")).render(<ContractSurface />);
 inspect().catch((error) => {
   document.documentElement.dataset.ledgerContract = "failed";
+  document.documentElement.dataset.contractError = error.message;
   document.body.dataset.contractError = error.message;
 });
