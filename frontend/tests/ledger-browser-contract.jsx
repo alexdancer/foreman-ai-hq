@@ -122,21 +122,40 @@ const dashboardData = {
   },
   spend: {
     worker_execution: 150,
+    orchestration: 90,
     agent_review_reporting: 30,
-    planning_estimation: 0,
+    planning_estimation: 40,
     setup_verification: 20,
-    other: 40,
+    other: 0,
+    pricing_coverage: {
+      worker_execution: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 150, coverage_percent: 0 },
+      agent_review_reporting: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 30, coverage_percent: 0 },
+      planning_estimation: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 40, coverage_percent: 0 },
+      setup_verification: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 20, coverage_percent: 0 },
+      other: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+      orchestration: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 90, coverage_percent: 0 },
+      total: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 240, coverage_percent: 0 },
+    },
     cost_by_category: {
       control_plane: null,
       task_breakdown: null,
       worker_execution: null,
       adapter_verification: null,
       reporting_summary: null,
-      other: null,
+      other: 0,
     },
     total_cost: null,
     priced_tokens: 0,
     unpriced_tokens: 240,
+  },
+  needs_you: { count: 2, project_count: 1, projects_with_needs_you: 1 },
+  estimation_coefficients: {
+    available: true,
+    scope: "default",
+    factors: [
+      { key: "g", label: "Context growth per turn", value: 115, provenance: "seed" },
+      { key: "p", label: "Output per turn", value: 800, provenance: "fitted(3)" },
+    ],
   },
   alarms: {
     total: 1,
@@ -146,7 +165,7 @@ const dashboardData = {
   },
   active_sessions: [{ id: "browser-session-999", task_description: "Browser Dashboard task", model: "gpt-browser-999", status: "running" }],
   estimation_accuracy: { completed_count: 3, median_error_ratio: 1.1, within_2x_pct: 100 },
-  projects: [{ id: "browser-project-999", name: "Browser project 999", task_count: 1, capability: { state: "launch_ready" } }],
+  projects: [{ id: "browser-project-999", name: "Browser project 999", task_count: 1, needs_you_count: 2, capability: { state: "launch_ready" } }],
 };
 
 function PipelineContract() {
@@ -456,24 +475,30 @@ async function inspect() {
     "Dashboard panel titles do not use the accepted sentence-case sans tier",
   );
   requireContract(
-    dashboard.querySelector(".dashboard-kpi-orchestration .value")?.textContent.trim() === "See breakdown",
-    "Dashboard presents incomplete orchestration attribution as an authoritative total",
+    dashboard.querySelector(".dashboard-kpi-orchestration .value")?.textContent.trim() === "90",
+    "Dashboard does not expose the authoritative orchestration total",
   );
   requireContract(
-    dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("partial attribution")
-      && dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("Other tracked spend"),
-    "Dashboard does not direct incomplete orchestration attribution to the tracked-spend breakdown",
+    dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("90 unpriced tokens"),
+    "Dashboard loses orchestration pricing coverage",
   );
-  const otherSpendRow = [...dashboard.querySelectorAll('[role="table"][aria-label="Governed spend by category"] [role="row"]')]
-    .find((row) => row.textContent.includes("Other tracked spend"));
-  requireContract(otherSpendRow?.textContent.includes("40"), "Dashboard loses unattributed Planning spend from the governed-spend breakdown");
+  const planningSpendRow = [...dashboard.querySelectorAll('[role="table"][aria-label="Governed spend by category"] [role="row"]')]
+    .find((row) => row.textContent.includes("Planning/estimation"));
+  requireContract(planningSpendRow?.textContent.includes("40"), "Dashboard does not attribute Planning spend to orchestration");
+  requireContract(!dashboard.textContent.includes("Other tracked spend"), "Dashboard still presents Planning spend as Other tracked spend");
   requireContract(
     dashboardOverview.querySelectorAll(".kpi")[1]?.querySelector(".value")?.textContent.trim() === "150",
     "Dashboard Worker execution KPI changed its authoritative total",
   );
   requireContract(
-    dashboard.querySelector(".dashboard-kpi-needs-you .value")?.textContent.trim() === "Project-scoped",
-    "Dashboard invents a global Needs You count",
+    dashboard.querySelector(".dashboard-kpi-needs-you .value")?.textContent.trim() === "2",
+    "Dashboard does not expose the authoritative project-scoped Needs You count",
+  );
+  requireContract(
+    dashboard.textContent.includes("Context growth per turn")
+      && dashboard.textContent.includes("seed")
+      && dashboard.textContent.includes("fitted(3)"),
+    "Dashboard loses canonical estimation coefficient provenance",
   );
   requireContract(dashboard.textContent.includes("unpriced"), "Dashboard loses the unpriced provenance qualifier");
   requireContract(dashboard.querySelector('[role="table"][aria-label="Active sessions"]'), "Dashboard sessions do not use the shared data table");

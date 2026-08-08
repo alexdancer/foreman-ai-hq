@@ -8,7 +8,7 @@ Before this redesign, Task Breakdown Review was a wall of equally weighted forms
 
 ## Outcome
 
-Build the operator workbench direction: a fixed-height, three-zone review surface; a next-action-led Pipeline; a canonical project-scoped Needs You route; shared presentation primitives; and a grouped Portal shell. This is a presentation migration. It changes no backend behavior, API contract, projection, mutation path, or product terminology. The only new canonical route is `/projects/{project_id}/needs-you`.
+Build the operator workbench direction: a fixed-height, three-zone review surface; a next-action-led Pipeline; a canonical project-scoped Needs You route; shared presentation primitives; and a grouped Portal shell. Except for the later additive Dashboard authority extension described below, this is a presentation migration and changes no backend behavior, API contract, projection, mutation path, or product terminology. The only new canonical route is `/projects/{project_id}/needs-you`.
 
 ## Accepted decisions
 
@@ -30,7 +30,7 @@ Build the operator workbench direction: a fixed-height, three-zone review surfac
 | Needs You | Canonical project-scoped route backed by the existing `/api/projects/{id}/needs-you` projection, with inline manual-estimate behavior and direct-load coverage for complete, partial, and unknown projects. | No `/app/.../needs-you` alias and no second Planning Inbox projection. |
 | Execution Floor | Full-width run panels with the existing three sections and command bar; fold the live-run dock into the active run panel. | Worker Run terminology and existing run evidence. |
 | Evidence Drawer | Shared TokenComparison, EventRow, and Disclosure presentation; provenance adjacent to figures; available from every relevant row and Session Report. | Focus trap, Escape, opener restore, and five-second live refresh. |
-| Dashboard | Lead with four KPI tiles in this order: budget, Worker execution, orchestration, and Needs You. Keep Needs You non-quantitative and project-scoped; withhold an authoritative orchestration total, identify its attribution as partial, and direct operators to the governed-spend breakdown including Other tracked spend. Keep Worker and orchestration spend distinct, qualify dollar amounts whenever pricing coverage is incomplete, and preserve every reachable provenance qualifier without inventing seed/fitted coefficient states absent from the projection. Follow with the existing next-action summary, governed-spend breakdown, sessions, accuracy, alarms, and project navigation. | Existing Dashboard projection and populated, loading, empty, error, active-session, and alarm behavior. |
+| Dashboard | Lead with four KPI tiles in this order: budget, Worker execution, orchestration, and Needs You. Show the Dashboard Needs You count by rolling up only counts emitted by each authoritative project-scoped Needs You projection; this remains a display, not a second decision queue. Show the canonical orchestration total with Planning attributed to orchestration/control-plane, Worker spend kept distinct, and Other reserved for genuinely unclassified spend. For each spend category, preserve authoritative `no_usage`, `fully_priced`, `partially_priced`, or `unpriced` coverage and every unpriced qualifier. Show default estimation-coefficient factors and their canonical `seed` or `fitted(n)` provenance when available. When any new authoritative field is absent or provenance loading fails, render it unavailable without reconstructing rules or leaking errors. Follow with the existing next-action summary, governed-spend breakdown, sessions, accuracy, alarms, and project navigation. | Additive `/api/dashboard` compatibility with all existing payload fields retained; persisted raw Planning-category compatibility; authenticated read-only behavior; populated, loading, empty, error, active-session, and alarm behavior. |
 | Sessions | Restyle onto shared data-table and evidence primitives. | Existing session list, states, pagination, and links. |
 | Session Report | Promote TokenComparison and shared evidence primitives into the report. | Existing single EvidenceSection/EvidenceItem/TokenRow implementation and provenance. |
 | Alarms | Use shared rows/status treatment and keep alarm actions legible. | Existing alarm state and dismissal behavior. |
@@ -50,7 +50,7 @@ Use the role-named neutral ramp and aliases described in `DESIGN.md`; preserve s
 ## Implementation boundaries
 
 - Frontend work is expected in tokens, shared UI primitives, shell, routes, Pipeline, Task Breakdown Review, Needs You, Floor, Drawer, Dashboard, Sessions, Reports, Alarms, History, Planning, Setup, and settings views.
-- No backend endpoint, projection, persistence schema, mutation path, Worker behavior, or product term changes are in scope.
+- Apart from the additive `/api/dashboard` fields described in the Dashboard row, no backend endpoint, projection, persistence schema, mutation path, Worker behavior, or product term changes are in scope.
 - Needs You route registration must pass through the authenticated FastAPI shell/recovery boundary and use the existing projection.
 - Removing Planning Inbox and promoting Needs You must land together.
 
@@ -63,7 +63,7 @@ Tests observe public render, keyboard, route, and HTTP behavior rather than impl
 3. Review focus/selection independence, five candidate states, roving keyboard model, fieldsets/disclosures, narrow-width context fallback, disabled reasons, confirmation-without-mutation, full-text loading, and dirty guards.
 4. Needs You direct loads, complete/partial builds, unknown-project 404, canonical route ownership, and inline manual estimates.
 5. Pipeline stage counts/mappings, all four ledger buckets, blocked/launch-failure annotations, evidence opening, launch popover, and exactly-once breakdown presentation.
-6. Floor, Drawer, Sessions, Reports, Alarms, History, Planning, Setup, and Settings shared presentation plus preserved behavior. For Dashboard, cover the four-KPI order, non-quantitative Needs You state, partial orchestration attribution, pricing qualifiers, reachable provenance, populated/loading/empty/error/active-session/alarm states, navigation, and responsive layout through the Vite-backed public behavior seam.
+6. Floor, Drawer, Sessions, Reports, Alarms, History, Planning, Setup, and Settings shared presentation plus preserved behavior. For Dashboard, cover the four-KPI order; authoritative Needs You roll-up; canonical Planning attribution; category-level no-usage, full, partial, and unpriced coverage; coefficient provenance and unavailable states; populated/loading/empty/error/active-session/alarm states; navigation; and responsive layout through the Vite-backed public behavior seam.
 7. `npm --prefix frontend run check`, the focused Portal tests, and proportionate backend tests. Verify the design at 1440/1728px and down through 1280/1100px, including keyboard access, greyscale legibility, disabled reasons, and responsive rail collapse.
 
 ## Task intent and order

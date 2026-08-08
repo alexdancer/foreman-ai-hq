@@ -224,25 +224,45 @@ function dashboardData(overrides = {}) {
     worker_execution: {
       token_total: 150,
       status_split: { completed: 100, failed_retry: 50, unknown: 0 },
-      components: { available: true, items: [{ label: "output", value: 50 }], cost: 0.0123 },
+      components: { available: true, items: [{ label: "output", value: 50 }], cost: 0.01 },
     },
     spend: {
       worker_execution: 150,
-      agent_review_reporting: 0,
-      planning_estimation: 0,
-      setup_verification: 0,
+      orchestration: 60,
+      agent_review_reporting: 30,
+      planning_estimation: 20,
+      setup_verification: 10,
       other: 0,
+      pricing_coverage: {
+        worker_execution: { state: "fully_priced", cost: 0.01, priced_tokens: 150, unpriced_tokens: 0, coverage_percent: 100 },
+        agent_review_reporting: { state: "fully_priced", cost: 0.3, priced_tokens: 30, unpriced_tokens: 0, coverage_percent: 100 },
+        planning_estimation: { state: "partially_priced", cost: 0.2, priced_tokens: 10, unpriced_tokens: 10, coverage_percent: 50 },
+        setup_verification: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 10, coverage_percent: 0 },
+        other: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+        orchestration: { state: "partially_priced", cost: 0.5, priced_tokens: 40, unpriced_tokens: 20, coverage_percent: 67 },
+        total: { state: "partially_priced", cost: 0.51, priced_tokens: 190, unpriced_tokens: 20, coverage_percent: 90 },
+      },
       cost_by_category: {
-        control_plane: 1.0,
-        task_breakdown: 0.5,
+        control_plane: 0.2,
+        task_breakdown: 0,
         worker_execution: 0.01,
-        adapter_verification: 0,
-        reporting_summary: 0,
+        adapter_verification: null,
+        reporting_summary: 0.3,
         other: 0,
       },
-      total_cost: 1.51,
-      priced_tokens: 150,
-      unpriced_tokens: 0,
+      total_cost: 0.51,
+      priced_tokens: 190,
+      unpriced_tokens: 20,
+    },
+    needs_you: { count: 2, project_count: 1, projects_with_needs_you: 1 },
+    estimation_coefficients: {
+      available: true,
+      scope: "default",
+      factors: [
+        { key: "a", label: "Input per file read", value: 900, provenance: "seed" },
+        { key: "g", label: "Context growth per turn", value: 115, provenance: "seed" },
+        { key: "p", label: "Output per turn", value: 800, provenance: "fitted(3)" },
+      ],
     },
     alarms: {
       total: 1,
@@ -271,6 +291,7 @@ function dashboardData(overrides = {}) {
       id: "demo-999",
       name: "DEMO 999",
       task_count: 1,
+      needs_you_count: 2,
       capability: { state: "launch_ready" },
     }],
     ...overrides,
@@ -1239,12 +1260,14 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(empty, /No Dashboard actions need attention/);
   assert.match(empty, /No active sessions/);
   assert.match(empty, /No open alarms/);
-  assert.doesNotMatch(empty, /Estimation accuracy/);
+  assert.match(empty, /Estimation accuracy/);
+  assert.match(empty, /No completed Tasks with estimate and actual evidence/);
+  assert.match(empty, /Estimation coefficient provenance/);
   assert.match(empty, /No projects are connected yet/);
   assert.match(empty, /href="\/settings\/project"/);
 });
 
-test("dashboard leads with four Ledger KPIs without inventing Needs You or complete orchestration authority", () => {
+test("dashboard leads with authoritative Worker, orchestration, and project-scoped Needs You KPIs", () => {
   const populated = renderDashboard({
     data: dashboardData({
       next_actions: [
@@ -1261,24 +1284,6 @@ test("dashboard leads with four Ledger KPIs without inventing Needs You or compl
           tone: "green",
         },
       ],
-      spend: {
-        worker_execution: 150,
-        agent_review_reporting: 30,
-        planning_estimation: 0,
-        setup_verification: 10,
-        other: 25,
-        cost_by_category: {
-          control_plane: null,
-          task_breakdown: null,
-          worker_execution: null,
-          adapter_verification: 0,
-          reporting_summary: null,
-          other: null,
-        },
-        total_cost: null,
-        priced_tokens: 0,
-        unpriced_tokens: 215,
-      },
     }),
     error: null,
     loading: false,
@@ -1295,92 +1300,142 @@ test("dashboard leads with four Ledger KPIs without inventing Needs You or compl
   assert.match(populated, /<a class="dashboard-action-link" href="\/board">Review 1 task<\/a>/);
   assert.match(populated, /Awaiting operator review/);
   assert.match(populated, /<div class="label">Worker execution<\/div><div class="value mono">150<\/div>/);
-  assert.match(populated, /<div class="label">Orchestration<\/div><div class="value mono">See breakdown<\/div>/);
-  assert.match(populated, /partial attribution/);
-  assert.match(populated, /cannot prove complete Planning attribution/);
-  assert.match(populated, /Other tracked spend/);
-  assert.match(populated, /<div class="label">Needs You<\/div><div class="value mono">Project-scoped<\/div>/);
-  assert.match(populated, /Authoritative Needs You decisions live within each project/);
-  assert.match(populated, /unpriced/);
+  assert.match(populated, /<div class="label">Orchestration<\/div><div class="value mono">60<\/div>/);
+  assert.match(populated, /Orchestration-only governed spend/);
+  assert.match(populated, /20 unpriced tokens/);
+  assert.match(populated, /<div class="label">Needs You<\/div><div class="value mono">2<\/div>/);
+  assert.match(populated, /Across 1 connected project/);
+  assert.match(populated, /Input per file read/);
+  assert.match(populated, /Context growth per turn/);
+  assert.match(populated, /seed/);
+  assert.match(populated, /fitted\(3\)/);
+  assert.match(populated, /href="\/projects\/demo-999\/needs-you"/);
+  assert.doesNotMatch(populated, /Other tracked spend/);
   assert.doesNotMatch(populated, /<section class="dashboard-overview"[^]*<section class="dashboard-overview"/);
   assertNoNestedPanels(populated);
 });
 
-test("dashboard spend breakdown shows priced USD per category, unpriced labels, and coverage", () => {
+test("dashboard spend breakdown distinguishes full, partial, unpriced, and empty category coverage", () => {
   const populated = renderDashboard({ data: dashboardData(), error: null, loading: false });
   assert.match(populated, /Worker execution/);
-  assert.match(populated, /\$0\.0100/);
+  assert.match(populated, /\$0\.0100[^]*fully priced/);
   assert.match(populated, /Planning\/estimation/);
-  assert.match(populated, /\$1\.5000/);
+  assert.match(populated, /\$0\.2000[^]*partially priced[^]*10 unpriced tokens/);
+  assert.match(populated, /Setup\/verification[^]*unpriced[^]*10 unpriced tokens/);
   assert.match(populated, /Priced spend/);
-  assert.match(populated, /\$1\.5100/);
-  assert.match(populated, /100% of tokens priced/);
+  assert.match(populated, /\$0\.5100/);
+  assert.match(populated, /90% of tokens priced/);
 
-  const unpriced = renderDashboard({
+  const empty = renderDashboard({
     data: dashboardData({
       spend: {
-        worker_execution: 50,
+        worker_execution: 0,
+        orchestration: 0,
         agent_review_reporting: 0,
         planning_estimation: 0,
         setup_verification: 0,
         other: 0,
-        cost_by_category: {
-          control_plane: null,
-          task_breakdown: null,
-          worker_execution: null,
-          adapter_verification: 0,
-          reporting_summary: null,
-          other: 0,
+        pricing_coverage: {
+          worker_execution: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          agent_review_reporting: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          planning_estimation: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          setup_verification: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          other: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          orchestration: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          total: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
         },
-        total_cost: null,
+        cost_by_category: {},
+        total_cost: 0,
         priced_tokens: 0,
-        unpriced_tokens: 50,
+        unpriced_tokens: 0,
       },
+      needs_you: { count: 0, project_count: 0, projects_with_needs_you: 0 },
+      projects: [],
     }),
     error: null,
     loading: false,
   });
-  assert.match(unpriced, /unpriced/);
-  assert.match(unpriced, /no priced spend recorded/);
-  assert.match(unpriced, /0% of tokens priced/);
+  assert.match(empty, /<div class="label">Worker execution<\/div><div class="value mono">0<\/div>/);
+  assert.match(empty, /<div class="label">Orchestration<\/div><div class="value mono">0<\/div>/);
+  assert.match(empty, /no usage/);
 
   const mixedCoverage = renderDashboard({
     data: dashboardData({
       spend: {
         worker_execution: 50,
+        orchestration: 20,
         agent_review_reporting: 20,
         planning_estimation: 0,
         setup_verification: 0,
         other: 0,
-        cost_by_category: {
-          control_plane: 0,
-          task_breakdown: 0,
-          worker_execution: 0.01,
-          adapter_verification: 0,
-          reporting_summary: 0.02,
-          other: 0,
+        pricing_coverage: {
+          worker_execution: { state: "partially_priced", cost: 0.01, priced_tokens: 30, unpriced_tokens: 20, coverage_percent: 60 },
+          agent_review_reporting: { state: "fully_priced", cost: 0.02, priced_tokens: 20, unpriced_tokens: 0, coverage_percent: 100 },
+          planning_estimation: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          setup_verification: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          other: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          orchestration: { state: "fully_priced", cost: 0.02, priced_tokens: 20, unpriced_tokens: 0, coverage_percent: 100 },
+          total: { state: "partially_priced", cost: 0.03, priced_tokens: 50, unpriced_tokens: 20, coverage_percent: 71 },
         },
+        cost_by_category: {},
         total_cost: 0.03,
-        priced_tokens: 30,
-        unpriced_tokens: 40,
+        priced_tokens: 50,
+        unpriced_tokens: 20,
       },
     }),
     error: null,
     loading: false,
   });
-  assert.match(mixedCoverage, /<span class="mono">\$0\.0100<\/span><span class="dashboard-provenance-qualifier"> ▲ global pricing coverage incomplete<\/span>/);
-  assert.match(mixedCoverage, /<span class="mono">\$0\.0200<\/span><span class="dashboard-provenance-qualifier"> ▲ global pricing coverage incomplete<\/span>/);
-  assert.match(mixedCoverage, /Reported cost[^]*\$0\.0123[^]*global pricing coverage incomplete/);
-  assert.match(mixedCoverage, /43% of tokens priced/);
+  assert.match(mixedCoverage, /Worker execution[^]*\$0\.0100[^]*partially priced[^]*20 unpriced tokens/);
+  assert.match(mixedCoverage, /Agent Review\/reporting[^]*\$0\.0200[^]*fully priced/);
+  assert.match(mixedCoverage, /Reported cost[^]*\$0\.0100[^]*partially priced[^]*20 unpriced tokens/);
+  assert.match(mixedCoverage, /71% of tokens priced/);
 });
 
-test("dashboard estimation accuracy panel shows absent, progress, and figures states", () => {
-  const absent = renderDashboard({
+test("dashboard attributes Planning-only spend to orchestration rather than Other", () => {
+  const planningOnly = renderDashboard({
+    data: dashboardData({
+      worker_execution: { token_total: 0, status_split: { completed: 0, failed_retry: 0, unknown: 0 }, components: { available: false, items: [], cost: null } },
+      spend: {
+        worker_execution: 0,
+        orchestration: 150,
+        agent_review_reporting: 0,
+        planning_estimation: 150,
+        setup_verification: 0,
+        other: 0,
+        pricing_coverage: {
+          worker_execution: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          agent_review_reporting: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          planning_estimation: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 150, coverage_percent: 0 },
+          setup_verification: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          other: { state: "no_usage", cost: 0, priced_tokens: 0, unpriced_tokens: 0, coverage_percent: 0 },
+          orchestration: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 150, coverage_percent: 0 },
+          total: { state: "unpriced", cost: null, priced_tokens: 0, unpriced_tokens: 150, coverage_percent: 0 },
+        },
+        cost_by_category: {},
+        total_cost: null,
+        priced_tokens: 0,
+        unpriced_tokens: 150,
+      },
+    }),
+    error: null,
+    loading: false,
+  });
+  assert.match(planningOnly, /<div class="label">Orchestration<\/div><div class="value mono">150<\/div>/);
+  assert.match(planningOnly, /Planning\/estimation[^]*150/);
+  assert.doesNotMatch(planningOnly, /Other tracked spend/);
+  assert.match(planningOnly, /150 unpriced tokens/);
+});
+
+test("dashboard estimation accuracy preserves canonical coefficient provenance and its missing state", () => {
+  const absentAccuracy = renderDashboard({
     data: dashboardData({ estimation_accuracy: { completed_count: null, median_error_ratio: null, within_2x_pct: null } }),
     error: null,
     loading: false,
   });
-  assert.doesNotMatch(absent, /Estimation accuracy/);
+  assert.match(absentAccuracy, /No completed Tasks with estimate and actual evidence/);
+  assert.match(absentAccuracy, /Estimation coefficient provenance/);
+  assert.match(absentAccuracy, /fitted\(3\)/);
 
   const progress = renderDashboard({
     data: dashboardData({ estimation_accuracy: { completed_count: 1, median_error_ratio: null, within_2x_pct: null } }),
@@ -1398,6 +1453,30 @@ test("dashboard estimation accuracy panel shows absent, progress, and figures st
   assert.match(figures, /Completed tasks tracked/);
   assert.match(figures, /Median error ratio/);
   assert.match(figures, /Within 2× estimate/);
+
+  const missing = renderDashboard({
+    data: dashboardData({ estimation_coefficients: { available: false, scope: "default", factors: [] } }),
+    error: null,
+    loading: false,
+  });
+  assert.match(missing, /Coefficient provenance unavailable/);
+  assert.doesNotMatch(missing, /private coefficient/);
+
+  const compatibleMissing = renderDashboard({
+    data: { ...dashboardData(), estimation_coefficients: undefined },
+    error: null,
+    loading: false,
+  });
+  assert.match(compatibleMissing, /Coefficient provenance unavailable/);
+
+  const legacyProjection = dashboardData();
+  delete legacyProjection.needs_you;
+  delete legacyProjection.spend.orchestration;
+  delete legacyProjection.spend.pricing_coverage;
+  const compatibleUnavailable = renderDashboard({ data: legacyProjection, error: null, loading: false });
+  assert.match(compatibleUnavailable, /<div class="label">Orchestration<\/div><div class="value mono">unavailable<\/div>/);
+  assert.match(compatibleUnavailable, /<div class="label">Needs You<\/div><div class="value mono">unavailable<\/div>/);
+  assert.match(compatibleUnavailable, /pricing coverage unavailable/);
 });
 
 test("React workspace renders active summary, profile, and route-owned links", () => {

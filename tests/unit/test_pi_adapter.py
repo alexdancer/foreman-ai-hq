@@ -96,6 +96,30 @@ def test_pi_usage_stream_sums_multiple_model_calls_in_one_turn() -> None:
     assert evidence.raw_usage["response_ids"] == ["resp_1", "resp_2"]
 
 
+def test_pi_usage_stream_qualifies_missing_cost_without_reclassifying_zero() -> None:
+    missing_cost = _pi_assistant_message(
+        "resp_missing", input_tokens=1000, output_tokens=10, cost=0.01
+    )
+    missing_cost["usage"].pop("cost")
+
+    unavailable = parse_pi_usage_stream(_pi_stream(missing_cost), model="gpt-5.4")
+    priced_zero = parse_pi_usage_stream(
+        _pi_stream(
+            _pi_assistant_message(
+                "resp_zero", input_tokens=1000, output_tokens=10, cost=0.0
+            )
+        ),
+        model="gpt-5.4",
+    )
+
+    assert unavailable is not None
+    assert unavailable.cost == 0.0
+    assert unavailable.raw_usage["cost_unavailable"] is True
+    assert priced_zero is not None
+    assert priced_zero.cost == 0.0
+    assert "cost_unavailable" not in priced_zero.raw_usage
+
+
 def test_pi_usage_stream_excludes_already_recorded_calls() -> None:
     stream = _pi_stream(
         _pi_assistant_message("resp_1", input_tokens=1000, output_tokens=10, cost=0.01),
@@ -255,6 +279,50 @@ def test_launch_pi_once_records_one_planning_turn_from_native_usage(monkeypatch,
     assert turn["raw_usage"]["spend_category"] == "planning"
     assert turn["raw_usage"]["usage_source"] == "native_usage"
     assert turn["raw_usage"]["tracking_mode"] == "native_usage"
+
+
+def test_launch_pi_once_preserves_mixed_call_pricing_coverage(
+    monkeypatch, tmp_path
+) -> None:
+    database_path = tmp_path / "harness.db"
+    db.init_db(database_path)
+    costless = _pi_assistant_message(
+        "resp_costless", input_tokens=2000, output_tokens=20, cost=0.02
+    )
+    costless["usage"].pop("cost")
+    _fake_pi_run(
+        monkeypatch,
+        _pi_stream(
+            _pi_assistant_message(
+                "resp_priced", input_tokens=1000, output_tokens=10, cost=0.01
+            ),
+            costless,
+        ),
+    )
+
+    session, _result = launch_pi_once(
+        database_path,
+        "hi",
+        profile_dir=DEFAULT_PROFILE_DIR,
+        model="openai-codex/gpt-5.4",
+        timeout=1,
+    )
+
+    token_log = db.build_session_artifact(database_path, session["id"])["token_log"]
+    breakdown = db.session_token_breakdown(database_path, session["id"])
+    assert len(token_log) == 1
+    assert token_log[0]["cost"] == 0.01
+    assert "cost_unavailable" not in token_log[0]["raw_usage"]
+    pricing_segments = token_log[0]["raw_usage"]["pricing_segments"]
+    assert [segment["cost"] for segment in pricing_segments] == [0.01, 0.0]
+    assert pricing_segments[1]["cost_unavailable"] is True
+    assert breakdown["cost_by_category"]["control_plane"] == 0.01
+    assert breakdown["pricing_coverage_by_category"]["control_plane"] == {
+        "state": "partially_priced",
+        "priced_tokens": 1010,
+        "unpriced_tokens": 2020,
+        "coverage_percent": 33,
+    }
 
 
 def test_launch_pi_once_without_usage_evidence_records_no_spend(monkeypatch, tmp_path) -> None:

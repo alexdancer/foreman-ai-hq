@@ -637,9 +637,63 @@ def test_token_usage_breakdown_aggregates_resolved_cost_and_coverage(tmp_path):
     assert breakdown["cost_by_category"]["task_breakdown"] is None
     assert breakdown["cost_by_category"]["adapter_verification"] is None
     assert breakdown["cost_by_category"]["other"] is None
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "fully_priced",
+        "priced_tokens": 20,
+        "unpriced_tokens": 0,
+        "coverage_percent": 100,
+    }
+    assert breakdown["pricing_coverage_by_category"]["task_breakdown"] == {
+        "state": "unpriced",
+        "priced_tokens": 0,
+        "unpriced_tokens": 5,
+        "coverage_percent": 0,
+    }
 
 
-def test_token_usage_breakdown_distinguishes_zero_priced_from_null_unpriced(tmp_path):
+def test_token_usage_breakdown_reports_partial_pricing_per_category(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="partial category pricing",
+        model="mixed",
+        session_key_hash="p" * 64,
+        guardrail_overrides={},
+        status="completed",
+    )
+    for tokens, cost in [(7, 0.03), (3, None)]:
+        record_token_turn(
+            db_path,
+            session_id=session["id"],
+            usage_kind="worker",
+            model="mixed",
+            prompt_tokens=tokens,
+            completion_tokens=0,
+            cost=cost,
+            raw_usage={"total_tokens": tokens, "spend_category": "worker_execution"},
+        )
+
+    breakdown = token_usage_breakdown(db_path)
+
+    assert breakdown["cost_by_category"]["worker_execution"] == pytest.approx(0.03)
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "partially_priced",
+        "priced_tokens": 7,
+        "unpriced_tokens": 3,
+        "coverage_percent": 70,
+    }
+    assert breakdown["pricing_coverage_by_category"]["control_plane"] == {
+        "state": "no_usage",
+        "priced_tokens": 0,
+        "unpriced_tokens": 0,
+        "coverage_percent": 0,
+    }
+
+
+def test_token_usage_breakdown_normalizes_unavailable_cost_and_preserves_priced_zero(
+    tmp_path,
+):
     db_path = tmp_path / "harness.db"
     init_db(db_path)
     session = create_session(
@@ -665,19 +719,105 @@ def test_token_usage_breakdown_distinguishes_zero_priced_from_null_unpriced(tmp_
         session_id=session["id"],
         usage_kind="worker",
         model="mixed",
+        prompt_tokens=5,
+        completion_tokens=0,
+        cost=0.0,
+        raw_usage={
+            "total_tokens": 5,
+            "spend_category": "worker_execution",
+            "cost_unavailable": True,
+        },
+    )
+    record_token_turn(
+        db_path,
+        session_id=session["id"],
+        usage_kind="worker",
+        model="mixed",
         prompt_tokens=6,
         completion_tokens=0,
         cost=None,
         raw_usage={"total_tokens": 6, "spend_category": "control_plane"},
     )
 
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            "select rowid as token_turn_rowid, cost from token_turns order by rowid"
+        ).fetchall()
+        assert rows[1]["cost"] is None
+        conn.execute(
+            "update token_turns set cost = 0 where rowid = ?",
+            (rows[1]["token_turn_rowid"],),
+        )
+
+    artifact = build_session_artifact(db_path, session["id"])
+    unavailable_turn = next(
+        turn for turn in artifact["token_log"] if turn["raw_usage"].get("cost_unavailable")
+    )
+    assert unavailable_turn["cost"] is None
+
     breakdown = token_usage_breakdown(db_path)
 
     assert breakdown["cost_by_category"]["task_breakdown"] == 0.0
+    assert breakdown["cost_by_category"]["worker_execution"] is None
     assert breakdown["cost_by_category"]["control_plane"] is None
     assert breakdown["total_cost"] == 0.0
     assert breakdown["priced_tokens"] == 4
-    assert breakdown["unpriced_tokens"] == 6
+    assert breakdown["unpriced_tokens"] == 11
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "unpriced",
+        "priced_tokens": 0,
+        "unpriced_tokens": 5,
+        "coverage_percent": 0,
+    }
+
+
+def test_token_usage_breakdown_rejects_invalid_costs_on_write_and_read(tmp_path):
+    db_path = tmp_path / "harness.db"
+    init_db(db_path)
+    session = create_session(
+        db_path,
+        task_description="invalid costs",
+        model="mixed",
+        session_key_hash="i" * 64,
+        guardrail_overrides={},
+        status="completed",
+    )
+    for tokens, cost in ((4, 0.0), (5, -0.01), (6, float("inf"))):
+        record_token_turn(
+            db_path,
+            session_id=session["id"],
+            usage_kind="worker",
+            model="mixed",
+            prompt_tokens=tokens,
+            completion_tokens=0,
+            cost=cost,
+            raw_usage={"total_tokens": tokens, "spend_category": "worker_execution"},
+        )
+
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            "select rowid as token_turn_rowid, cost from token_turns order by rowid"
+        ).fetchall()
+        assert [row["cost"] for row in rows] == [0.0, None, None]
+        conn.execute(
+            "update token_turns set cost = -1 where rowid = ?",
+            (rows[1]["token_turn_rowid"],),
+        )
+        conn.execute(
+            "update token_turns set cost = ? where rowid = ?",
+            (float("inf"), rows[2]["token_turn_rowid"]),
+        )
+
+    breakdown = token_usage_breakdown(db_path)
+    assert breakdown["cost_by_category"]["worker_execution"] == 0.0
+    assert breakdown["priced_tokens"] == 4
+    assert breakdown["unpriced_tokens"] == 11
+    assert breakdown["pricing_coverage_by_category"]["worker_execution"] == {
+        "state": "partially_priced",
+        "priced_tokens": 4,
+        "unpriced_tokens": 11,
+        "coverage_percent": 27,
+    }
 
 
 def test_token_usage_breakdown_reports_null_total_cost_when_all_unpriced(tmp_path):
@@ -851,8 +991,11 @@ def test_planning_token_turn_spend_category_and_usage_source(tmp_path):
     assert turn["raw_usage"]["usage_source"] == "harness_proxy"
 
     breakdown = token_usage_breakdown(db_path)
-    assert breakdown["by_category"]["other"] == 150
+    assert breakdown["by_category"]["control_plane"] == 150
+    assert breakdown["by_category"]["other"] == 0
     assert breakdown["by_category"]["worker_execution"] == 0
+    assert breakdown["cost_by_category"]["control_plane"] == pytest.approx(0.001)
+    assert breakdown["pricing_coverage_by_category"]["control_plane"]["state"] == "fully_priced"
     assert breakdown["by_source"]["harness_proxy"] == 150
     assert db.budgeted_token_usage(db_path) == 150
 
@@ -888,5 +1031,6 @@ def test_token_usage_breakdown_keeps_six_fixed_keys_and_rolls_up_planning(tmp_pa
         "reporting_summary",
         "other",
     }
-    assert breakdown["by_category"]["other"] == 1
+    assert breakdown["by_category"]["control_plane"] == 1
+    assert breakdown["by_category"]["other"] == 0
     assert db.budgeted_token_usage(db_path) == 1

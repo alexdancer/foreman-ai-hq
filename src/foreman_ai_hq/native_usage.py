@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,6 +17,11 @@ CODEX_NATIVE_MODELS = {
     "gpt-5.6-terra",
     "gpt-5.6-luna",
 }
+
+MODEL_USAGE_COST_KEY = "costUSD"
+ITEM_COST_KEYS = ("total_cost_usd", "cost")
+USAGE_COST_KEYS = ("cost", "cost_usd", "usd")
+NATIVE_COST_KEYS = {MODEL_USAGE_COST_KEY, *ITEM_COST_KEYS, *USAGE_COST_KEYS}
 
 
 @dataclass(frozen=True)
@@ -134,7 +140,20 @@ def token_usage_components(
         )
         reasoning_is_additive = output is None and reasoning is not None
     total = total_tokens if total_tokens is not None else _first_int(usage, "total_tokens", "total", "tokens.total", "usage.total_tokens", "usage.total")
-    cost_value = cost if cost not in (None, 0) else _first_float(usage, "total_cost_usd", "cost_usd", "cost", "usd", "usage.total_cost_usd", "usage.cost_usd", "usage.cost")
+    cost_value = (
+        normalized_cost(cost)
+        if cost is not None
+        else _first_float(
+            usage,
+            "total_cost_usd",
+            "cost_usd",
+            "cost",
+            "usd",
+            "usage.total_cost_usd",
+            "usage.cost_usd",
+            "usage.cost",
+        )
+    )
     additive_reasoning = reasoning if reasoning_is_additive else None
     component_sum = sum(value or 0 for value in (fresh_input, cache_read, cache_write, output, additive_reasoning))
     unclassified = total - component_sum if total is not None and component_sum > 0 and total > component_sum else None
@@ -208,8 +227,8 @@ def parse_native_usage_evidence(
         total_tokens = _int_from_any(usage.get("total_tokens") or usage.get("total"))
         if total_tokens <= 0:
             total_tokens = prompt_tokens + completion_tokens + _reasoning_token_count(usage)
-        cost = _native_usage_cost(item, usage, model=model)
-        if total_tokens <= 0 or (cost is None and not codex_turn_usage):
+        cost, cost_reported = _native_usage_cost(item, usage, model=model)
+        if total_tokens <= 0 or (not cost_reported and not codex_turn_usage):
             continue
         return NativeUsageEvidence(
             prompt_tokens=prompt_tokens,
@@ -218,9 +237,9 @@ def parse_native_usage_evidence(
             cost=cost or 0.0,
             raw_usage={
                 "model": explicit_model or model,
-                "usage": usage,
+                "usage": _json_safe_native_evidence(usage),
                 "run_binding": run_binding,
-                "source": item,
+                "source": _json_safe_native_evidence(item),
                 **({"cost_unavailable": True} if cost is None else {}),
             },
         )
@@ -250,17 +269,41 @@ def _reasoning_token_count(usage: dict[str, Any]) -> int:
     return _int_from_any(usage.get("reasoning_tokens") or usage.get("reasoning_output_tokens") or usage.get("reasoning"))
 
 
-def _native_usage_cost(item: dict[str, Any], usage: dict[str, Any], *, model: str) -> float | None:
+def _native_usage_cost(
+    item: dict[str, Any], usage: dict[str, Any], *, model: str
+) -> tuple[float | None, bool]:
     model_usage = item.get("modelUsage") or item.get("model_usage")
     if isinstance(model_usage, dict):
         matching_details = _matching_model_usage(model_usage, model=model)
-        if matching_details is not None and matching_details.get("costUSD") is not None:
-            return _float_from_any(matching_details.get("costUSD"))
-        return None
-    for value in (item.get("total_cost_usd"), usage.get("cost"), usage.get("cost_usd"), usage.get("usd"), item.get("cost")):
+        if matching_details is not None and matching_details.get(MODEL_USAGE_COST_KEY) is not None:
+            return normalized_cost(matching_details.get(MODEL_USAGE_COST_KEY)), True
+        return None, False
+    for value in (
+        item.get(ITEM_COST_KEYS[0]),
+        *(usage.get(key) for key in USAGE_COST_KEYS),
+        item.get(ITEM_COST_KEYS[1]),
+    ):
         if value is not None:
-            return _float_from_any(value)
-    return None
+            return normalized_cost(value), True
+    return None, False
+
+
+# Native evidence crosses strict JSON boundaries, so invalid costs are nulled while opaque provider text remains intact.
+def _json_safe_native_evidence(value: Any, *, cost_context: bool = False) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _json_safe_native_evidence(nested, cost_context=cost_context or key in NATIVE_COST_KEYS)
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        return [_json_safe_native_evidence(item, cost_context=cost_context) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if cost_context:
+        normalized, recognized = _classified_cost(value)
+        if recognized and normalized is None:
+            return None
+    return value
 
 
 def _matching_model_usage(model_usage: dict[str, Any], *, model: str) -> dict[str, Any] | None:
@@ -370,11 +413,11 @@ def _codex_stream_binding(values: list[Any], *, selected_model: str) -> dict[str
     return None
 
 
-def _pi_cost_total(usage: dict[str, Any]) -> float:
+def _pi_cost_total(usage: dict[str, Any]) -> float | None:
     cost = usage.get("cost")
     if isinstance(cost, dict):
-        return _float_from_any(cost.get("total"))
-    return _float_from_any(cost)
+        cost = cost.get("total")
+    return normalized_cost(cost)
 
 
 def parse_pi_usage_stream(
@@ -394,6 +437,9 @@ def parse_pi_usage_stream(
     completion_tokens = 0
     total_tokens = 0
     cost = 0.0
+    cost_unavailable = False
+    cost_available = False
+    pricing_segments: list[dict[str, Any]] = []
     provider: str | None = None
     event_model: str | None = None
     for item in _walk_json_dicts(parsed):
@@ -422,11 +468,30 @@ def parse_pi_usage_stream(
         prompt_tokens += p
         completion_tokens += c
         total_tokens += t
-        cost += _pi_cost_total(usage)
+        turn_cost = _pi_cost_total(usage)
+        if turn_cost is None:
+            cost_unavailable = True
+        else:
+            cost += turn_cost
+            cost_available = True
+        turn_provider = msg.get("provider")
+        turn_model = msg.get("model") or model
+        pricing_segments.append(
+            {
+                "response_id": rid,
+                "provider": turn_provider,
+                "model": turn_model,
+                "prompt_tokens": p,
+                "completion_tokens": c,
+                "total_tokens": t,
+                "cost": turn_cost or 0.0,
+                **({"cost_unavailable": True} if turn_cost is None else {}),
+            }
+        )
         if provider is None:
-            provider = msg.get("provider")
+            provider = turn_provider
         if event_model is None:
-            event_model = msg.get("model")
+            event_model = turn_model
     if total_tokens <= 0:
         return None
     return NativeUsageEvidence(
@@ -439,8 +504,14 @@ def parse_pi_usage_stream(
             "model": event_model or model,
             "response_ids": response_ids,
             "total_tokens": total_tokens,
+            "pricing_segments": pricing_segments,
             "usage_source": "native_usage",
             "tracking_mode": "native_usage",
+            **(
+                {"cost_unavailable": True}
+                if cost_unavailable and not cost_available
+                else {}
+            ),
         },
     )
 
@@ -532,7 +603,7 @@ def _first_float(data: dict[str, Any], *paths: str) -> float | None:
     for path in paths:
         value = _nested_value(data, path)
         if value is not None:
-            return _float_from_any(value)
+            return normalized_cost(value)
     return None
 
 
@@ -562,12 +633,22 @@ def _int_from_any(value: Any) -> int:
         return 0
 
 
-def _float_from_any(value: Any) -> float:
-    if value is None:
-        return 0.0
+def normalized_cost(value: Any) -> float | None:
+    return _classified_cost(value)[0]
+
+
+def _classified_cost(value: Any) -> tuple[float | None, bool]:
+    if isinstance(value, bool) or value is None:
+        return None, isinstance(value, bool)
     if isinstance(value, str):
-        value = value.replace("$", "").replace(",", "").strip()
+        value = _clean_cost_string(value)
     try:
-        return float(value)
+        resolved = float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return None, False
+    normalized = resolved if math.isfinite(resolved) and resolved >= 0 else None
+    return normalized, True
+
+
+def _clean_cost_string(value: str) -> str:
+    return value.replace("$", "").replace(",", "").strip()

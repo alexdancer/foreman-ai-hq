@@ -64,26 +64,18 @@ export function DashboardContent({ data }) {
   const components = worker.components || {};
   const componentItems = components.items || [];
   const spend = data.spend || {};
-  const costByCategory = spend.cost_by_category || {};
-  const workerCost = costByCategory.worker_execution;
-  const reportingCost = costByCategory.reporting_summary;
-  const planningCost = sumCostsWhenAllPresent(
-    costByCategory.control_plane,
-    costByCategory.task_breakdown,
-  );
-  const setupCost = costByCategory.adapter_verification;
-  const otherCost = costByCategory.other;
-  const totalCost = spend.total_cost;
+  const pricingCoverage = spend.pricing_coverage || {};
+  const workerPricing = pricingCoverage.worker_execution;
+  const orchestrationPricing = pricingCoverage.orchestration;
+  const totalPricing = pricingCoverage.total;
   const pricedTokens = Number(spend.priced_tokens || 0);
   const unpricedTokens = Number(spend.unpriced_tokens || 0);
-  const pricingCoverageIncomplete = unpricedTokens > 0;
-  const totalSpendTokens = pricedTokens + unpricedTokens;
-  const coveragePct = totalSpendTokens > 0
-    ? Math.round((pricedTokens / totalSpendTokens) * 100)
-    : 0;
   const alarms = data.alarms || {};
   const sessions = data.active_sessions || [];
   const accuracy = data.estimation_accuracy || {};
+  const coefficients = data.estimation_coefficients;
+  const needsYou = data.needs_you || {};
+  const needsYouAvailable = Number.isSafeInteger(needsYou.count) && needsYou.count >= 0;
   const projects = data.projects || [];
   const budgetPercent = budget.daily_cap
     ? Math.min(100, (budget.total_tokens / budget.daily_cap) * 100)
@@ -93,28 +85,28 @@ export function DashboardContent({ data }) {
     {
       label: "Worker execution",
       tokens: spend.worker_execution,
-      cost: workerCost,
+      pricing: workerPricing,
       tone: "neutral",
       scope: `Worker-only normalized actuals · completed ${formatTokens(statusSplit.completed)} · failed/retry ${formatTokens(statusSplit.failed_retry)}${statusSplit.unknown ? ` · unknown ${formatTokens(statusSplit.unknown)}` : ""}`,
     },
     {
       label: "Agent Review/reporting",
       tokens: spend.agent_review_reporting,
-      cost: reportingCost,
+      pricing: pricingCoverage.agent_review_reporting,
       tone: "orchestration",
       scope: "Review and report orchestration",
     },
     {
       label: "Planning/estimation",
       tokens: spend.planning_estimation,
-      cost: planningCost,
+      pricing: pricingCoverage.planning_estimation,
       tone: "orchestration",
-      scope: "Task breakdown and estimator orchestration",
+      scope: "Planning Chat, task breakdown, and estimation orchestration",
     },
     {
       label: "Setup/verification",
       tokens: spend.setup_verification,
-      cost: setupCost,
+      pricing: pricingCoverage.setup_verification,
       tone: "orchestration",
       scope: "Adapter and Orchestrator verification spend",
     },
@@ -123,7 +115,7 @@ export function DashboardContent({ data }) {
     spendRows.push({
       label: "Other tracked spend",
       tokens: spend.other,
-      cost: otherCost,
+      pricing: pricingCoverage.other,
       tone: "neutral",
       scope: "Uncategorized governed spend",
     });
@@ -148,19 +140,21 @@ export function DashboardContent({ data }) {
         <Metric
           label="Worker execution"
           value={formatTokens(spend.worker_execution ?? worker.token_total)}
-          detail={`Worker-only normalized task actuals · ${formatAggregateCost(workerCost, pricingCoverageIncomplete)}`}
+          detail={<><span>Worker-only normalized task actuals · </span><PriceEvidence coverage={workerPricing} /></>}
         />
         <Metric
           className="dashboard-kpi-orchestration"
           label="Orchestration"
-          value="See breakdown"
-          detail={<><StatusPill tone="warning" label="partial attribution" /> <span>Current projection cannot prove complete Planning attribution · review the governed-spend breakdown, including Other tracked spend</span></>}
+          value={spend.orchestration == null ? "unavailable" : formatTokens(spend.orchestration)}
+          detail={<><span>Orchestration-only governed spend · </span><PriceEvidence coverage={orchestrationPricing} /></>}
         />
         <Metric
-          className="dashboard-kpi-needs-you"
+          className={`dashboard-kpi-needs-you${needsYouAvailable && needsYou.count > 0 ? " has-attention" : ""}`}
           label="Needs You"
-          value="Project-scoped"
-          detail="Authoritative Needs You decisions live within each project · Dashboard next-action summary follows"
+          value={needsYouAvailable ? formatTokens(needsYou.count) : "unavailable"}
+          detail={needsYouAvailable
+            ? `Across ${formatTokens(needsYou.project_count)} connected project${Number(needsYou.project_count) === 1 ? "" : "s"} · sourced from each project-scoped Needs You queue`
+            : "Project-scoped Needs You count unavailable"}
         />
       </section>
 
@@ -203,15 +197,15 @@ export function DashboardContent({ data }) {
                   : <strong>{row.label}</strong>}
               </DataCell>
               <DataCell className="mono dashboard-number">{formatTokens(row.tokens)}</DataCell>
-              <DataCell><PriceEvidence value={row.cost} coverageIncomplete={pricingCoverageIncomplete} /></DataCell>
+              <DataCell><PriceEvidence coverage={row.pricing} /></DataCell>
               <DataCell>{row.scope}</DataCell>
             </Row>
           ))}
           <Row>
             <DataCell><strong>Priced spend</strong></DataCell>
             <DataCell className="mono dashboard-number">{formatTokens(pricedTokens)} priced<br />{formatTokens(unpricedTokens)} unpriced</DataCell>
-            <DataCell><PriceEvidence value={totalCost} emptyLabel="no priced spend recorded" /></DataCell>
-            <DataCell>{coveragePct}% of tokens priced</DataCell>
+            <DataCell><PriceEvidence coverage={totalPricing} emptyLabel="no priced spend recorded" /></DataCell>
+            <DataCell>{totalPricing ? `${totalPricing.coverage_percent}% of tokens priced` : "Category pricing coverage unavailable"}</DataCell>
           </Row>
         </DataTable>
         <PanelBody className="dashboard-details">
@@ -231,7 +225,7 @@ export function DashboardContent({ data }) {
                 {components.cost != null && (
                   <>
                     <div>Reported cost</div>
-                    <div><PriceEvidence value={components.cost} coverageIncomplete={pricingCoverageIncomplete} /></div>
+                    <div><PriceEvidence coverage={workerPricing} /></div>
                   </>
                 )}
               </div>
@@ -268,24 +262,42 @@ export function DashboardContent({ data }) {
         )}
       </Panel>
 
-      {accuracy.completed_count != null && (
-        <Panel>
-          <PanelHeader title="Estimation accuracy" />
-          <PanelBody>
-            {accuracy.completed_count >= 3 ? (
-              <div className="dashboard-accuracy-grid" aria-label="Estimation accuracy figures">
-                <AccuracyStat label="Completed tasks tracked" value={formatTokens(accuracy.completed_count)} detail="With both estimate and actual tokens" />
-                <AccuracyStat label="Median error ratio" value={`${Number(accuracy.median_error_ratio).toFixed(2)}×`} detail={accuracyDetail(accuracy.median_error_ratio)} />
-                <AccuracyStat label="Within 2× estimate" value={`${Math.round(accuracy.within_2x_pct)}%`} detail="Tasks where 0.5× ≤ actual ≤ 2.0×" />
+      <Panel>
+        <PanelHeader title="Estimation accuracy" />
+        <PanelBody>
+          {accuracy.completed_count == null ? (
+            <EmptyState>No completed Tasks with estimate and actual evidence.</EmptyState>
+          ) : accuracy.completed_count >= 3 ? (
+            <div className="dashboard-accuracy-grid" aria-label="Estimation accuracy figures">
+              <AccuracyStat label="Completed tasks tracked" value={formatTokens(accuracy.completed_count)} detail="With both estimate and actual tokens" />
+              <AccuracyStat label="Median error ratio" value={`${Number(accuracy.median_error_ratio).toFixed(2)}×`} detail={accuracyDetail(accuracy.median_error_ratio)} />
+              <AccuracyStat label="Within 2× estimate" value={`${Math.round(accuracy.within_2x_pct)}%`} detail="Tasks where 0.5× ≤ actual ≤ 2.0×" />
+            </div>
+          ) : (
+            <EmptyState>
+              Not enough completed tasks for accuracy tracking ({accuracy.completed_count || 0} of 3 needed).
+            </EmptyState>
+          )}
+          <Disclosure
+            label="Estimation coefficient provenance"
+            count={coefficients?.available ? coefficients.factors?.length || 0 : 0}
+            countLabel={coefficients?.available ? `${coefficients.factors?.length || 0} default coefficient factors` : "Coefficient provenance unavailable"}
+          >
+            {coefficients?.available && coefficients.factors?.length > 0 ? (
+              <div className="dashboard-kv">
+                {coefficients.factors.map((factor) => (
+                  <React.Fragment key={factor.key}>
+                    <div>{factor.label}</div>
+                    <div><span className="mono">{formatTokens(factor.value)}</span> <span className="dashboard-provenance-qualifier">▲ {factor.provenance}</span></div>
+                  </React.Fragment>
+                ))}
               </div>
             ) : (
-              <EmptyState>
-                Not enough completed tasks for accuracy tracking ({accuracy.completed_count || 0} of 3 needed).
-              </EmptyState>
+              <p className="dashboard-provenance-qualifier">▲ Coefficient provenance unavailable</p>
             )}
-          </PanelBody>
-        </Panel>
-      )}
+          </Disclosure>
+        </PanelBody>
+      </Panel>
 
       <Panel>
         <PanelHeader title="Recent alarms" badge={<OwnedLink className="muted mono" to="/alarms">view all →</OwnedLink>} />
@@ -320,11 +332,12 @@ export function DashboardContent({ data }) {
             </EmptyState>
           </PanelBody>
         ) : (
-          <DataTable label="Connected projects" columns="minmax(14rem, 1fr) 12rem 7rem minmax(16rem, auto)">
+          <DataTable label="Connected projects" columns="minmax(14rem, 1fr) 12rem 7rem 8rem minmax(16rem, auto)">
             <Row header>
               <ColumnHead>Project</ColumnHead>
               <ColumnHead>Capability</ColumnHead>
               <ColumnHead>Tasks</ColumnHead>
+              <ColumnHead>Needs You</ColumnHead>
               <ColumnHead>Navigation</ColumnHead>
             </Row>
             {projects.map((project) => (
@@ -332,6 +345,7 @@ export function DashboardContent({ data }) {
                 <DataCell><strong>{project.name}</strong></DataCell>
                 <DataCell><StatusPill tone={capabilityStatusTone(project.capability?.state)} label={project.capability?.state || "unknown"} /></DataCell>
                 <DataCell className="mono dashboard-number">{formatTokens(project.task_count)}</DataCell>
+                <DataCell className="mono dashboard-number"><AppLink to={`/projects/${project.id}/needs-you`}>{project.needs_you_count == null ? "unavailable" : formatTokens(project.needs_you_count)}</AppLink></DataCell>
                 <DataCell>
                   <div className="dashboard-project-actions">
                     <AppLink className="btn small" to={`/projects/${project.id}`}>Open Pipeline</AppLink>
@@ -379,32 +393,32 @@ function AccuracyStat({ label, value, detail }) {
   );
 }
 
-function PriceEvidence({ value, emptyLabel = "unpriced", coverageIncomplete = false }) {
-  if (value == null) {
+function PriceEvidence({ coverage, emptyLabel = "no usage" }) {
+  if (!coverage) {
+    return <span className="dashboard-provenance-qualifier">▲ pricing coverage unavailable</span>;
+  }
+  if (coverage.state === "no_usage") {
     return <span className="dashboard-provenance-qualifier">▲ {emptyLabel}</span>;
   }
-  return (
-    <>
-      <span className="mono">${Number(value).toFixed(4)}</span>
-      {coverageIncomplete && <span className="dashboard-provenance-qualifier"> ▲ global pricing coverage incomplete</span>}
-    </>
-  );
+  if (coverage.state === "unpriced") {
+    return <span className="dashboard-provenance-qualifier">▲ unpriced · {formatTokens(coverage.unpriced_tokens)} unpriced tokens</span>;
+  }
+  if (coverage.cost == null) {
+    return <span className="dashboard-provenance-qualifier">▲ price evidence unavailable</span>;
+  }
+  if (coverage.state === "partially_priced") {
+    return (
+      <>
+        <span className="mono">${Number(coverage.cost).toFixed(4)} priced</span>
+        <span className="dashboard-provenance-qualifier"> ▲ partially priced · {formatTokens(coverage.unpriced_tokens)} unpriced tokens</span>
+      </>
+    );
+  }
+  return <><span className="mono">${Number(coverage.cost).toFixed(4)}</span> <span>· fully priced</span></>;
 }
 
 function formatTokens(value) {
   return Number(value || 0).toLocaleString();
-}
-
-function formatAggregateCost(value, coverageIncomplete) {
-  if (value == null) return "unpriced";
-  const formatted = `$${Number(value).toFixed(4)}`;
-  return coverageIncomplete ? `${formatted} priced · global pricing coverage incomplete` : formatted;
-}
-
-function sumCostsWhenAllPresent(...values) {
-  return values.every((value) => value != null)
-    ? values.reduce((total, value) => total + Number(value), 0)
-    : null;
 }
 
 function accuracyDetail(ratio) {

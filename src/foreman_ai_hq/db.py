@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -13,8 +14,23 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
-from foreman_ai_hq.native_usage import token_usage_components
+from foreman_ai_hq.native_usage import normalized_cost, token_usage_components
 from foreman_ai_hq.worker_model_allowlist import SEEDED_WORKER_ADAPTER_MODELS
+
+TOKEN_USAGE_CATEGORIES = (
+    "control_plane",
+    "task_breakdown",
+    "worker_execution",
+    "adapter_verification",
+    "reporting_summary",
+    "other",
+)
+ORCHESTRATION_SPEND_CATEGORIES = (
+    "control_plane",
+    "task_breakdown",
+    "reporting_summary",
+    "adapter_verification",
+)
 
 SCHEMA = """
 create table if not exists sessions (
@@ -583,6 +599,7 @@ def record_token_turn(
     raw_usage: dict[str, Any],
 ) -> None:
     raw_usage = _classified_raw_usage(usage_kind, raw_usage)
+    cost = _normalized_token_cost(cost, raw_usage)
     total_tokens = int(raw_usage.get("total_tokens", prompt_tokens + completion_tokens))
     with connect(path) as conn:
         conn.execute(
@@ -2245,6 +2262,48 @@ def _classified_raw_usage(usage_kind: str, raw_usage: dict[str, Any]) -> dict[st
     return usage
 
 
+def _normalized_token_cost(
+    cost: float | None, raw_usage: dict[str, Any]
+) -> float | None:
+    # Only finite nonnegative evidence is priced; explicit zero remains valid.
+    if (
+        raw_usage.get("cost_unavailable") is True
+        or isinstance(cost, bool)
+        or cost is None
+    ):
+        return None
+    return normalized_cost(cost)
+
+
+def _turn_pricing_tokens(
+    raw_usage: dict[str, Any], tokens: int, cost: float | None
+) -> tuple[int, int]:
+    # Legacy or invalid segments require a canonical token match to override row pricing.
+    fallback = (tokens, 0) if cost is not None else (0, tokens)
+    segments = raw_usage.get("pricing_segments")
+    if not isinstance(segments, list) or not segments:
+        return fallback
+    priced_tokens = 0
+    unpriced_tokens = 0
+    for segment in segments:
+        if not isinstance(segment, dict):
+            return fallback
+        segment_tokens = segment.get("total_tokens")
+        if (
+            isinstance(segment_tokens, bool)
+            or not isinstance(segment_tokens, int)
+            or segment_tokens < 0
+        ):
+            return fallback
+        if _normalized_token_cost(segment.get("cost"), segment) is None:
+            unpriced_tokens += segment_tokens
+        else:
+            priced_tokens += segment_tokens
+    if priced_tokens + unpriced_tokens != tokens:
+        return fallback
+    return priced_tokens, unpriced_tokens
+
+
 def _spend_category_for_usage_kind(usage_kind: str) -> str:
     if usage_kind == "task_breakdown":
         return "task_breakdown"
@@ -2312,16 +2371,11 @@ def _token_turns_with_session_ids(path: Path | str, *, since: str | None = None)
 
 
 def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
-    by_category = {
-        "control_plane": 0,
-        "task_breakdown": 0,
-        "worker_execution": 0,
-        "adapter_verification": 0,
-        "reporting_summary": 0,
-        "other": 0,
-    }
+    by_category = dict.fromkeys(TOKEN_USAGE_CATEGORIES, 0)
     cost_by_category = {cat: 0.0 for cat in by_category}
     cost_seen = {cat: False for cat in by_category}
+    priced_by_category = dict.fromkeys(by_category, 0)
+    unpriced_by_category = dict.fromkeys(by_category, 0)
     by_source: dict[str, int] = {}
     total = 0
     total_cost = 0.0
@@ -2334,39 +2388,90 @@ def _summarize_token_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
         raw_usage = turn.get("raw_usage") or {}
         category = str(raw_usage.get("spend_category") or _spend_category_for_usage_kind(str(turn.get("usage_kind") or "")))
         source = str(raw_usage.get("usage_source") or _usage_source_for_usage_kind(str(turn.get("usage_kind") or ""), category))
-        # Agent Review used to be its own category; report it with other control-plane summaries.
+        # Legacy aliases stay readable while the fixed public category set remains compatible.
         if category == "agent_review":
             category = "reporting_summary"
             if source == "unspecified":
                 source = "control_plane"
+        elif category == "planning":
+            category = "control_plane"
         if category not in by_category:
             category = "other"
         by_category[category] += tokens
         by_source[source] = by_source.get(source, 0) + tokens
         total += tokens
+        turn_priced_tokens, turn_unpriced_tokens = _turn_pricing_tokens(
+            raw_usage, tokens, cost
+        )
+        priced_tokens += turn_priced_tokens
+        priced_by_category[category] += turn_priced_tokens
+        unpriced_tokens += turn_unpriced_tokens
+        unpriced_by_category[category] += turn_unpriced_tokens
         if cost is not None:
             cost_value = float(cost)
             cost_by_category[category] += cost_value
             total_cost += cost_value
-            priced_tokens += tokens
             cost_seen[category] = True
             any_cost = True
-        else:
-            unpriced_tokens += tokens
     for cat in by_category:
         if not cost_seen[cat]:
             cost_by_category[cat] = None if by_category[cat] > 0 else 0.0
     if not any_cost:
         total_cost = 0.0 if total == 0 else None
+    pricing_coverage_by_category = {
+        category: _pricing_coverage(priced_by_category[category], unpriced_by_category[category])
+        for category in by_category
+    }
     return {
         "total_tokens": total,
         "by_category": by_category,
         "by_source": by_source,
         "cost_by_category": cost_by_category,
+        "pricing_coverage_by_category": pricing_coverage_by_category,
         "total_cost": total_cost,
         "priced_tokens": priced_tokens,
         "unpriced_tokens": unpriced_tokens,
     }
+
+
+def _pricing_coverage(priced_tokens: int, unpriced_tokens: int) -> dict[str, int | str]:
+    total_tokens = priced_tokens + unpriced_tokens
+    if total_tokens == 0:
+        state = "no_usage"
+    elif priced_tokens == 0:
+        state = "unpriced"
+    elif unpriced_tokens == 0:
+        state = "fully_priced"
+    else:
+        state = "partially_priced"
+    return {
+        "state": state,
+        "priced_tokens": priced_tokens,
+        "unpriced_tokens": unpriced_tokens,
+        "coverage_percent": round((priced_tokens / total_tokens) * 100) if total_tokens else 0,
+    }
+
+
+def aggregate_pricing_coverage(
+    token_breakdown: dict[str, Any], category_names: tuple[str, ...]
+) -> dict[str, Any]:
+    category_coverage = token_breakdown["pricing_coverage_by_category"]
+    priced_tokens = sum(category_coverage[name]["priced_tokens"] for name in category_names)
+    unpriced_tokens = sum(category_coverage[name]["unpriced_tokens"] for name in category_names)
+    coverage = _pricing_coverage(priced_tokens, unpriced_tokens)
+    if coverage["state"] == "no_usage":
+        cost: float | None = 0.0
+    elif coverage["state"] == "unpriced":
+        cost = None
+    else:
+        cost = sum(
+            float(value)
+            for name in category_names
+            if (value := token_breakdown["cost_by_category"][name]) is not None
+        )
+        if not math.isfinite(cost) or cost < 0:
+            cost = None
+    return {**coverage, "cost": cost}
 
 
 def _worker_execution_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2618,14 +2723,15 @@ def _scalar_detail_parts(detail: dict[str, Any]) -> list[str]:
 
 
 def _token_turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    raw_usage = _from_json(row["raw_usage_json"])
     return {
         "usage_kind": row["usage_kind"],
         "model": row["model"],
         "prompt_tokens": row["prompt_tokens"],
         "completion_tokens": row["completion_tokens"],
         "total_tokens": row["total_tokens"],
-        "cost": row["cost"],
-        "raw_usage": _from_json(row["raw_usage_json"]),
+        "cost": _normalized_token_cost(row["cost"], raw_usage),
+        "raw_usage": raw_usage,
         "created_at": row["created_at"],
     }
 

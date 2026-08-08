@@ -78,6 +78,16 @@ def test_token_usage_components_normalizes_provider_aliases():
     assert partial["normalized_actual"] == 10
 
 
+def test_token_usage_components_rejects_invalid_costs_and_preserves_zero():
+    for invalid in (-0.01, float("nan"), float("inf"), float("-inf")):
+        assert token_usage_components({"cost_usd": invalid})["cost"] is None
+        assert token_usage_components({}, cost=invalid)["cost"] is None
+
+    assert token_usage_components({"cost_usd": 0.0})["cost"] == 0.0
+    assert token_usage_components({"cost_usd": 0.25}, cost=0.0)["cost"] == 0.0
+    assert token_usage_components({"cost_usd": 0.25})["cost"] == 0.25
+
+
 def test_worker_execution_token_summary_splits_completed_failed_and_components(tmp_path):
     db_path = tmp_path / "harness.db"
     db.init_db(db_path)

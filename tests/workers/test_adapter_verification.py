@@ -445,6 +445,156 @@ def test_parse_claude_code_native_usage_requires_cost_evidence():
     assert evidence is None
 
 
+def test_native_usage_preserves_opencode_and_claude_tokens_with_invalid_costs(
+    tmp_path,
+):
+    cases = [
+        (
+            "opencode/gpt-5.1",
+            {
+                "type": "usage",
+                "model": "opencode/gpt-5.1",
+                "run_id": "run_invalid_cost",
+                "usage": {
+                    "input_tokens": 7,
+                    "output_tokens": 2,
+                    "total_tokens": 9,
+                    "cost_usd": -0.01,
+                },
+            },
+            9,
+        ),
+        (
+            "sonnet",
+            {
+                "type": "result",
+                "subtype": "success",
+                "session_id": "session_invalid_cost",
+                "usage": {"input_tokens": 3, "output_tokens": 4},
+                "modelUsage": {
+                    "claude-sonnet-4-6": {"costUSD": float("nan")}
+                },
+            },
+            7,
+        ),
+    ]
+    db_path = tmp_path / "harness.db"
+    db.init_db(db_path)
+
+    for index, (model, payload, expected_tokens) in enumerate(cases):
+        evidence = parse_native_usage_evidence(json.dumps(payload), model=model)
+
+        assert evidence is not None
+        assert evidence.total_tokens == expected_tokens
+        assert evidence.cost == 0.0
+        assert evidence.raw_usage["cost_unavailable"] is True
+        json.dumps(evidence.raw_usage, allow_nan=False)
+        if model == "opencode/gpt-5.1":
+            assert evidence.raw_usage["usage"]["cost_usd"] is None
+            assert evidence.raw_usage["source"]["usage"]["cost_usd"] is None
+        else:
+            assert evidence.raw_usage["source"]["modelUsage"]["claude-sonnet-4-6"]["costUSD"] is None
+
+        session = db.create_session(
+            db_path,
+            task_description=f"invalid native cost {index}",
+            model=model,
+            session_key_hash=f"invalid-native-cost-{index}",
+            guardrail_overrides={},
+            status="completed",
+        )
+        db.record_token_turn(
+            db_path,
+            session_id=session["id"],
+            usage_kind="adapter_verification",
+            model=model,
+            prompt_tokens=evidence.prompt_tokens,
+            completion_tokens=evidence.completion_tokens,
+            cost=evidence.cost,
+            raw_usage=evidence.raw_usage,
+        )
+        turn = db.build_session_artifact(db_path, session["id"])["token_log"][0]
+        assert turn["total_tokens"] == expected_tokens
+        assert turn["cost"] is None
+        assert turn["raw_usage"]["cost_unavailable"] is True
+
+
+def test_invalid_native_cost_serializes_through_verify_and_artifact_routes(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    stdout = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "session_id": "session_invalid_cost_route",
+            "result": SENTINEL_RESPONSE,
+            "usage": {"input_tokens": 3, "output_tokens": 4},
+            "modelUsage": {"claude-sonnet-4-6": {"costUSD": "$Infinity"}},
+        }
+    )
+
+    with _client(tmp_path) as client:
+        db.update_worker_adapter(
+            tmp_path / "harness.db",
+            "claude_code",
+            workdir=str(tmp_path),
+            supported_models=["sonnet"],
+        )
+        client.app.state.worker_adapter_verification_runner = FakeRunner(stdout=stdout)
+        response = client.post(
+            "/settings/workers/claude_code/verify",
+            headers=_auth_headers(),
+            json={"model": "sonnet", "tracking_mode": "native_usage"},
+        )
+        artifact = client.get(
+            f"/session/{response.json()['session_id']}/artifact",
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    response_usage = response.json()["evidence"]["native_usage"]
+    assert response_usage["cost_unavailable"] is True
+    assert response_usage["source"]["modelUsage"]["claude-sonnet-4-6"]["costUSD"] is None
+    assert artifact.status_code == 200
+    turn = artifact.json()["token_log"][0]
+    assert turn["total_tokens"] == 7
+    assert turn["cost"] is None
+    assert turn["raw_usage"]["cost_unavailable"] is True
+    assert turn["raw_usage"]["source"]["modelUsage"]["claude-sonnet-4-6"]["costUSD"] is None
+
+
+def test_native_usage_sanitizes_formatted_cost_values():
+    cases = [
+        ("$-0.01", None, 0.0, True),
+        ("$NaN", None, 0.0, True),
+        ("-$1,000", None, 0.0, True),
+        ("$0.00", "$0.00", 0.0, False),
+        ("$1,234.50", "$1,234.50", 1234.5, False),
+        ("provider estimate unavailable", "provider estimate unavailable", 0.0, True),
+    ]
+
+    for raw_cost, expected_raw, expected_cost, unavailable in cases:
+        payload = {
+            "type": "usage",
+            "model": "opencode/gpt-5.1",
+            "run_id": "run_formatted_cost",
+            "usage": {
+                "input_tokens": 7,
+                "output_tokens": 2,
+                "total_tokens": 9,
+                "cost_usd": raw_cost,
+            },
+        }
+
+        evidence = parse_native_usage_evidence(json.dumps(payload), model="opencode/gpt-5.1")
+
+        assert evidence is not None
+        assert evidence.cost == expected_cost
+        assert evidence.raw_usage["usage"]["cost_usd"] == expected_raw
+        assert evidence.raw_usage["source"]["usage"]["cost_usd"] == expected_raw
+        assert evidence.raw_usage.get("cost_unavailable", False) is unavailable
+        json.dumps(evidence.raw_usage, allow_nan=False)
+
+
 def test_parse_codex_turn_completed_usage_accepts_costless_run_bound_tokens():
     evidence = parse_native_usage_evidence(_codex_native_stdout(), model="5.4", returncode=0)
 
@@ -701,7 +851,7 @@ def test_verify_codex_native_usage_records_authoritative_costless_token_row(tmp_
     assert turn["prompt_tokens"] == 25
     assert turn["completion_tokens"] == 7
     assert turn["total_tokens"] == 35
-    assert turn["cost"] == 0
+    assert turn["cost"] is None
     assert turn["raw_usage"]["usage"]["cached_input_tokens"] == 10
     assert turn["raw_usage"]["usage_source"] == "native_usage"
     assert runner.calls[0].command == [
