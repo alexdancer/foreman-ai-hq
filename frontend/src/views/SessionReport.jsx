@@ -2,7 +2,7 @@ import React from "react";
 
 import { getJSON } from "../api.js";
 import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
-import { sessionStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
+import { EvidenceDisclosure, sessionStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
 import { AppLink } from "../nav.jsx";
 import { drainLiveEvents } from "../live-events.js";
 import { LiveEventFeed } from "../components/LiveEventFeed.jsx";
@@ -206,7 +206,7 @@ function PageList({ title, page, render }) {
   return <div><strong>{title}</strong><ul>{state.items.map((item, index) => <li key={index}>{render(item)}</li>)}</ul>{state.pagination.has_more && <button type="button" onClick={load}>Load more {title.toLowerCase()}</button>}</div>;
 }
 
-export function EvidenceSection({ title, page, renderItem, nested = false }) {
+export function EvidenceSection({ title, page, renderItem, nested = false, open = false }) {
   const [state, setState] = React.useState(page);
   const [error, setError] = React.useState(null);
   const load = async () => {
@@ -218,17 +218,19 @@ export function EvidenceSection({ title, page, renderItem, nested = false }) {
       setError("Could not load more evidence. Retry.");
     }
   };
-  const Tag = nested ? "div" : "section";
+  const count = state.pagination.total ?? state.items.length;
   return (
-    <Tag className={nested ? "nested-evidence" : "panel evidence-section"}>
-      {!nested && <div className="panel-header"><h3>{title}</h3><span>{state.pagination.total} rows</span></div>}
-      {nested && <h3>{title}</h3>}
-      <div className={nested ? "" : "panel-body"}>
-        {state.items.length ? state.items.map(renderItem) : <p className="muted">No {title.toLowerCase()} evidence.</p>}
-        {state.pagination.has_more && <button type="button" onClick={load}>Load more {title}</button>}
-        {error && <p className="danger-text" role="alert">{error}</p>}
-      </div>
-    </Tag>
+    <EvidenceDisclosure
+      className={nested ? "nested-evidence" : "evidence-section"}
+      label={title}
+      count={count}
+      countLabel={`${count} ${title.toLowerCase()} rows`}
+      open={open}
+    >
+      {state.items.length ? state.items.map(renderItem) : <p className="muted">No {title.toLowerCase()} evidence.</p>}
+      {state.pagination.has_more && <button type="button" onClick={load}>Load more {title}</button>}
+      {error && <p className="danger-text" role="alert">{error}</p>}
+    </EvidenceDisclosure>
   );
 }
 

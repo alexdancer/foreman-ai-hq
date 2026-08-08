@@ -39,6 +39,25 @@ const pipelineTask = {
   },
 };
 
+const drawerReport = {
+  summary: { adapter_id: "browser-adapter", tracking_mode: "native_usage" },
+  freshness: { active: false },
+  tokens: {
+    log: {
+      items: [{ usage_kind: "worker", model: "gpt-browser-999", prompt_tokens: 8, completion_tokens: 4, total_tokens: 12, cost: null, raw_usage: null }],
+      pagination: { total: 1, has_more: false, next_href: null },
+    },
+  },
+  zone_timeline: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+  worker_timeline: {
+    items: [{ id: 1, created_at: "2099-01-01T00:00:00Z", level: "info", layer: "worker", kind: "token", title: "Usage recorded", detail_summary: "total_tokens=12", detail: null }],
+    pagination: { total: 1, has_more: false, next_href: null },
+  },
+  repo_context_briefs: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+  alarms: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+  checkpoints: { items: [], pagination: { total: 0, has_more: false, next_href: null } },
+};
+
 const pipelineData = {
   project: { id: "browser-project-999", name: "Browser project 999" },
   workspace: {
@@ -71,6 +90,24 @@ const pipelineData = {
   automation: { queue: { status: "idle", auto_agent_review: false }, live_refresh_enabled: false },
 };
 
+const floorTask = {
+  ...pipelineTask,
+  id: "floor-running-999",
+  status: "Running",
+  session_href: "/sessions/floor-running-999",
+  timeline: [{ id: 1, created_at: "2099-01-01T00:00:00Z", kind: "token", title: "Provisional usage", detail_summary: { text: "total_tokens=12", truncated: false } }],
+  controls: { ...pipelineTask.controls, can_launch: false, can_refresh: true },
+};
+const floorData = {
+  ...pipelineData,
+  tasks_by_status: {
+    Estimated: [],
+    Running: [floorTask],
+    Review: [{ ...floorTask, id: "floor-review-999", status: "Review", controls: { ...floorTask.controls, can_refresh: false } }],
+    Done: [{ ...floorTask, id: "floor-done-999", status: "Done", actual_tokens: 89, controls: { ...floorTask.controls, can_refresh: false, can_archive: true } }],
+  },
+};
+
 function PipelineContract() {
   const [selectedTask, setSelectedTask] = React.useState(null);
   return <>
@@ -88,12 +125,25 @@ function PipelineContract() {
     {selectedTask && <EvidenceDrawerState
       task={selectedTask}
       projectId="browser-project-999"
-      data={null}
+      data={drawerReport}
       error={null}
       loading={false}
       onClose={() => setSelectedTask(null)}
     />}
   </>;
+}
+
+function FloorContract() {
+  return <section id="floor-interaction-contract">
+    <BoardState
+      projectId="browser-project-999"
+      surface="floor"
+      data={floorData}
+      error={null}
+      loading={false}
+      action={() => {}}
+    />
+  </section>;
 }
 
 function ContractSurface() {
@@ -168,6 +218,7 @@ function ContractSurface() {
       <Panel><PanelHeader title="Sibling panel" /></Panel>
       <button id="pipeline-outside-target" type="button">Outside target</button>
       <PipelineContract />
+      <FloorContract />
     </main>
   );
 }
@@ -268,6 +319,31 @@ async function inspect() {
     return drawer && document.activeElement === drawer;
   }, "Pipeline evidence drawer does not receive focus");
   const evidenceDrawer = document.querySelector(".evidence-drawer");
+  requireContract(evidenceDrawer.querySelector(".token-comparison"), "Evidence Drawer does not lead with shared estimate-versus-actual evidence");
+  requireContract(
+    evidenceDrawer.querySelector(".token-comparison-provenance")?.textContent.includes("browser-adapter · native_usage"),
+    "Evidence Drawer omits adjacent spend-tracking provenance",
+  );
+  const evidenceDisclosures = [...evidenceDrawer.querySelectorAll(".evidence-disclosure")];
+  const evidenceLabels = evidenceDisclosures.map((disclosure) => disclosure.querySelector(".disclosure-label")?.textContent);
+  requireContract(
+    JSON.stringify(evidenceLabels) === JSON.stringify([
+      "Live Worker Run feed",
+      "Worker Run timeline",
+      "Token log",
+      "Budget-zone timeline",
+      "Repo Context Brief",
+      "Alarms",
+      "Checkpoint results",
+    ]),
+    `Evidence Drawer hierarchy is incorrect: ${evidenceLabels.join(", ")}`,
+  );
+  requireContract(evidenceDisclosures[0].open, "Evidence Drawer live feed is initially collapsed");
+  requireContract(evidenceDisclosures[1].open, "Evidence Drawer Worker Run timeline is initially collapsed");
+  requireContract(
+    evidenceDisclosures.slice(2).every((disclosure) => !disclosure.open),
+    "Evidence Drawer raw evidence disclosures are not initially collapsed",
+  );
   const evidenceControls = [...evidenceDrawer.querySelectorAll(
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
   )];
@@ -288,6 +364,35 @@ async function inspect() {
   );
   window.scrollTo(0, 0);
   await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const floor = document.querySelector("#floor-interaction-contract");
+  for (const title of ["Active Worker Runs", "Review queue", "Recently finished"]) {
+    requireContract([...floor.querySelectorAll("h3")].some((heading) => heading.textContent === title), `Execution Floor omits ${title}`);
+  }
+  const activeGrid = floor.querySelector(".floor-active-grid");
+  const activePanel = activeGrid.querySelector(".floor-active-run");
+  requireContract(activePanel?.querySelector(".live-run-dock"), "live-run dock is not folded into the active Worker Run panel");
+  requireContract(!floor.querySelector(".floor-main > .live-run-dock"), "live-run dock remains detached from the active Worker Run panel");
+  const sessionReportLinks = [...activePanel.querySelectorAll('a[href="/sessions/floor-running-999"]')];
+  requireContract(
+    sessionReportLinks.length === 1 && sessionReportLinks[0].textContent.trim() === "Session Report",
+    "embedded live-run dock does not preserve its direct Session Report permalink",
+  );
+  requireContract(
+    activePanel.querySelectorAll(".task-heading .task-id").length === 1
+      && !activePanel.querySelector(".live-run-dock-task .task-id, .live-run-dock-title"),
+    "embedded live-run dock duplicates the active task identity",
+  );
+  requireContract(
+    [...activePanel.querySelectorAll("button")].some((button) => button.textContent.trim() === "View evidence"),
+    "active Worker Run loses its Evidence Drawer entry point",
+  );
+  requireContract(activePanel.querySelector(".event-row"), "active Worker Run does not preserve shared live-event treatment");
+  requireContract(getComputedStyle(activeGrid).gridTemplateColumns.split(" ").length === 1, "active Worker Runs are not full-width panels");
+  requireContract(
+    Math.abs(activePanel.getBoundingClientRect().width - activeGrid.getBoundingClientRect().width) < 1,
+    "active Worker Run panel does not fill its Execution Floor section",
+  );
 
   const select = document.querySelector("#contract-select");
   const track = document.querySelector("#select-track");

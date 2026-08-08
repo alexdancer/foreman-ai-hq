@@ -28,16 +28,16 @@ export function selectedLiveRun(runs, selectedTaskId) {
   return runs.find((run) => run.taskId === selectedTaskId) || runs[0];
 }
 
-export function LiveRunDock({ runs }) {
+export function LiveRunDock({ runs, embedded = false }) {
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const active = selectedLiveRun(runs, selectedTaskId);
 
   if (!active) return null;
 
   return (
-    <section className="panel live-run-dock" aria-label="Live Worker Runs">
-      <div className="panel-header live-run-dock-header">
-        <h3>Live runs{runs.length > 1 ? ` (${runs.length})` : ""}</h3>
+    <section className={`live-run-dock${embedded ? " is-embedded" : ""}`} aria-label="Live Worker Runs">
+      <div className="live-run-dock-header">
+        <span className="section-label">Live Worker Run</span>
         {runs.length > 1 && (
           <div className="live-run-tabs" role="tablist">
             {runs.map((run) => (
@@ -58,12 +58,14 @@ export function LiveRunDock({ runs }) {
         )}
         <StatusPill className="live-run-badge" tone="running" label="live" />
       </div>
-      <div className="panel-body live-run-dock-body">
-        <p className="live-run-dock-task">
-          <span className="task-id">{active.taskId}</span>
-          <span className="live-run-dock-title">{active.title}</span>
-          {active.sessionHref && <a href={active.sessionHref}>Session report</a>}
-        </p>
+      <div className="live-run-dock-body">
+        {(!embedded || active.sessionHref) && <p className="live-run-dock-task">
+          {!embedded && <>
+            <span className="task-id">{active.taskId}</span>
+            <span className="live-run-dock-title">{active.title}</span>
+          </>}
+          {active.sessionHref && <a href={active.sessionHref}>Session Report</a>}
+        </p>}
         <div aria-live="polite">
           <LiveEventFeed events={active.events} active />
         </div>

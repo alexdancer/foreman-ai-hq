@@ -221,9 +221,16 @@ def test_recorded_demo_browser(request: pytest.FixtureRequest) -> None:
                 drawer.get_by_text("Token log").wait_for(timeout=15000)
                 drawer.locator("a:has-text('Full Session Report')").click()
                 page.wait_for_url("**/sessions/**", timeout=15000)
-                page.get_by_text("Native usage evidence recorded").wait_for(timeout=15000)
-                page.get_by_text("native_usage").first.wait_for(timeout=15000)
-                page.get_by_text(DEMO_MODEL).first.wait_for(timeout=15000)
+                worker_timeline = page.locator("details.evidence-section").filter(
+                    has=page.get_by_text("Worker Run timeline", exact=True)
+                )
+                worker_timeline.locator(":scope > summary").click()
+                worker_timeline.get_by_text("Native usage evidence recorded").wait_for(
+                    timeout=15000
+                )
+                governance = page.locator("section.report-summary")
+                governance.get_by_text("native_usage").wait_for(timeout=15000)
+                governance.get_by_text(DEMO_MODEL).first.wait_for(timeout=15000)
 
                 # Automated synthetic disposition: the unattended scenario
                 # finishes itself through the normal Mark Done control. This is

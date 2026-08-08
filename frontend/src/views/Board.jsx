@@ -9,7 +9,7 @@ import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveE
 import { BlockedCondition } from "../components/BlockedCondition.jsx";
 import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
 import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison, DataTable, Row, ColumnHead, DataCell } from "../components/ui/index.js";
+import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison, EvidenceDisclosure, DataTable, Row, ColumnHead, DataCell } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -1109,8 +1109,7 @@ function FloorSurface({
         </div>
       </div>
       <div className="board-filter-toolbar"><input className="board-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter Floor tasks" /></div>
-      <LiveRunDock runs={liveRunsFromTasks(tasksByStatus.Running)} />
-      <section className="floor-section"><PanelHeader title="Active Worker Runs" count={running.length} /><div className="floor-active-grid">{running.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" />)}{running.length === 0 && <EmptyState>No Worker Runs are active.</EmptyState>}</div></section>
+      <section className="floor-section"><PanelHeader title="Active Worker Runs" count={running.length} /><div className="floor-active-grid">{running.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" liveRun />)}{running.length === 0 && <EmptyState>No Worker Runs are active.</EmptyState>}</div></section>
       <section className="floor-section"><PanelHeader title="Review queue" count={review.length} /><div className="floor-review-grid">{review.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} actionVariant="primary" />)}{review.length === 0 && <EmptyState>No completed runs await review.</EmptyState>}</div></section>
       <section className="floor-section"><PanelHeader title="Recently finished" count={done.length} /><div className="floor-finished-trail">{done.map((task) => <TaskCard key={task.id} task={task} projectId={projectId} adapters={data.adapters} action={action} openEvidence={openEvidence} recentlyFinished actionVariant="primary" />)}{done.length === 0 && <EmptyState>No unarchived finished runs.</EmptyState>}</div></section>
     </div>
@@ -1135,11 +1134,11 @@ function QueueStart({ projectId, queue, action }) {
   </form>;
 }
 
-function TaskCard({ task, projectId, action, openEvidence = () => {}, recentlyFinished = false, actionVariant = "secondary" }) {
+function TaskCard({ task, projectId, action, openEvidence = () => {}, recentlyFinished = false, actionVariant = "secondary", liveRun = false }) {
   const { controls } = task;
   const fullSummary = task.summary.text || task.id;
   const displayName = taskDisplayName(task);
-  return <article className="task" id={`task-${task.id}`}>
+  return <article className={`task${liveRun ? " floor-active-run" : ""}`} id={`task-${task.id}`}>
     {recentlyFinished && <TokenComparison className="finished-token-comparison" estimate={task.estimate_tokens} actual={task.actual_tokens} />}
     <header className="task-heading">
       <span className="task-id">{task.id}</span>
@@ -1151,6 +1150,7 @@ function TaskCard({ task, projectId, action, openEvidence = () => {}, recentlyFi
     <BlockedCondition reason={task.blocked_condition?.reason} announce />
     {task.launch_failure && <LaunchFailureNotice failure={task.launch_failure} />}
     {task.status === "Running" && <LatestEventLine timeline={task.timeline} />}
+    {liveRun && <LiveRunDock runs={liveRunsFromTasks([task])} embedded />}
     <div className="task-meta">{!recentlyFinished && task.estimate_tokens != null && <span>Estimate {task.estimate_tokens.toLocaleString()}</span>}{!recentlyFinished && task.actual_tokens != null && <span>Actual {task.actual_tokens.toLocaleString()}</span>}{task.launch_model && <span>Run {task.launch_model}</span>}{task.launch_model && task.recommended_model && task.launch_model !== task.recommended_model && <span>Recommended {task.recommended_model}</span>}{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}{task.intake_decision && <span title={task.intake_decision_reason || ""}>Intake: {task.intake_decision}</span>}</div>
     {(controls.can_refresh || controls.can_archive || controls.can_dismiss || task.session_href) && <div className="task-actions">
       {controls.can_refresh && <Button size="small" type="button" onClick={() => action(`/tasks/${task.id}/refresh`, reviewForm(projectId))}>Refresh</Button>}
@@ -1245,6 +1245,11 @@ export function EvidenceDrawer({ task, projectId, action, onClose, getJSONImpl =
   />;
 }
 
+function drawerTrackingProvenance(summary, loading) {
+  if (!summary) return loading ? "Session Report provenance loading" : "Session Report provenance unavailable";
+  return [summary.adapter_id, summary.tracking_mode].filter(Boolean).join(" · ") || "Session Report provenance unavailable";
+}
+
 export function EvidenceDrawerState({ task, projectId, action = () => {}, onClose = () => {}, data, error, loading }) {
   const [reviewPrompt, setReviewPrompt] = useState(task.review_prompt?.text || "");
   const [blockedReason, setBlockedReason] = useState("");
@@ -1296,16 +1301,23 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
     <aside ref={drawerRef} tabIndex={-1} className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`Evidence for ${taskDisplayName(task)}`}>
       <header className="evidence-drawer-header"><div><span className="section-label">Task evidence</span><h2>{taskDisplayName(task)}</h2></div><Button size="small" variant="secondary" type="button" onClick={onClose}>Close</Button></header>
       <div className="evidence-drawer-body">
-        <div className="task-meta"><span>Estimate {task.estimate_tokens ?? "unavailable"}</span><span>Actual {task.actual_tokens ?? "unavailable"}</span>{task.task_branch && <span className="mono">{task.task_branch}</span>}{task.harness_commit?.sha && <span className="mono" title={task.harness_commit.message}>{task.harness_commit.sha.slice(0,7)}</span>}{task.pull_request?.url && <a href={task.pull_request.url} target="_blank" rel="noopener noreferrer">PR</a>}</div>
+        <section className="drawer-token-lead" aria-label="Estimate versus actual token evidence">
+          <span className="section-label">Estimate versus actual</span>
+          <TokenComparison
+            estimate={task.estimate_tokens}
+            actual={task.actual_tokens}
+            provenance={drawerTrackingProvenance(data?.summary, loading)}
+          />
+        </section>
         <BlockedCondition reason={task.blocked_condition?.reason} />
         {loading && <Loading>Loading session evidence…</Loading>}
         {error && <Notice variant="danger" role="alert">{error}</Notice>}
         {!loading && !error && !data && <EmptyState>No session evidence is available.</EmptyState>}
         {data && <>
+          {(data.worker_timeline?.items?.length > 0 || data.freshness?.active) && <EvidenceDisclosure label="Live Worker Run feed" count={data.worker_timeline?.items?.length || 0} countLabel={`${data.worker_timeline?.items?.length || 0} live Worker Run events`} className="evidence-section live-feed-panel" open><div aria-live="polite"><LiveEventFeed events={(data.worker_timeline?.items || []).map((item, index) => ({ ...item, id: item.id ?? index }))} active={Boolean(data.freshness?.active)} /></div></EvidenceDisclosure>}
+          <EvidenceSection key={`${task.id}:timeline`} title="Worker Run timeline" page={safeEvidencePage(data.worker_timeline)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.level || "event"} · ${item.layer || "worker"} · ${item.kind || "event"} · ${item.title || "Worker output"}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary || ""}`} detail={item.detail} />} open />
           <EvidenceSection key={`${task.id}:tokens`} title="Token log" page={safeEvidencePage(data.tokens?.log)} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
           <EvidenceSection key={`${task.id}:zones`} title="Budget-zone timeline" page={safeEvidencePage(data.zone_timeline)} renderItem={(item, index) => <EvidenceItem key={index} {...budgetZoneEvidenceProps(item)} />} />
-          {(data.worker_timeline?.items?.length > 0 || data.freshness?.active) && <Panel className="evidence-section live-feed-panel"><PanelHeader title="Live Worker Run feed" badge={<span>system evidence</span>} /><PanelBody aria-live="polite"><LiveEventFeed events={(data.worker_timeline?.items || []).map((item, index) => ({ ...item, id: item.id ?? index }))} active={Boolean(data.freshness?.active)} /></PanelBody></Panel>}
-          <EvidenceSection key={`${task.id}:timeline`} title="Worker Run timeline" page={safeEvidencePage(data.worker_timeline)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.level || "event"} · ${item.layer || "worker"} · ${item.kind || "event"} · ${item.title || "Worker output"}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary || ""}`} detail={item.detail} />} />
           <RepoContext key={`${task.id}:repo`} page={safeEvidencePage(data.repo_context_briefs)} />
           <EvidenceSection key={`${task.id}:alarms`} title="Alarms" page={safeEvidencePage(data.alarms)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} {...alarmEvidenceProps(item, { fallbackId: "alarm", fallbackBody: "No recommended action." })} />} />
           <EvidenceSection key={`${task.id}:checkpoints`} title="Checkpoint results" page={safeEvidencePage(data.checkpoints)} renderItem={(item, index) => <EvidenceItem key={index} {...checkpointEvidenceProps(item)} />} />
