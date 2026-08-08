@@ -1179,9 +1179,11 @@ test("Session Report refresh remounts paged evidence and labels review-session o
 
 test("dashboard renders loading, error, populated, and empty states", () => {
   const loading = renderDashboard({ data: null, error: null, loading: true });
+  assert.match(loading, /aria-label="Dashboard loading"/);
   assert.match(loading, /Loading dashboard…/);
 
   const failed = renderDashboard({ data: null, error: new Error("offline"), loading: false });
+  assert.match(failed, /role="alert"/);
   assert.match(failed, /Could not load dashboard/);
   assert.doesNotMatch(failed, /server-rendered dashboard/);
   assert.match(failed, /href="\/dashboard"/);
@@ -1194,6 +1196,7 @@ test("dashboard renders loading, error, populated, and empty states", () => {
   assert.match(populated, /href="\/projects\/demo-999"/);
   assert.match(populated, /href="\/projects\/demo-999\/floor"/);
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assert.match(populated, /role="table" aria-label="Active sessions"/);
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /status-pill-success[^>]*>.*status-pill-label">launch_ready<\/span>/s);
 
@@ -1222,11 +1225,69 @@ test("dashboard renders loading, error, populated, and empty states", () => {
     error: null,
     loading: false,
   });
+  assert.match(empty, /No Dashboard actions need attention/);
   assert.match(empty, /No active sessions/);
   assert.match(empty, /No open alarms/);
   assert.doesNotMatch(empty, /Estimation accuracy/);
   assert.match(empty, /No projects are connected yet/);
   assert.match(empty, /href="\/settings\/project"/);
+});
+
+test("dashboard leads with the four Ledger KPIs and preserves provenance qualifiers", () => {
+  const populated = renderDashboard({
+    data: dashboardData({
+      next_actions: [
+        {
+          label: "Review calibrated estimate",
+          detail: "Context coefficient seed · output coefficient fitted(3) · Worker actual unpriced",
+          href: "/board",
+          tone: "purple",
+        },
+        {
+          label: "Open task board",
+          detail: "Estimate, launch, refresh, review, or block tasks",
+          href: "/board",
+          tone: "green",
+        },
+      ],
+      spend: {
+        worker_execution: 150,
+        agent_review_reporting: 30,
+        planning_estimation: 20,
+        setup_verification: 10,
+        other: 5,
+        cost_by_category: {
+          control_plane: null,
+          task_breakdown: null,
+          worker_execution: null,
+          adapter_verification: 0,
+          reporting_summary: null,
+          other: null,
+        },
+        total_cost: null,
+        priced_tokens: 0,
+        unpriced_tokens: 215,
+      },
+    }),
+    error: null,
+    loading: false,
+  });
+
+  assert.match(populated, /<section class="dashboard-overview" aria-label="Governance overview">/);
+  const labels = ["Daily governed budget", "Worker execution", "Orchestration", "Needs You"];
+  for (const label of labels) assert.match(populated, new RegExp(`<div class="label">${label}<\\/div>`));
+  for (let index = 1; index < labels.length; index += 1) {
+    assert.ok(populated.indexOf(`>${labels[index - 1]}<`) < populated.indexOf(`>${labels[index]}<`));
+  }
+  assert.ok(populated.indexOf(">Needs You<") < populated.indexOf(">Operator next actions<"));
+  assert.match(populated, /<h3>Operator next actions<\/h3><span class="column-count">2<\/span>/);
+  assert.match(populated, /<a class="dashboard-action-link" href="\/board">Review calibrated estimate<\/a>/);
+  assert.match(populated, /<div class="label">Worker execution<\/div><div class="value mono">150<\/div>/);
+  assert.match(populated, /<div class="label">Orchestration<\/div><div class="value mono">60<\/div><div class="sub">[^<]* · unpriced<\/div>/);
+  assert.match(populated, /<div class="label">Needs You<\/div><div class="value mono">1<\/div>/);
+  for (const qualifier of ["seed", "fitted(3)", "unpriced"]) assert.match(populated, new RegExp(qualifier.replace(/[()]/g, "\\$&")));
+  assert.doesNotMatch(populated, /<section class="dashboard-overview"[^]*<section class="dashboard-overview"/);
+  assertNoNestedPanels(populated);
 });
 
 test("dashboard spend breakdown shows priced USD per category, unpriced labels, and coverage", () => {
