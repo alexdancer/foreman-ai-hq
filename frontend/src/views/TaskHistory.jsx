@@ -1,7 +1,13 @@
 import React, { useState } from "react";
 
 import { BlockedCondition, TaskCondition } from "../components/BlockedCondition.jsx";
-import { StatusPill, statusTone } from "../components/ui/index.js";
+import { Button } from "../components/ui/Button.jsx";
+import { DataCell, DataTable, ColumnHead, Row } from "../components/ui/DataTable.jsx";
+import { EmptyState } from "../components/ui/EmptyState.jsx";
+import { Loading } from "../components/ui/Loading.jsx";
+import { Notice } from "../components/ui/Notice.jsx";
+import { StatusPill } from "../components/ui/StatusPill.jsx";
+import { statusTone } from "../components/ui/statusTone.js";
 import { AppLink } from "../nav.jsx";
 import { useResource } from "../useResource.js";
 
@@ -81,13 +87,9 @@ export function TaskHistoryState({
   onSelectFilter,
   onUnarchive,
 }) {
-  if (loading && !data) return <p className="spinner">Loading task history…</p>;
-  if (error) return (
-    <>
-      <div className="notice danger">{safeError(error)}</div>
-    </>
-  );
-  if (!data) return <div className="empty-state">No task history state available.</div>;
+  if (loading && !data) return <Loading aria-label="Task history loading">Loading task history…</Loading>;
+  if (error) return <Notice variant="danger" role="alert">{safeError(error)}</Notice>;
+  if (!data) return <EmptyState>No task history state available.</EmptyState>;
 
   const filters = data.filters || [];
   const tasks = data.tasks || [];
@@ -96,10 +98,14 @@ export function TaskHistoryState({
     <>
       <h1 className="page-title">Task history</h1>
       <p className="page-sub">Project archive and evidence</p>
+      <Notice className="task-history-read-only" role="note" aria-label="Task history is read-only">
+        <StatusPill tone="info" label="Read-only" />
+        <span>Task details and evidence are preserved here. Unarchive returns an archived task to the Pipeline; it does not edit the historical record.</span>
+      </Notice>
       {notice && (
-        <div className={`notice ${notice.type}`} role="status" aria-live="polite">
+        <Notice variant={notice.type} role="status" aria-live="polite">
           {notice.message}
-        </div>
+        </Notice>
       )}
       <section className="status-toolbar" aria-label="Archive filters">
         <div className="status-group">
@@ -121,38 +127,36 @@ export function TaskHistoryState({
           </AppLink>
         </div>
       </section>
-      <section className="panel">
+      <section className="panel" aria-label="Task history ledger">
         <div className="panel-header">
           <h3>Tasks</h3>
           <span className="mono muted">filter={filter}</span>
         </div>
-        <div className="panel-body tight">
-          <div className="table-wrap">
-            <table className="evidence-table">
-              <thead>
-                <tr>
-                  <th>Task</th>
-                  <th>Status</th>
-                  <th>Tokens</th>
-                  <th>Evidence</th>
-                  <th>Archive</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.length === 0 && (
-                  <tr>
-                    <td colSpan="6">
-                      <div className="empty-state">No tasks match this history filter.</div>
-                    </td>
-                  </tr>
-                )}
-                {tasks.map((task) => (
-                  <TaskRow key={task.id} task={task} onUnarchive={onUnarchive} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="panel-body">
+          <DataTable
+            label="Task history"
+            columns="minmax(16rem, 1.35fr) minmax(10rem, 0.8fr) minmax(13rem, 1fr) minmax(14rem, 1fr) minmax(9rem, 0.65fr) minmax(8rem, auto)"
+            className="task-history-table"
+          >
+            <Row header>
+              <ColumnHead>Task</ColumnHead>
+              <ColumnHead>Status</ColumnHead>
+              <ColumnHead>Tokens</ColumnHead>
+              <ColumnHead>Evidence</ColumnHead>
+              <ColumnHead>Archive</ColumnHead>
+              <ColumnHead>Actions</ColumnHead>
+            </Row>
+            {tasks.length === 0 && (
+              <Row className="task-history-empty">
+                <DataCell style={{ gridColumn: "1 / -1" }}>
+                  <EmptyState>No tasks match this history filter.</EmptyState>
+                </DataCell>
+              </Row>
+            )}
+            {tasks.map((task) => (
+              <TaskRow key={task.id} task={task} onUnarchive={onUnarchive} />
+            ))}
+          </DataTable>
         </div>
       </section>
     </>
@@ -161,59 +165,50 @@ export function TaskHistoryState({
 
 function TaskRow({ task, onUnarchive }) {
   return (
-    <tr id={task.id}>
-      <td>
-        <strong className="wrap-anywhere">{task.description}</strong>
-        {task.task_kind === "acceptance_verification" && <span className="pill" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
-        <div className="mono muted">{task.id}</div>
-      </td>
-      <td>
-        <StatusPill tone={statusTone(task.status)} label={task.status || "Unknown"} />
-        {task.archived && <StatusPill tone="neutral" label="Archived" />}
-      </td>
-      <td>
-        <div className="mono muted">
-          Estimate: {task.estimate_tokens != null ? task.estimate_tokens.toLocaleString() : "—"}
+    <Row className="task-history-row" id={task.id}>
+      <DataCell>
+        <div className="task-history-subject">
+          <strong>{task.description}</strong>
+          {task.task_kind === "acceptance_verification" && <span className="pill" title={`Kind: ${task.task_kind}`}>{task.task_kind}</span>}
+          <span className="mono muted">{task.id}</span>
         </div>
-        <div className="mono muted">
-          Actual: {task.actual_tokens != null ? task.actual_tokens.toLocaleString() : "—"}
+      </DataCell>
+      <DataCell>
+        <div className="task-history-statuses">
+          <StatusPill tone={statusTone(task.status)} label={task.status || "Unknown"} />
+          {task.archived && <StatusPill tone="neutral" label="Archived" />}
         </div>
-        {task.recommended_model && (
-          <div className="mono muted">Model: {task.recommended_model}</div>
-        )}
-      </td>
-      <td>
-        {task.session_href ? (
-          <a href={task.session_href}>Session report</a>
-        ) : (
-          <span className="muted">No session</span>
-        )}
-        {task.worker_run_id && <div className="mono muted">Worker Run: {task.worker_run_id}</div>}
-        <BlockedCondition reason={task.blocked_reason} />
-        {task.requires_manual_estimate && <TaskCondition label="Manual estimate required" />}
-      </td>
-      <td>
-        {task.archived_at ? (
-          <div className="mono muted">{task.archived_at}</div>
-        ) : (
-          <span className="muted">Active</span>
-        )}
-      </td>
-      <td className="right">
+      </DataCell>
+      <DataCell>
+        <div className="task-history-tokens">
+          <span>Estimate: {task.estimate_tokens != null ? task.estimate_tokens.toLocaleString() : "—"}</span>
+          <span>Actual: {task.actual_tokens != null ? task.actual_tokens.toLocaleString() : "—"}</span>
+          {task.recommended_model && <span>Model: {task.recommended_model}</span>}
+        </div>
+      </DataCell>
+      <DataCell>
+        <div className="task-history-evidence">
+          {task.session_href ? <AppLink to={task.session_href}>Session report</AppLink> : <span className="muted">No session</span>}
+          {task.worker_run_id && <span className="mono muted">Worker Run: {task.worker_run_id}</span>}
+          <BlockedCondition reason={task.blocked_reason} />
+          {task.requires_manual_estimate && <TaskCondition label="Manual estimate required" />}
+        </div>
+      </DataCell>
+      <DataCell>
+        {task.archived_at ? <span className="mono muted">{task.archived_at}</span> : <span className="muted">Active</span>}
+      </DataCell>
+      <DataCell className="task-history-actions">
         {task.archived && (
-          <button
+          <Button
+            size="small"
+            variant="secondary"
             type="button"
-            className="btn small"
             onClick={() => onUnarchive(task.id)}
           >
             Unarchive
-          </button>
+          </Button>
         )}
-      </td>
-    </tr>
+      </DataCell>
+    </Row>
   );
-}
-
-function boundedError(value, fallback) {
-  return typeof value === "string" && value ? value.slice(0, 1000) : fallback;
 }

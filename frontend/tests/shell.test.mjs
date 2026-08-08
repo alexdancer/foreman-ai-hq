@@ -1113,10 +1113,49 @@ test("Alarms sidebar and list render from available_actions and bookmarkable fil
     assert.match(populated, new RegExp(text));
   }
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assert.match(populated, /role="table" aria-label="Alarms"/);
+  assert.match(populated, /class="data-table-row/);
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /class="status-pill-label">HIGH<\/span>/);
+  assert.match(populated, /class="status-pill-label">Open<\/span>/);
   assert.doesNotMatch(populated, /Abort/);
   assert.doesNotMatch(populated, /adjust_guardrail/);
+});
+
+test("Alarms keep the budget raise confirmation keyboard-accessible", async () => {
+  const data = {
+    filters: [],
+    alarms: [{
+      id: "alarm-budget-999",
+      type: "DAILY_CAP_EXCEEDED",
+      severity: "HIGH",
+      session_id: null,
+      context: { text: "DEMO", truncated: false },
+      recommended_action: "Raise budget.",
+      available_actions: [{ action: "raise_budget", cap_key: "daily_cap_tokens", current_cap: 1000 }],
+      resolved_at: null,
+    }],
+  };
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(AlarmsState, {
+      data,
+      error: null,
+      loading: false,
+      filter: "open",
+      onFilter: () => {},
+      onRefresh: async () => {},
+      retry: () => {},
+    }));
+  });
+  const raiseButton = renderer.root.findAllByType("button").find((button) => button.children.join("") === "Raise Budget");
+  await act(async () => { raiseButton.props.onClick(); });
+  const confirmation = renderer.root.findByProps({ role: "dialog" });
+  assert.equal(confirmation.props["aria-modal"], "true");
+  assert.match(confirmation.props["aria-labelledby"], /title$/);
+  assert.ok(renderer.root.findByProps({ "aria-label": "Custom new daily_cap_tokens value" }));
+  assert.match(JSON.stringify(renderer.toJSON()), /Enter a positive new budget cap before confirming\./);
+  await act(async () => { renderer.unmount(); });
 });
 
 test("resolving an alarm refreshes both the list and shell badge", async (t) => {
@@ -2286,16 +2325,36 @@ test("React task history sanitizes errors and links back to the canonical Pipeli
 
   const populated = renderToStaticMarkup(React.createElement(TaskHistoryState, {
     projectId: "demo-999",
-    data: { filters: [], tasks: [] },
+    data: {
+      filters: [{ label: "Archived", value: "archived", count: 1, active: true }],
+      tasks: [{
+        id: "task-history-999",
+        description: "Preserve history evidence",
+        status: "Done",
+        task_kind: "acceptance_verification",
+        archived: true,
+        archived_at: "2099-01-01T00:00:00+00:00",
+        estimate_tokens: 1000,
+        actual_tokens: 1200,
+        session_href: "/sessions/sess-history-999",
+        worker_run_id: "run-history-999",
+      }],
+    },
     error: null,
     loading: false,
-    filter: "all",
+    filter: "archived",
     onSelectFilter: () => {},
     onUnarchive: () => {},
     notice: null,
   }));
   assert.match(populated, /href="\/projects\/demo-999"/);
   assert.match(populated, /Back to Pipeline/);
+  assert.match(populated, /role="table" aria-label="Task history"/);
+  assert.match(populated, /Read-only/);
+  assert.match(populated, /Unarchive/);
+  assert.match(populated, /href="\/sessions\/sess-history-999"/);
+  assert.match(populated, /acceptance_verification/);
+  assertStatusPillsHaveGlyphs(populated);
   assert.doesNotMatch(populated, /href="\/app\/projects\/demo-999\/board"/);
 });
 
@@ -2322,6 +2381,41 @@ test("React task history does not render a Scout label", () => {
   assert.match(markup, /class="status-pill-label">Archived<\/span>/);
   assert.match(markup, /Needs operator input/);
   assert.match(markup, /class="status-pill status-pill-warning"><span class="status-pill-glyph" aria-hidden="true">▲<\/span><span class="status-pill-label">Manual estimate required<\/span><\/span>/);
+});
+
+test("Task history retains keyboard-reachable filters and unarchive action", async () => {
+  let selectedFilter = null;
+  let unarchived = null;
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(TaskHistoryState, {
+      projectId: "demo-999",
+      data: {
+        filters: [{ label: "Archived", value: "archived", count: 1, active: true }],
+        tasks: [{
+          id: "task-history-restore-999",
+          description: "Restore archived task",
+          status: "Done",
+          task_kind: "implementation",
+          archived: true,
+        }],
+      },
+      error: null,
+      loading: false,
+      filter: "archived",
+      onSelectFilter: (filter) => { selectedFilter = filter; },
+      onUnarchive: (taskId) => { unarchived = taskId; },
+      notice: null,
+    }));
+  });
+  const unarchive = renderer.root.findAllByType("button").find((button) => button.children.join("") === "Unarchive");
+  await act(async () => { unarchive.props.onClick(); });
+  assert.equal(unarchived, "task-history-restore-999");
+  await act(async () => {
+    renderer.root.findAllByType("button").find((button) => button.children.join("") === "Archived 1").props.onClick();
+  });
+  assert.equal(selectedFilter, "archived");
+  await act(async () => { renderer.unmount(); });
 });
 
 test("board action controller negotiates JSON, reloads, reports failures, and navigates", async () => {

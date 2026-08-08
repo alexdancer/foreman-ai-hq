@@ -2247,7 +2247,8 @@ def test_task_history_view_source_contract():
     assert "Accept: \"application/json\"" in source
     assert "aria-live" in source
     assert "aria-pressed" in source
-    assert "colSpan" in source
+    assert "DataTable" in source
+    assert "Read-only" in source
 
 
 def test_react_budget_settings_requires_auth(tmp_path, monkeypatch):
@@ -2660,6 +2661,8 @@ def test_react_alarms_source_contract():
     assert "aria-live" in source
     assert "aria-pressed" in source
     assert "raise_budget" in source
+    assert "DataTable" in source
+    assert "ConfirmSheet" in source
     assert "abort" not in source.lower()
     assert "adjust_guardrail" not in source
 
