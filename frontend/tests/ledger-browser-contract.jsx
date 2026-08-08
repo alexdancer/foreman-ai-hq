@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { ConfirmSheet, Panel, PanelBody, PanelHeader, Skeleton, StatusPill } from "../src/components/ui/index.js";
 import { BoardState, EvidenceDrawerState } from "../src/views/Board.jsx";
+import { DashboardContent } from "../src/views/Dashboard.jsx";
 import "../src/tokens.css";
 
 const confirmSheetRef = React.createRef();
@@ -106,6 +107,46 @@ const floorData = {
     Review: [{ ...floorTask, id: "floor-review-999", status: "Review", controls: { ...floorTask.controls, can_refresh: false } }],
     Done: [{ ...floorTask, id: "floor-done-999", status: "Done", actual_tokens: 89, controls: { ...floorTask.controls, can_refresh: false, can_archive: true } }],
   },
+};
+
+const dashboardData = {
+  next_actions: [
+    { label: "Review 1 task", detail: "Awaiting operator review", href: "/board", tone: "purple" },
+    { label: "Open task board", detail: "Inspect project work", href: "/board", tone: "green" },
+  ],
+  budget: { total_tokens: 240, daily_cap: 1000, current_zone: "green", since: "2099-01-01T00:00:00Z" },
+  worker_execution: {
+    token_total: 150,
+    status_split: { completed: 120, failed_retry: 30, unknown: 0 },
+    components: { available: true, items: [{ label: "output", value: 30 }], cost: null },
+  },
+  spend: {
+    worker_execution: 150,
+    agent_review_reporting: 30,
+    planning_estimation: 0,
+    setup_verification: 20,
+    other: 40,
+    cost_by_category: {
+      control_plane: null,
+      task_breakdown: null,
+      worker_execution: null,
+      adapter_verification: null,
+      reporting_summary: null,
+      other: null,
+    },
+    total_cost: null,
+    priced_tokens: 0,
+    unpriced_tokens: 240,
+  },
+  alarms: {
+    total: 1,
+    open: 1,
+    critical: 0,
+    recent: [{ id: "browser-alarm-999", type: "BUDGET_YELLOW", severity: "LOW", session_id: "browser-session-999", recommended_action: "Review spend." }],
+  },
+  active_sessions: [{ id: "browser-session-999", task_description: "Browser Dashboard task", model: "gpt-browser-999", status: "running" }],
+  estimation_accuracy: { completed_count: 3, median_error_ratio: 1.1, within_2x_pct: 100 },
+  projects: [{ id: "browser-project-999", name: "Browser project 999", task_count: 1, capability: { state: "launch_ready" } }],
 };
 
 function PipelineContract() {
@@ -219,6 +260,9 @@ function ContractSurface() {
       <button id="pipeline-outside-target" type="button">Outside target</button>
       <PipelineContract />
       <FloorContract />
+      <section id="dashboard-interaction-contract">
+        <DashboardContent data={dashboardData} />
+      </section>
     </main>
   );
 }
@@ -393,6 +437,59 @@ async function inspect() {
     Math.abs(activePanel.getBoundingClientRect().width - activeGrid.getBoundingClientRect().width) < 1,
     "active Worker Run panel does not fill its Execution Floor section",
   );
+
+  const dashboard = document.querySelector("#dashboard-interaction-contract");
+  const dashboardOverview = dashboard.querySelector(".dashboard-overview");
+  const dashboardLabels = [...dashboardOverview.querySelectorAll(".kpi > .label")]
+    .map((label) => label.textContent.trim());
+  requireContract(
+    JSON.stringify(dashboardLabels) === JSON.stringify(["Daily governed budget", "Worker execution", "Orchestration", "Needs You"]),
+    `Dashboard KPI order is incorrect: ${dashboardLabels.join(", ")}`,
+  );
+  requireContract(
+    getComputedStyle(dashboardOverview).gridTemplateColumns.split(" ").length === 2,
+    "Dashboard KPI overview does not collapse to two columns at 1100px",
+  );
+  const dashboardPanelTitleStyle = getComputedStyle(dashboard.querySelector(".panel-header h3"));
+  requireContract(
+    dashboardPanelTitleStyle.textTransform === "none" && dashboardPanelTitleStyle.fontFamily.includes("-apple-system"),
+    "Dashboard panel titles do not use the accepted sentence-case sans tier",
+  );
+  requireContract(
+    dashboard.querySelector(".dashboard-kpi-orchestration .value")?.textContent.trim() === "See breakdown",
+    "Dashboard presents incomplete orchestration attribution as an authoritative total",
+  );
+  requireContract(
+    dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("partial attribution")
+      && dashboard.querySelector(".dashboard-kpi-orchestration")?.textContent.includes("Other tracked spend"),
+    "Dashboard does not direct incomplete orchestration attribution to the tracked-spend breakdown",
+  );
+  const otherSpendRow = [...dashboard.querySelectorAll('[role="table"][aria-label="Governed spend by category"] [role="row"]')]
+    .find((row) => row.textContent.includes("Other tracked spend"));
+  requireContract(otherSpendRow?.textContent.includes("40"), "Dashboard loses unattributed Planning spend from the governed-spend breakdown");
+  requireContract(
+    dashboardOverview.querySelectorAll(".kpi")[1]?.querySelector(".value")?.textContent.trim() === "150",
+    "Dashboard Worker execution KPI changed its authoritative total",
+  );
+  requireContract(
+    dashboard.querySelector(".dashboard-kpi-needs-you .value")?.textContent.trim() === "Project-scoped",
+    "Dashboard invents a global Needs You count",
+  );
+  requireContract(dashboard.textContent.includes("unpriced"), "Dashboard loses the unpriced provenance qualifier");
+  requireContract(dashboard.querySelector('[role="table"][aria-label="Active sessions"]'), "Dashboard sessions do not use the shared data table");
+  requireContract(dashboard.querySelector('[role="table"][aria-label="Recent open alarms"]'), "Dashboard alarms do not use shared Ledger rows");
+  const dashboardSessionLink = dashboard.querySelector('a[href="/sessions/browser-session-999"]');
+  requireContract(dashboardSessionLink, "Dashboard active-session navigation is missing");
+  const dashboardAction = dashboard.querySelector(".dashboard-action-link");
+  dashboardAction.focus();
+  requireContract(dashboardAction.matches(":focus-visible"), "Dashboard action is not keyboard focus-visible");
+  requireContract(
+    getComputedStyle(dashboardAction).outlineColor === "rgb(92, 242, 196)",
+    "Dashboard action focus outline is not mint",
+  );
+  requireContract(!dashboard.querySelector(".panel .panel"), "Dashboard renders nested panels");
+  window.scrollTo(0, 0);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   const select = document.querySelector("#contract-select");
   const track = document.querySelector("#select-track");
