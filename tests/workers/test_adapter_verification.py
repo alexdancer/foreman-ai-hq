@@ -701,7 +701,7 @@ def test_verify_codex_native_usage_records_authoritative_costless_token_row(tmp_
     assert turn["prompt_tokens"] == 25
     assert turn["completion_tokens"] == 7
     assert turn["total_tokens"] == 35
-    assert turn["cost"] == 0
+    assert turn["cost"] is None
     assert turn["raw_usage"]["usage"]["cached_input_tokens"] == 10
     assert turn["raw_usage"]["usage_source"] == "native_usage"
     assert runner.calls[0].command == [

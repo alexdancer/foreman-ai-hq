@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -370,11 +371,19 @@ def _codex_stream_binding(values: list[Any], *, selected_model: str) -> dict[str
     return None
 
 
-def _pi_cost_total(usage: dict[str, Any]) -> float:
+def _pi_cost_total(usage: dict[str, Any]) -> float | None:
     cost = usage.get("cost")
     if isinstance(cost, dict):
-        return _float_from_any(cost.get("total"))
-    return _float_from_any(cost)
+        cost = cost.get("total")
+    if isinstance(cost, bool) or cost is None:
+        return None
+    if isinstance(cost, str):
+        cost = cost.replace("$", "").replace(",", "").strip()
+    try:
+        resolved = float(cost)
+    except (TypeError, ValueError):
+        return None
+    return resolved if math.isfinite(resolved) and resolved >= 0 else None
 
 
 def parse_pi_usage_stream(
@@ -394,6 +403,7 @@ def parse_pi_usage_stream(
     completion_tokens = 0
     total_tokens = 0
     cost = 0.0
+    cost_unavailable = False
     provider: str | None = None
     event_model: str | None = None
     for item in _walk_json_dicts(parsed):
@@ -422,7 +432,11 @@ def parse_pi_usage_stream(
         prompt_tokens += p
         completion_tokens += c
         total_tokens += t
-        cost += _pi_cost_total(usage)
+        turn_cost = _pi_cost_total(usage)
+        if turn_cost is None:
+            cost_unavailable = True
+        else:
+            cost += turn_cost
         if provider is None:
             provider = msg.get("provider")
         if event_model is None:
@@ -441,6 +455,7 @@ def parse_pi_usage_stream(
             "total_tokens": total_tokens,
             "usage_source": "native_usage",
             "tracking_mode": "native_usage",
+            **({"cost_unavailable": True} if cost_unavailable else {}),
         },
     )
 

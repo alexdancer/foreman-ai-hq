@@ -599,8 +599,7 @@ def record_token_turn(
     raw_usage: dict[str, Any],
 ) -> None:
     raw_usage = _classified_raw_usage(usage_kind, raw_usage)
-    if raw_usage.get("cost_unavailable") is True:
-        cost = None
+    cost = _normalized_token_cost(cost, raw_usage)
     total_tokens = int(raw_usage.get("total_tokens", prompt_tokens + completion_tokens))
     with connect(path) as conn:
         conn.execute(
@@ -2263,6 +2262,13 @@ def _classified_raw_usage(usage_kind: str, raw_usage: dict[str, Any]) -> dict[st
     return usage
 
 
+def _normalized_token_cost(
+    cost: float | None, raw_usage: dict[str, Any]
+) -> float | None:
+    # Only explicit unavailability overrides zero, which can be valid priced evidence.
+    return None if raw_usage.get("cost_unavailable") is True else cost
+
+
 def _spend_category_for_usage_kind(usage_kind: str) -> str:
     if usage_kind == "task_breakdown":
         return "task_breakdown"
@@ -2680,14 +2686,15 @@ def _scalar_detail_parts(detail: dict[str, Any]) -> list[str]:
 
 
 def _token_turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    raw_usage = _from_json(row["raw_usage_json"])
     return {
         "usage_kind": row["usage_kind"],
         "model": row["model"],
         "prompt_tokens": row["prompt_tokens"],
         "completion_tokens": row["completion_tokens"],
         "total_tokens": row["total_tokens"],
-        "cost": row["cost"],
-        "raw_usage": _from_json(row["raw_usage_json"]),
+        "cost": _normalized_token_cost(row["cost"], raw_usage),
+        "raw_usage": raw_usage,
         "created_at": row["created_at"],
     }
 

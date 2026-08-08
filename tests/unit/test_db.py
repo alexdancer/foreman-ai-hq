@@ -739,6 +739,22 @@ def test_token_usage_breakdown_normalizes_unavailable_cost_and_preserves_priced_
         raw_usage={"total_tokens": 6, "spend_category": "control_plane"},
     )
 
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            "select rowid as token_turn_rowid, cost from token_turns order by rowid"
+        ).fetchall()
+        assert rows[1]["cost"] is None
+        conn.execute(
+            "update token_turns set cost = 0 where rowid = ?",
+            (rows[1]["token_turn_rowid"],),
+        )
+
+    artifact = build_session_artifact(db_path, session["id"])
+    unavailable_turn = next(
+        turn for turn in artifact["token_log"] if turn["raw_usage"].get("cost_unavailable")
+    )
+    assert unavailable_turn["cost"] is None
+
     breakdown = token_usage_breakdown(db_path)
 
     assert breakdown["cost_by_category"]["task_breakdown"] == 0.0

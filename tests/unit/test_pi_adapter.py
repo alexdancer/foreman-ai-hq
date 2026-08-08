@@ -96,6 +96,30 @@ def test_pi_usage_stream_sums_multiple_model_calls_in_one_turn() -> None:
     assert evidence.raw_usage["response_ids"] == ["resp_1", "resp_2"]
 
 
+def test_pi_usage_stream_qualifies_missing_cost_without_reclassifying_zero() -> None:
+    missing_cost = _pi_assistant_message(
+        "resp_missing", input_tokens=1000, output_tokens=10, cost=0.01
+    )
+    missing_cost["usage"].pop("cost")
+
+    unavailable = parse_pi_usage_stream(_pi_stream(missing_cost), model="gpt-5.4")
+    priced_zero = parse_pi_usage_stream(
+        _pi_stream(
+            _pi_assistant_message(
+                "resp_zero", input_tokens=1000, output_tokens=10, cost=0.0
+            )
+        ),
+        model="gpt-5.4",
+    )
+
+    assert unavailable is not None
+    assert unavailable.cost == 0.0
+    assert unavailable.raw_usage["cost_unavailable"] is True
+    assert priced_zero is not None
+    assert priced_zero.cost == 0.0
+    assert "cost_unavailable" not in priced_zero.raw_usage
+
+
 def test_pi_usage_stream_excludes_already_recorded_calls() -> None:
     stream = _pi_stream(
         _pi_assistant_message("resp_1", input_tokens=1000, output_tokens=10, cost=0.01),
