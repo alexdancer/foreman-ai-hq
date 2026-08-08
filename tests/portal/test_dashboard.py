@@ -207,6 +207,47 @@ def test_dashboard_uses_project_needs_you_projection_and_canonical_pricing(tmp_p
     }
 
 
+def test_dashboard_keeps_invalid_raw_component_cost_json_safe(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
+    database_path = tmp_path / "harness.db"
+
+    with _client(tmp_path) as client:
+        session = db.create_session(
+            database_path,
+            task_description="Invalid raw component cost",
+            model="worker-model",
+            session_key_hash="invalid-raw-component-cost",
+            guardrail_overrides={},
+            status="completed",
+        )
+        db.record_token_turn(
+            database_path,
+            session_id=session["id"],
+            usage_kind="worker",
+            model="worker-model",
+            prompt_tokens=10,
+            completion_tokens=0,
+            cost=float("inf"),
+            raw_usage={
+                "total_tokens": 10,
+                "cost_usd": float("inf"),
+                "spend_category": "worker_execution",
+            },
+        )
+        response = client.get("/api/dashboard", headers=_portal_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worker_execution"]["components"]["cost"] is None
+    assert payload["spend"]["pricing_coverage"]["worker_execution"] == {
+        "state": "unpriced",
+        "cost": None,
+        "priced_tokens": 0,
+        "unpriced_tokens": 10,
+        "coverage_percent": 0,
+    }
+
+
 def test_dashboard_attributes_planning_only_spend_to_orchestration(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_TRACKER_PORTAL_TOKEN", PORTAL_TOKEN)
     database_path = tmp_path / "harness.db"

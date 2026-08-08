@@ -14,7 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from foreman_ai_hq.adapter_readiness import evaluate_adapter_readiness
-from foreman_ai_hq.native_usage import token_usage_components
+from foreman_ai_hq.native_usage import normalized_cost, token_usage_components
 from foreman_ai_hq.worker_model_allowlist import SEEDED_WORKER_ADAPTER_MODELS
 
 TOKEN_USAGE_CATEGORIES = (
@@ -2272,16 +2272,13 @@ def _normalized_token_cost(
         or cost is None
     ):
         return None
-    try:
-        normalized = float(cost)
-    except (TypeError, ValueError):
-        return None
-    return normalized if math.isfinite(normalized) and normalized >= 0 else None
+    return normalized_cost(cost)
 
 
 def _turn_pricing_tokens(
     raw_usage: dict[str, Any], tokens: int, cost: float | None
 ) -> tuple[int, int]:
+    # Legacy or invalid segments require a canonical token match to override row pricing.
     fallback = (tokens, 0) if cost is not None else (0, tokens)
     segments = raw_usage.get("pricing_segments")
     if not isinstance(segments, list) or not segments:

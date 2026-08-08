@@ -135,7 +135,20 @@ def token_usage_components(
         )
         reasoning_is_additive = output is None and reasoning is not None
     total = total_tokens if total_tokens is not None else _first_int(usage, "total_tokens", "total", "tokens.total", "usage.total_tokens", "usage.total")
-    cost_value = cost if cost not in (None, 0) else _first_float(usage, "total_cost_usd", "cost_usd", "cost", "usd", "usage.total_cost_usd", "usage.cost_usd", "usage.cost")
+    cost_value = (
+        normalized_cost(cost)
+        if cost is not None
+        else _first_float(
+            usage,
+            "total_cost_usd",
+            "cost_usd",
+            "cost",
+            "usd",
+            "usage.total_cost_usd",
+            "usage.cost_usd",
+            "usage.cost",
+        )
+    )
     additive_reasoning = reasoning if reasoning_is_additive else None
     component_sum = sum(value or 0 for value in (fresh_input, cache_read, cache_write, output, additive_reasoning))
     unclassified = total - component_sum if total is not None and component_sum > 0 and total > component_sum else None
@@ -256,11 +269,11 @@ def _native_usage_cost(item: dict[str, Any], usage: dict[str, Any], *, model: st
     if isinstance(model_usage, dict):
         matching_details = _matching_model_usage(model_usage, model=model)
         if matching_details is not None and matching_details.get("costUSD") is not None:
-            return _float_from_any(matching_details.get("costUSD"))
+            return normalized_cost(matching_details.get("costUSD"))
         return None
     for value in (item.get("total_cost_usd"), usage.get("cost"), usage.get("cost_usd"), usage.get("usd"), item.get("cost")):
         if value is not None:
-            return _float_from_any(value)
+            return normalized_cost(value)
     return None
 
 
@@ -375,15 +388,7 @@ def _pi_cost_total(usage: dict[str, Any]) -> float | None:
     cost = usage.get("cost")
     if isinstance(cost, dict):
         cost = cost.get("total")
-    if isinstance(cost, bool) or cost is None:
-        return None
-    if isinstance(cost, str):
-        cost = cost.replace("$", "").replace(",", "").strip()
-    try:
-        resolved = float(cost)
-    except (TypeError, ValueError):
-        return None
-    return resolved if math.isfinite(resolved) and resolved >= 0 else None
+    return normalized_cost(cost)
 
 
 def parse_pi_usage_stream(
@@ -569,7 +574,7 @@ def _first_float(data: dict[str, Any], *paths: str) -> float | None:
     for path in paths:
         value = _nested_value(data, path)
         if value is not None:
-            return _float_from_any(value)
+            return normalized_cost(value)
     return None
 
 
@@ -599,12 +604,13 @@ def _int_from_any(value: Any) -> int:
         return 0
 
 
-def _float_from_any(value: Any) -> float:
-    if value is None:
-        return 0.0
+def normalized_cost(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
     if isinstance(value, str):
         value = value.replace("$", "").replace(",", "").strip()
     try:
-        return float(value)
+        resolved = float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return None
+    return resolved if math.isfinite(resolved) and resolved >= 0 else None
