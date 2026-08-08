@@ -19,7 +19,7 @@ export function TokenComparison({
   const displayedActualLabel = actualLabel ?? (savings != null && savings > 0 ? `Actual · −${savings}%` : "Actual");
 
   return (
-    <div className={cx("token-comparison", className)} aria-label={ariaLabel} {...rest}>
+    <div className={cx("token-comparison", className)} role="group" aria-label={ariaLabel} {...rest}>
       <div className="token-stat token-stat-estimate">
         <small>{estimateLabel}</small>
         <strong>{estimate?.toLocaleString() ?? "Unavailable"}</strong>

@@ -2,9 +2,13 @@ import React from "react";
 
 import { cx } from "./cx.js";
 
-export function DataTable({ label, columns, className, children, style, ...rest }) {
-  const tableStyle = columns
-    ? { ...style, "--data-table-columns": columns }
+export function DataTable({ label, columns, minWidth, className, children, style, ...rest }) {
+  const tableStyle = columns || minWidth
+    ? {
+        ...style,
+        ...(columns ? { "--data-table-columns": columns } : {}),
+        ...(minWidth ? { "--data-table-min-width": minWidth } : {}),
+      }
     : style;
   return (
     <div className="data-table-scroll">

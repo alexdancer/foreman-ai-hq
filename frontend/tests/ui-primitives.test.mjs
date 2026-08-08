@@ -310,7 +310,7 @@ test("TokenComparison and EventRow provide shared ledger evidence presentation",
     actual: 89,
     provenance: "native usage",
   }));
-  assert.match(comparison, /class="token-comparison" aria-label="Estimate versus actual tokens"/);
+  assert.match(comparison, /role="group" aria-label="Estimate versus actual tokens"/);
   assert.match(comparison, /<small>Estimate<\/small><strong>100<\/strong>/);
   assert.match(comparison, /<small>Actual · −11%<\/small><strong>89<\/strong>/);
   assert.match(comparison, /class="token-comparison-provenance">Spend tracking · native usage<\/p>/);

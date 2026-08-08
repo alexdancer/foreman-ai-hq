@@ -168,6 +168,11 @@ function renderSidebar(overrides = {}) {
   return renderToStaticMarkup(React.createElement(Sidebar, props));
 }
 
+function renderedText(node) {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  return node.children.map(renderedText).join("");
+}
+
 function assertStatusPillsHaveGlyphs(markup) {
   const statuses = (markup.match(/class="status-pill status-pill-/g) || []).length;
   assert.ok(statuses > 0, "expected at least one rendered status pill");
@@ -1004,8 +1009,14 @@ test("Sessions sidebar and list preserve compact scan, states, and pagination", 
   const populated = renderToStaticMarkup(React.createElement(SessionsState, { data, error: null, loading: false }));
   for (const text of ["Agent Review", "DEMO review task", "claude-demo-999", "10 prompt", "5 completion", "15 total", "1 runs", "2 events", "1 failed checks", "yellow zone", "1 alarms", "Active sessions refresh every 5 seconds", "Next sessions"]) assert.match(populated, new RegExp(text));
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
-  assert.match(populated, /class="data-table sessions-data-table" role="table" aria-label="Sessions ledger"/);
-  assert.doesNotMatch(populated, /<table class="evidence-table"/);
+  const populatedTree = create(React.createElement(SessionsState, { data, error: null, loading: false }));
+  const table = populatedTree.root.findByProps({ role: "table", "aria-label": "Sessions ledger" });
+  assert.deepEqual(
+    table.findAllByProps({ role: "columnheader" }).map(renderedText),
+    ["Session", "Kind / task", "Model / status", "Provider tokens", "Evidence", "Zone / alarms"],
+  );
+  assert.equal(table.findAllByProps({ role: "row" }).length, 2);
+  assert.equal(table.findAllByProps({ role: "cell" }).length, 6);
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /status-pill-warning[^>]*>.*status-pill-label">yellow zone<\/span>/s);
 });
@@ -1170,11 +1181,13 @@ test("resolving an alarm refreshes both the list and shell badge", async (t) => 
 });
 
 test("Session Report renders compact governance plus every bounded evidence path", () => {
-  const markup = renderToStaticMarkup(React.createElement(SessionReportState, {
+  const report = React.createElement(SessionReportState, {
     data: reportData(), error: null, loading: false,
     freshnessNotice: { version: "b".repeat(64) },
     refreshError: "Could not check for new session evidence. Retry Refresh.",
-  }));
+  });
+  const markup = renderToStaticMarkup(report);
+  const reportTree = create(report);
   for (const text of [
     "Governance summary", "DEMO task 2099", "DEMO project 999", "opencode", "native_usage", "review needed", "missing authoritative usage",
     "Provider / raw totals", "Normalized budget total", "control_plane: 1", "worker_execution: 30", "reporting_summary: 4", "cache read/reused context",
@@ -1182,12 +1195,18 @@ test("Session Report renders compact governance plus every bounded evidence path
     "Alarms", "BUDGET_YELLOW", "Checkpoint results", "FAIL", "Related Agent Review", "review/control-plane evidence", "19 review/control-plane tokens", "Agent Review finding",
     "Preview truncated", "Load full text", "New session evidence available", "Could not check for new session evidence",
   ]) assert.match(markup, new RegExp(text));
-  assert.match(markup, /class="token-comparison report-token-comparison" aria-label="Normalized versus provider token totals"/);
-  assert.match(markup, /<small>Normalized budget total<\/small><strong>40<\/strong>/);
-  assert.match(markup, /<small>Provider \/ raw total<\/small><strong>50<\/strong>/);
+  const tokenComparison = reportTree.root.findByProps({ role: "group", "aria-label": "Normalized versus provider token totals" });
+  assert.deepEqual(tokenComparison.findAllByType("small").map(renderedText), ["Normalized budget total", "Provider / raw total"]);
+  assert.deepEqual(tokenComparison.findAllByType("strong").map(renderedText), ["40", "50"]);
   assert.match(markup, /Spend tracking · opencode · native_usage/);
-  assert.match(markup, /<details class="disclosure evidence-disclosure evidence-section live-feed-panel" open="">/);
-  assert.match(markup, /class="live-event live-event-launch event-row"/);
+  const disclosures = reportTree.root.findAllByType("details");
+  const disclosureLabels = disclosures.map((disclosure) => renderedText(disclosure.findAllByType("summary")[0]));
+  for (const label of ["Live Worker Run feed", "Worker Run timeline", "Token log", "Budget-zone timeline", "Repo Context Brief", "Alarms", "Checkpoint results"]) {
+    assert.ok(disclosureLabels.some((name) => name.startsWith(label)), `${label} is not exposed as a disclosure`);
+  }
+  const liveFeed = disclosures.find((disclosure) => renderedText(disclosure.findAllByType("summary")[0]).startsWith("Live Worker Run feed"));
+  assert.equal(liveFeed.props.open, true);
+  assert.ok(liveFeed.findByProps({ "aria-live": "polite" }));
   assert.match(markup, /href="\/sessions\/review-demo-999"/);
   assert.match(markup, /aria-live="polite"/);
   assertStatusPillsHaveGlyphs(markup);

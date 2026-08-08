@@ -65,6 +65,7 @@ export function SessionsState({ data, error, loading, retry = () => {}, page = (
             className="sessions-data-table"
             label="Sessions ledger"
             columns="minmax(11rem, 1fr) minmax(16rem, 2fr) minmax(12rem, 1.3fr) minmax(14rem, 1.4fr) minmax(13rem, 1.3fr) minmax(12rem, 1.2fr)"
+            minWidth="78rem"
           >
             <Row header>
               <ColumnHead>Session</ColumnHead><ColumnHead>Kind / task</ColumnHead><ColumnHead>Model / status</ColumnHead><ColumnHead>Provider tokens</ColumnHead><ColumnHead>Evidence</ColumnHead><ColumnHead>Zone / alarms</ColumnHead>
