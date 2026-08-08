@@ -1,11 +1,10 @@
 import React from "react";
 
 import { getJSON } from "../api.js";
-import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
-import { EvidenceDisclosure, sessionStatusTone, StatusPill, statusTone } from "../components/ui/index.js";
+import { sessionStatusTone, StatusPill, TokenComparison } from "../components/ui/index.js";
+import { AgentReview, BoundedText, evidenceProvenance, SessionEvidence } from "../components/SessionEvidence.jsx";
 import { AppLink } from "../nav.jsx";
 import { drainLiveEvents } from "../live-events.js";
-import { LiveEventFeed } from "../components/LiveEventFeed.jsx";
 
 const safeError = (error) => error?.status === 401
   ? "Session Report requires sign-in."
@@ -117,22 +116,9 @@ export function SessionReportState({
           </Summary>
         </div>
       </section>
-      <TokenSummary tokens={tokens} />
+      <TokenSummary tokens={tokens} summary={summary} />
       {data.related_agent_review && <AgentReview key={`review-${version}`} review={data.related_agent_review} isReviewSession={session.kind === "Agent Review"} />}
-      <EvidenceSection key={`tokens-${version}`} title="Token log" page={tokens.log} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
-      <EvidenceSection key={`zones-${version}`} title="Budget-zone timeline" page={data.zone_timeline} renderItem={(item, index) => <EvidenceItem key={index} {...budgetZoneEvidenceProps(item)} />} />
-      {(liveEvents.length > 0 || data.freshness.active) && (
-        <section className="panel evidence-section live-feed-panel">
-          <div className="panel-header"><h3>Live Worker Run feed</h3><span>system evidence</span></div>
-          <div className="panel-body" aria-live="polite">
-            <LiveEventFeed events={liveEvents} active={data.freshness.active} />
-          </div>
-        </section>
-      )}
-      <EvidenceSection key={`worker-${version}`} title="Worker Run timeline" page={data.worker_timeline} renderItem={(item, index) => <EvidenceItem key={index} title={`${item.level} · ${item.layer} · ${item.kind} · ${item.title}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary}`} detail={item.detail} />} />
-      <RepoContext key={`repo-${version}`} page={data.repo_context_briefs} />
-      <EvidenceSection key={`alarms-${version}`} title="Alarms" page={data.alarms} renderItem={(item) => <EvidenceItem key={item.id} {...alarmEvidenceProps(item)} />} />
-      <EvidenceSection key={`checkpoints-${version}`} title="Checkpoint results" page={data.checkpoints} renderItem={(item, index) => <EvidenceItem key={index} {...checkpointEvidenceProps(item)} />} />
+      <SessionEvidence data={data} liveEvents={liveEvents} />
     </>
   );
 }
@@ -146,123 +132,32 @@ function Summary({ label, children }) {
   return <div className="summary-item"><h2>{label}</h2>{children}</div>;
 }
 
-function TokenSummary({ tokens }) {
+function TokenSummary({ tokens, summary }) {
+  const providerTotals = tokens.provider_totals;
+  const normalized = tokens.normalized;
   return (
     <section className="panel">
       <div className="panel-header"><h3>Token evidence</h3><span>normalized vs provider/control-plane</span></div>
       <div className="panel-body summary-grid">
-        <Summary label="Provider / raw totals"><span>{tokens.provider_totals.prompt_tokens} prompt · {tokens.provider_totals.completion_tokens} completion · {tokens.provider_totals.total_tokens} total</span></Summary>
-        <Summary label="Normalized budget total"><span>{tokens.normalized.total_tokens}</span></Summary>
-        <Summary label="Spend categories">{Object.entries(tokens.normalized.by_category).map(([key, value]) => <div className="mono" key={key}>{key}: {value}</div>)}</Summary>
+        <div className="report-token-lead">
+          <TokenComparison
+            className="report-token-comparison"
+            estimate={normalized.total_tokens}
+            actual={providerTotals.total_tokens}
+            estimateLabel="Normalized budget total"
+            actualLabel="Provider / raw total"
+            aria-label="Normalized versus provider token totals"
+            provenance={evidenceProvenance(summary)}
+          />
+        </div>
+        <Summary label="Provider / raw totals"><span>{providerTotals.prompt_tokens} prompt · {providerTotals.completion_tokens} completion · {providerTotals.total_tokens} total</span></Summary>
+        <Summary label="Normalized budget total"><span>{normalized.total_tokens}</span></Summary>
+        <Summary label="Spend categories">{Object.entries(normalized.by_category).map(([key, value]) => <div className="mono" key={key}>{key}: {value}</div>)}</Summary>
         <Summary label="Worker token components">
           {tokens.worker_components.available ? tokens.worker_components.items.map((item) => <div className="mono" key={item.key}>{item.label}: {item.value}</div>) : <span>Component breakdown unavailable.</span>}
           <div>turns: {tokens.worker_components.turn_count} · cost: {tokens.worker_components.cost ?? "unavailable"}</div>
         </Summary>
       </div>
     </section>
-  );
-}
-
-export function AgentReview({ review, isReviewSession = false }) {
-  return (
-    <section className="panel">
-      <div className="panel-header"><h3>{isReviewSession ? "Agent Review outcome" : "Related Agent Review"}</h3><span>review/control-plane evidence</span></div>
-      <div className="panel-body">
-        <p><StatusPill tone={statusTone(review.status)} label={review.status || "unknown"} /> · {review.recommendation || "no recommendation"} · {review.model || "unknown model"}</p>
-        <p>{review.review_total_tokens ?? "unavailable"} review/control-plane tokens · {review.reviewed_at || "time unavailable"}</p>
-        {review.review_session_href && <AppLink to={review.review_session_href}>Review Session Report</AppLink>}
-        {review.summary && <BoundedText value={review.summary} />}
-        {review.error && <BoundedText value={review.error} />}
-        <EvidenceSection title="Agent Review findings" page={review.findings} renderItem={(item, index) => <EvidenceItem key={index} title={`Finding ${index + 1}`} detail={item} />} nested />
-      </div>
-    </section>
-  );
-}
-
-export function TokenRow({ item }) {
-  return <EvidenceItem title={`${item.usage_kind} · ${item.model}`} meta={`${item.prompt_tokens} prompt · ${item.completion_tokens} completion · ${item.total_tokens} total · cost ${item.cost ?? "unavailable"}`} detail={item.raw_usage} />;
-}
-
-export function RepoContext({ page }) {
-  return (
-    <EvidenceSection title="Repo Context Brief" page={page} renderItem={(item) => (
-      <article className="evidence-item" key={item.worker_run_id}>
-        <h3>Worker Run {item.worker_run_id}</h3>
-        <PageList title="Source documents" page={item.documents} render={(doc) => doc.path} />
-        <PageList title="Manifests" page={item.manifests} render={(manifest) => manifest} />
-        <BoundedText value={item.text} />
-      </article>
-    )} />
-  );
-}
-
-function PageList({ title, page, render }) {
-  const [state, setState] = React.useState(page);
-  const load = async () => {
-    if (!state.pagination.next_href) return;
-    const next = await getJSON(state.pagination.next_href);
-    setState({ items: [...state.items, ...next.items], pagination: next.pagination });
-  };
-  return <div><strong>{title}</strong><ul>{state.items.map((item, index) => <li key={index}>{render(item)}</li>)}</ul>{state.pagination.has_more && <button type="button" onClick={load}>Load more {title.toLowerCase()}</button>}</div>;
-}
-
-export function EvidenceSection({ title, page, renderItem, nested = false, open = false }) {
-  const [state, setState] = React.useState(page);
-  const [error, setError] = React.useState(null);
-  const load = async () => {
-    try {
-      const next = await getJSON(state.pagination.next_href);
-      setState({ items: [...state.items, ...next.items], pagination: next.pagination });
-      setError(null);
-    } catch {
-      setError("Could not load more evidence. Retry.");
-    }
-  };
-  const count = state.pagination.total ?? state.items.length;
-  return (
-    <EvidenceDisclosure
-      className={nested ? "nested-evidence" : "evidence-section"}
-      label={title}
-      count={count}
-      countLabel={`${count} ${title.toLowerCase()} rows`}
-      open={open}
-    >
-      {state.items.length ? state.items.map(renderItem) : <p className="muted">No {title.toLowerCase()} evidence.</p>}
-      {state.pagination.has_more && <button type="button" onClick={load}>Load more {title}</button>}
-      {error && <p className="danger-text" role="alert">{error}</p>}
-    </EvidenceDisclosure>
-  );
-}
-
-export function EvidenceItem({ title, status = null, statusTone: tone = null, statusLabel = null, meta = null, body = null, detail = null }) {
-  const visibleStatus = status || (statusLabel ? <StatusPill tone={tone || "neutral"} label={statusLabel} /> : null);
-  return (
-    <article className="evidence-item">
-      <div className="evidence-item-heading">{visibleStatus}<h3>{title}</h3></div>{meta && <p className="mono muted">{meta}</p>}{body && <p>{body}</p>}
-      {detail && <details><summary>Evidence detail</summary><BoundedText value={detail} /></details>}
-    </article>
-  );
-}
-
-export function BoundedText({ value }) {
-  const [full, setFull] = React.useState(null);
-  const [error, setError] = React.useState(null);
-  if (!value) return null;
-  const load = async () => {
-    try {
-      const response = await fetch(value.full_href, { credentials: "same-origin", headers: { Accept: "text/plain" } });
-      if (!response.ok) throw new Error();
-      setFull(await response.text());
-      setError(null);
-    } catch {
-      setError("Could not load full evidence. Retry.");
-    }
-  };
-  return (
-    <div className="bounded-text">
-      <pre className="raw-evidence">{full ?? value.preview}</pre>
-      {value.truncated && full === null && <><span className="truncation">Preview truncated.</span> <button type="button" onClick={load}>Load full text</button></>}
-      {error && <span className="danger-text" role="alert">{error}</span>}
-    </div>
   );
 }

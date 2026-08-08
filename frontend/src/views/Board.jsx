@@ -5,11 +5,10 @@ import { getJSON } from "../api.js";
 import PlanningChat from "./PlanningChat.jsx";
 import { drainLiveEvents, runSingleFlight } from "../live-events.js";
 import { LiveRunDock, liveRunsFromTasks } from "../components/LiveRunDock.jsx";
-import { LiveEventFeed, liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
+import { liveEventText, liveEventTime } from "../components/LiveEventFeed.jsx";
 import { BlockedCondition } from "../components/BlockedCondition.jsx";
-import { alarmEvidenceProps, budgetZoneEvidenceProps, checkpointEvidenceProps } from "../components/evidenceStatus.js";
-import { AgentReview, EvidenceItem, EvidenceSection, RepoContext, TokenRow } from "./SessionReport.jsx";
-import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison, EvidenceDisclosure, DataTable, Row, ColumnHead, DataCell } from "../components/ui/index.js";
+import { AgentReview, evidenceProvenance, SessionEvidence } from "../components/SessionEvidence.jsx";
+import { Button, StatusPill, Notice, EmptyState, Loading, Panel, PanelHeader, PanelBody, statusTone, TokenComparison, DataTable, Row, ColumnHead, DataCell } from "../components/ui/index.js";
 import "../board-floor.css";
 
 const COLUMNS = ["Estimated", "Running", "Review", "Done"];
@@ -1245,11 +1244,6 @@ export function EvidenceDrawer({ task, projectId, action, onClose, getJSONImpl =
   />;
 }
 
-function drawerTrackingProvenance(summary, loading) {
-  if (!summary) return loading ? "Session Report provenance loading" : "Session Report provenance unavailable";
-  return [summary.adapter_id, summary.tracking_mode].filter(Boolean).join(" · ") || "Session Report provenance unavailable";
-}
-
 export function EvidenceDrawerState({ task, projectId, action = () => {}, onClose = () => {}, data, error, loading }) {
   const [reviewPrompt, setReviewPrompt] = useState(task.review_prompt?.text || "");
   const [blockedReason, setBlockedReason] = useState("");
@@ -1306,7 +1300,7 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
           <TokenComparison
             estimate={task.estimate_tokens}
             actual={task.actual_tokens}
-            provenance={drawerTrackingProvenance(data?.summary, loading)}
+            provenance={evidenceProvenance(data?.summary, loading)}
           />
         </section>
         <BlockedCondition reason={task.blocked_condition?.reason} />
@@ -1314,13 +1308,7 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
         {error && <Notice variant="danger" role="alert">{error}</Notice>}
         {!loading && !error && !data && <EmptyState>No session evidence is available.</EmptyState>}
         {data && <>
-          {(data.worker_timeline?.items?.length > 0 || data.freshness?.active) && <EvidenceDisclosure label="Live Worker Run feed" count={data.worker_timeline?.items?.length || 0} countLabel={`${data.worker_timeline?.items?.length || 0} live Worker Run events`} className="evidence-section live-feed-panel" open><div aria-live="polite"><LiveEventFeed events={(data.worker_timeline?.items || []).map((item, index) => ({ ...item, id: item.id ?? index }))} active={Boolean(data.freshness?.active)} /></div></EvidenceDisclosure>}
-          <EvidenceSection key={`${task.id}:timeline`} title="Worker Run timeline" page={safeEvidencePage(data.worker_timeline)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} title={`${item.level || "event"} · ${item.layer || "worker"} · ${item.kind || "event"} · ${item.title || "Worker output"}`} meta={`${item.created_at || "time unavailable"} · ${item.detail_summary || ""}`} detail={item.detail} />} open />
-          <EvidenceSection key={`${task.id}:tokens`} title="Token log" page={safeEvidencePage(data.tokens?.log)} renderItem={(item, index) => <TokenRow key={index} item={item} />} />
-          <EvidenceSection key={`${task.id}:zones`} title="Budget-zone timeline" page={safeEvidencePage(data.zone_timeline)} renderItem={(item, index) => <EvidenceItem key={index} {...budgetZoneEvidenceProps(item)} />} />
-          <RepoContext key={`${task.id}:repo`} page={safeEvidencePage(data.repo_context_briefs)} />
-          <EvidenceSection key={`${task.id}:alarms`} title="Alarms" page={safeEvidencePage(data.alarms)} renderItem={(item, index) => <EvidenceItem key={item.id ?? index} {...alarmEvidenceProps(item, { fallbackId: "alarm", fallbackBody: "No recommended action." })} />} />
-          <EvidenceSection key={`${task.id}:checkpoints`} title="Checkpoint results" page={safeEvidencePage(data.checkpoints)} renderItem={(item, index) => <EvidenceItem key={index} {...checkpointEvidenceProps(item)} />} />
+          <SessionEvidence data={data} timelineOpen />
           {data.related_agent_review && <AgentReview review={data.related_agent_review} />}
         </>}
       </div>
@@ -1342,12 +1330,6 @@ export function EvidenceDrawerState({ task, projectId, action = () => {}, onClos
       </footer>
     </aside>
   </div>;
-}
-
-function safeEvidencePage(page) {
-  return page?.items && page?.pagination
-    ? page
-    : { items: [], pagination: { total: 0, has_more: false, next_href: null } };
 }
 
 function reviewForm(projectId, actionName, values = {}) {

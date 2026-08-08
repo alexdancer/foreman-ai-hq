@@ -1004,6 +1004,8 @@ test("Sessions sidebar and list preserve compact scan, states, and pagination", 
   const populated = renderToStaticMarkup(React.createElement(SessionsState, { data, error: null, loading: false }));
   for (const text of ["Agent Review", "DEMO review task", "claude-demo-999", "10 prompt", "5 completion", "15 total", "1 runs", "2 events", "1 failed checks", "yellow zone", "1 alarms", "Active sessions refresh every 5 seconds", "Next sessions"]) assert.match(populated, new RegExp(text));
   assert.match(populated, /href="\/sessions\/sess-demo-999"/);
+  assert.match(populated, /class="data-table sessions-data-table" role="table" aria-label="Sessions ledger"/);
+  assert.doesNotMatch(populated, /<table class="evidence-table"/);
   assertStatusPillsHaveGlyphs(populated);
   assert.match(populated, /status-pill-warning[^>]*>.*status-pill-label">yellow zone<\/span>/s);
 });
@@ -1180,6 +1182,12 @@ test("Session Report renders compact governance plus every bounded evidence path
     "Alarms", "BUDGET_YELLOW", "Checkpoint results", "FAIL", "Related Agent Review", "review/control-plane evidence", "19 review/control-plane tokens", "Agent Review finding",
     "Preview truncated", "Load full text", "New session evidence available", "Could not check for new session evidence",
   ]) assert.match(markup, new RegExp(text));
+  assert.match(markup, /class="token-comparison report-token-comparison" aria-label="Normalized versus provider token totals"/);
+  assert.match(markup, /<small>Normalized budget total<\/small><strong>40<\/strong>/);
+  assert.match(markup, /<small>Provider \/ raw total<\/small><strong>50<\/strong>/);
+  assert.match(markup, /Spend tracking · opencode · native_usage/);
+  assert.match(markup, /<details class="disclosure evidence-disclosure evidence-section live-feed-panel" open="">/);
+  assert.match(markup, /class="live-event live-event-launch event-row"/);
   assert.match(markup, /href="\/sessions\/review-demo-999"/);
   assert.match(markup, /aria-live="polite"/);
   assertStatusPillsHaveGlyphs(markup);
@@ -1187,15 +1195,27 @@ test("Session Report renders compact governance plus every bounded evidence path
   assert.ok(markup.indexOf("Governance summary") < markup.indexOf("Token log"));
 });
 
-test("Session Report refresh remounts paged evidence and labels review-session outcomes", () => {
+test("Session Report refresh remounts paged evidence and labels review-session outcomes", async () => {
   const data = reportData();
   data.session.kind = "Agent Review";
-  const markup = renderToStaticMarkup(React.createElement(SessionReportState, { data, error: null, loading: false }));
-  assert.match(markup, /Agent Review outcome/);
-  const source = readFileSync(new URL("../src/views/SessionReport.jsx", import.meta.url), "utf8");
-  for (const key of ["tokens-${version}", "zones-${version}", "worker-${version}", "repo-${version}", "alarms-${version}", "checkpoints-${version}"]) {
-    assert.ok(source.includes(key));
-  }
+  let tree;
+  await act(async () => {
+    tree = create(React.createElement(SessionReportState, { data, error: null, loading: false }));
+  });
+  assert.match(JSON.stringify(tree.toJSON()), /Agent Review outcome/);
+
+  const refreshed = reportData();
+  refreshed.session.kind = "Agent Review";
+  refreshed.freshness.version = "b".repeat(64);
+  refreshed.tokens.log = evidencePage([{
+    ...refreshed.tokens.log.items[0],
+    raw_usage: sessionBounded("refreshed provider raw usage", true),
+  }]);
+  await act(async () => {
+    tree.update(React.createElement(SessionReportState, { data: refreshed, error: null, loading: false }));
+  });
+  assert.match(JSON.stringify(tree.toJSON()), /refreshed provider raw usage/);
+  await act(async () => { tree.unmount(); });
 });
 
 test("dashboard renders loading, error, populated, and empty states", () => {
